@@ -1,6 +1,21 @@
 // ================================================================
-// MENU
+// MENU - ĐIỀU HƯỚNG TRANG
 // ================================================================
+
+// Hàm an toàn để gọi render
+function safeRender(renderFn, moduleName) {
+    try {
+        if (typeof renderFn === 'function') {
+            renderFn();
+        } else {
+            console.warn(`Module ${moduleName} chưa được định nghĩa`);
+        }
+    } catch (error) {
+        console.error(`Lỗi khi render ${moduleName}:`, error);
+        showError(`Lỗi tải module ${moduleName}, vui lòng tải lại trang.`);
+    }
+}
+
 document.querySelectorAll('#menu > li').forEach(li => {
     li.addEventListener('click', function(e) {
         document.querySelectorAll('#menu > li').forEach(l => l.classList.remove('active'));
@@ -11,77 +26,49 @@ document.querySelectorAll('#menu > li').forEach(li => {
 
         switch (page) {
             case 'dashboard':
-                document.getElementById('page-dashboard').classList.add('active');
-                renderDashboard();
-                break;
-            case 'projects':
-                document.getElementById('page-projects').classList.add('active');
-                renderProjects();
-                break;
-            case 'vendors':
-                document.getElementById('page-vendors').classList.add('active');
-                renderVendors();
-                break;
-            case 'items':
-                document.getElementById('page-items').classList.add('active');
-                renderItems();
-                break;
-            case 'mr':
-                document.getElementById('page-mr').classList.add('active');
-                renderMR();
-                break;
-            case 'pr':
-                document.getElementById('page-pr').classList.add('active');
-                renderPR();
-                break;
-            case 'po':
-                document.getElementById('page-po').classList.add('active');
-                renderPO();
-                break;
-            case 'inventory':
-                document.getElementById('page-inventory').classList.add('active');
-                switchWarehouseTab('wh-list');
-                break;
-            case 'issue':
-                if (typeof renderIssuePage === 'function') {
-                    renderIssuePage();
-                } else {
-                    showError('Lỗi tải module Cấp phát, vui lòng tải lại trang.');
-                }
-                break;
-            case 'material-return':
-                if (typeof renderMaterialReturnPage === 'function') {
-                    renderMaterialReturnPage();
-                } else {
-                    showError('Lỗi tải module Hoàn trả, vui lòng tải lại trang.');
-                }
-                break;
-            case 'min-stock':
-                if (typeof renderMinStockPage === 'function') {
-                    renderMinStockPage();
-                } else {
-                    showError('Lỗi tải module Cảnh báo tồn, vui lòng tải lại trang.');
-                }
-                break;
-            case 'auto-reorder':
-                if (typeof renderAutoReorderPage === 'function') {
-                    renderAutoReorderPage();
-                } else {
-                    showError('Lỗi tải module Đặt hàng tự động, vui lòng tải lại trang.');
-                }
-                break;
-            case 'admin':
-                if (typeof renderAdminPage === 'function') {
-                    renderAdminPage();
-                } else {
-                    showError('Lỗi tải module Admin, vui lòng tải lại trang.');
-                }
-                break;
+    ensurePageAndActivate('page-dashboard', renderDashboard, 'Dashboard');
+    break;
+case 'projects':
+    ensurePageAndActivate('page-projects', renderProjects, 'Projects');
+    break;
+case 'vendors':
+    ensurePageAndActivate('page-vendors', renderVendors, 'Vendors');
+    break;
+case 'items':
+    ensurePageAndActivate('page-items', renderItems, 'Items');
+    break;
+case 'mr':
+    ensurePageAndActivate('page-mr', renderMR, 'MR');
+    break;
+case 'pr':
+    ensurePageAndActivate('page-pr', renderPR, 'PR');
+    break;
+case 'po':
+    ensurePageAndActivate('page-po', renderPO, 'PO');
+    break;
+case 'inventory':
+    ensurePageAndActivate('page-inventory', () => renderWarehousePage('wh-list'), 'Warehouse');
+    break;
+case 'issue':
+    ensurePageAndActivate('page-issue', renderIssuePage, 'Issue');
+    break;
+case 'material-return':
+    ensurePageAndActivate('page-material-return', renderMaterialReturnPage, 'Material Return');
+    break;
+case 'min-stock':
+    ensurePageAndActivate('page-min-stock', renderMinStockPage, 'Min Stock');
+    break;
+case 'auto-reorder':
+    ensurePageAndActivate('page-auto-reorder', renderAutoReorderPage, 'Auto Reorder');
+    break;
+case 'admin':
+    ensurePageAndActivate('page-admin', renderAdminPage, 'Admin');
+    break;
             default:
                 console.warn('Trang không xác định:', page);
         }
 
-        // Đóng sidebar trên mobile (nếu có hàm)
+        // Đóng sidebar trên mobile
         if (typeof closeSidebarOnMobile === 'function') {
             closeSidebarOnMobile();
         }
@@ -89,11 +76,10 @@ document.querySelectorAll('#menu > li').forEach(li => {
 });
 
 // Hàm chuyển tab trong module Kho
-function switchWarehouseTab(tab) {
-    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-    document.getElementById('page-inventory').classList.add('active');
-    renderWarehousePage(tab);
-}
+window.switchWarehouseTab = function(tab) {
+    if (!tab) tab = 'wh-list';
+    ensurePageAndActivate('page-inventory', () => renderWarehousePage(tab), 'Warehouse');
+};
 
 // ================================================================
 // NAVIGATION HELPER
@@ -131,30 +117,33 @@ window.switchWarehouseTab = switchWarehouseTab;
 // ================================================================
 // FILTER EVENTS
 // ================================================================
-document.getElementById('project-filter')?.addEventListener('input', renderProjects);
-document.getElementById('vendor-filter')?.addEventListener('input', renderVendors);
-document.getElementById('item-filter')?.addEventListener('input', renderItems);
-document.getElementById('mr-filter')?.addEventListener('input', renderMR);
-document.getElementById('mr-status-filter')?.addEventListener('change', renderMR);
-document.getElementById('pr-filter')?.addEventListener('input', renderPR);
-document.getElementById('pr-status-filter')?.addEventListener('change', renderPR);
-document.getElementById('po-filter')?.addEventListener('input', renderPO);
-document.getElementById('po-status-filter')?.addEventListener('change', renderPO);
+document.getElementById('project-filter')?.addEventListener('input', () => safeRender(renderProjects, 'Projects'));
+document.getElementById('vendor-filter')?.addEventListener('input', () => safeRender(renderVendors, 'Vendors'));
+document.getElementById('item-filter')?.addEventListener('input', () => safeRender(renderItems, 'Items'));
+document.getElementById('mr-filter')?.addEventListener('input', () => safeRender(renderMR, 'MR'));
+document.getElementById('mr-status-filter')?.addEventListener('change', () => safeRender(renderMR, 'MR'));
+document.getElementById('pr-filter')?.addEventListener('input', () => safeRender(renderPR, 'PR'));
+document.getElementById('pr-status-filter')?.addEventListener('change', () => safeRender(renderPR, 'PR'));
+document.getElementById('po-filter')?.addEventListener('input', () => safeRender(renderPO, 'PO'));
+document.getElementById('po-status-filter')?.addEventListener('change', () => safeRender(renderPO, 'PO'));
 
-// app.js - chỉ định nghĩa renderAll, không gọi
+// ================================================================
+// RENDER ALL (định nghĩa, không tự gọi)
+// ================================================================
 function renderAll() {
-    renderDashboard();
-    renderProjects();
-    renderVendors();
-    renderItems();
-    renderMR();
-    renderPR();
-    renderPO();
+    // Sử dụng safeRender cho từng module để không bị lỗi một module làm hỏng toàn bộ
+    safeRender(renderDashboard, 'Dashboard');
+    safeRender(renderProjects, 'Projects');
+    safeRender(renderVendors, 'Vendors');
+    safeRender(renderItems, 'Items');
+    safeRender(renderMR, 'MR');
+    safeRender(renderPR, 'PR');
+    safeRender(renderPO, 'PO');
     // Các module khác sẽ render khi click menu
 }
 
 // ================================================================
-// SIDEBAR TOGGLE - ĐƠN GIẢN (giữ nguyên)
+// SIDEBAR TOGGLE
 // ================================================================
 const app = document.getElementById('app');
 const toggleBtn = document.getElementById('sidebar-toggle');
@@ -236,20 +225,48 @@ window.openSidebar = openSidebar;
 window.toggleSidebar = toggleSidebar;
 
 // ================================================================
-// ẨN MENU ADMIN
+// ẨN MENU ADMIN (kiểm tra hàm getUser tồn tại)
 // ================================================================
 window.updateMenuVisibility = function() {
+    if (typeof getUser !== 'function') return;
     const user = getUser();
     if (!user) return;
     const adminMenuItem = document.querySelector('#menu > li[data-page="admin"]');
     if (adminMenuItem) {
-        adminMenuItem.style.display = (user.role === 'ADMIN' || hasPermission('admin.view')) ? 'flex' : 'none';
+        const hasAdminPerm = typeof hasPermission === 'function' && hasPermission('admin.view');
+        adminMenuItem.style.display = (user.role === 'ADMIN' || hasAdminPerm) ? 'flex' : 'none';
     }
 };
 
+
+function ensurePageAndActivate(pageId, renderFn, moduleName) {
+    let page = document.getElementById(pageId);
+    if (!page) {
+        const content = document.querySelector('.content');
+        if (!content) return;
+        page = document.createElement('div');
+        page.className = 'page';
+        page.id = pageId;
+        content.appendChild(page);
+    }
+    // Ẩn tất cả các page khác
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    page.classList.add('active');
+    // Gọi render
+    if (typeof renderFn === 'function') {
+        try {
+            renderFn();
+        } catch (e) {
+            console.error(`Lỗi render ${moduleName}:`, e);
+            showError(`Lỗi tải module ${moduleName}`);
+        }
+    }
+}
+
 // Gọi ngay nếu đã login
-if (getUser() && typeof hasPermission === 'function') {
+if (typeof getUser === 'function' && getUser() && typeof hasPermission === 'function') {
     window.updateMenuVisibility();
 }
 
-console.log('✅ App module loaded successfully.');
+console.log('✅ App module loaded successfully (safe render added).');
+

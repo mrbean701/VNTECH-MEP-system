@@ -1,12 +1,23 @@
 // ================================================================
-// ADMIN - Quản lý người dùng, Phòng ban, Workflow, Phân quyền
+// ADMIN - Quản lý người dùng, Phòng ban, Workflow, Phân quyền (FULL API)
 // ================================================================
 
 let currentAdminTab = 'users';
 
-// ===================================================================
-// HÀM HELPERS CHO PHÂN QUYỀN
-// ===================================================================
+// Biến toàn cục lưu dữ liệu từ API
+let _adminUsers = [];
+let _adminDepartments = [];
+let _adminWorkflows = [];
+
+// ====== HELPER AN TOÀN ======
+function safeArray(data) {
+    return Array.isArray(data) ? data : [];
+}
+function safeObject(data) {
+    return data && typeof data === 'object' && !Array.isArray(data) ? data : {};
+}
+
+// ====== HÀM HELPERS ======
 function getRoles() {
     return [
         { value: 'ADMIN', label: 'Admin' },
@@ -22,15 +33,15 @@ function getRoles() {
 function getAllPermissionKeys() {
     return [
         'dashboard.view',
-        'mr.view', 'mr.create', 'mr.edit', 'mr.delete', 'mr.approve',
-        'pr.view', 'pr.create', 'pr.edit', 'pr.delete', 'pr.approve',
-        'po.view', 'po.create', 'po.edit', 'po.delete', 'po.approve',
+        'mr.view', 'mr.create', 'mr.edit', 'mr.delete', 'mr.approve', 'mr.submit', 'mr.reject',
+        'pr.view', 'pr.create', 'pr.edit', 'pr.delete', 'pr.approve', 'pr.submit', 'pr.reject',
+        'po.view', 'po.create', 'po.edit', 'po.delete', 'po.approve', 'po.submit', 'po.reject',
         'inventory.view', 'inventory.edit', 'inventory.delete',
         'grn.view', 'grn.create', 'grn.edit', 'grn.delete', 'grn.receive', 'grn.qc', 'grn.complete',
         'sto.view', 'sto.create', 'sto.edit', 'sto.delete', 'sto.submit', 'sto.approve', 'sto.complete',
-        'issue.view', 'issue.create', 'issue.edit', 'issue.delete', 'issue.submit', 'issue.approve', 'issue.complete', 'issue.confirm',
+        'issue.view', 'issue.create', 'issue.edit', 'issue.delete', 'issue.submit', 'issue.approve', 'issue.complete', 'issue.confirm', 'issue.reject',
         'materialreturn.view', 'materialreturn.create', 'materialreturn.edit', 'materialreturn.delete',
-        'materialreturn.submit', 'materialreturn.approve', 'materialreturn.confirm',
+        'materialreturn.submit', 'materialreturn.approve', 'materialreturn.confirm', 'materialreturn.reject',
         'admin.view'
     ];
 }
@@ -62,15 +73,61 @@ function getActionLabel(action) {
         'qc': '🔬 QC',
         'complete': '✔️ Hoàn thành',
         'submit': '📤 Gửi duyệt',
-        'confirm': '✅ Xác nhận'
+        'confirm': '✅ Xác nhận',
+        'reject': '❌ Từ chối'
     };
     return map[action] || action;
+}
+
+// ====== LẤY DỮ LIỆU ======
+function getUsersData() {
+    if (_adminUsers.length > 0) return _adminUsers;
+    return safeArray(getUsers());
+}
+
+function getDepartmentsData() {
+    if (_adminDepartments.length > 0) return _adminDepartments;
+    return safeArray(getDepartments());
+}
+
+function getPermissionsSafe() {
+    return safeObject(getPermissions());
+}
+
+// ====== REFRESH DỮ LIỆU TỪ API ======
+async function refreshAdminUsers() {
+    try {
+        _adminUsers = await api.getUsers();
+    } catch (e) {
+        _adminUsers = [];
+        console.error('Failed to refresh users:', e);
+    }
+}
+
+async function refreshAdminDepartments() {
+    try {
+        _adminDepartments = await api.getDepartments();
+    } catch (e) {
+        _adminDepartments = [];
+        console.error('Failed to refresh departments:', e);
+    }
+}
+
+async function refreshAdminWorkflows() {
+    try {
+        const data = await api.getWorkflows();
+        _adminWorkflows = Array.isArray(data) ? data : [];
+        saveData('workflows', _adminWorkflows);
+    } catch (e) {
+        console.error('Failed to refresh workflows:', e);
+        _adminWorkflows = getData('workflows') || [];
+    }
 }
 
 // ===================================================================
 // RENDER CHÍNH
 // ===================================================================
-function renderAdminPage() {
+async function renderAdminPage() {
     console.log('🔄 renderAdminPage được gọi');
 
     let page = document.getElementById('page-admin');
@@ -96,13 +153,20 @@ function renderAdminPage() {
     page.classList.add('active');
 
     const user = getUser();
-    if (!user || user.role !== 'ADMIN') {
+    if (!user || (user.role !== 'ADMIN' && !hasPermission('admin.view'))) {
         document.getElementById('admin-container').innerHTML = `
             <div class="page-header"><h2>🔒 Truy cập bị từ chối</h2></div>
             <p style="color:#e74c3c; font-size:16px;">Bạn không có quyền truy cập trang này. Chỉ ADMIN mới được phép.</p>
         `;
         return;
     }
+
+    try {
+        await refreshAdminUsers();
+        await refreshAdminDepartments();
+        await refreshAdminWorkflows();
+        await api.getPermissions();
+    } catch(e) { console.warn('Load data error:', e); }
 
     renderAdminUI();
 }
@@ -126,22 +190,27 @@ function renderAdminUI(tab) {
         <div id="admin-tab-content">
     `;
 
-    if (currentAdminTab === 'users') {
-        html += renderUsersTab();
-    } else if (currentAdminTab === 'departments') {
-        html += renderDepartmentsTab();
-    } else if (currentAdminTab === 'workflows') {
-        html += renderWorkflowsTab();
-    } else if (currentAdminTab === 'role-permissions') {
-        html += renderRolePermissionsTab();
-    } else if (currentAdminTab === 'user-permissions') {
-        html += renderUserPermissionsTab();
+    try {
+        if (currentAdminTab === 'users') {
+            html += renderUsersTab();
+        } else if (currentAdminTab === 'departments') {
+            html += renderDepartmentsTab();
+        } else if (currentAdminTab === 'workflows') {
+            html += renderWorkflowsTab();
+        } else if (currentAdminTab === 'role-permissions') {
+            html += renderRolePermissionsTab();
+        } else if (currentAdminTab === 'user-permissions') {
+            html += renderUserPermissionsTab();
+        }
+    } catch (error) {
+        console.error('Lỗi render tab admin:', error);
+        html += `<div style="color:red; padding:20px;">Có lỗi xảy ra khi hiển thị tab: ${error.message}</div>`;
     }
 
     html += `</div>`;
     container.innerHTML = html;
 
-    // Gắn sự kiện filter
+    // Gán sự kiện cho filter
     if (currentAdminTab === 'users') {
         document.getElementById('admin-user-filter')?.addEventListener('input', () => renderAdminUI('users'));
         document.getElementById('admin-role-filter')?.addEventListener('change', () => renderAdminUI('users'));
@@ -149,18 +218,6 @@ function renderAdminUI(tab) {
     if (currentAdminTab === 'departments') {
         document.getElementById('dept-filter')?.addEventListener('input', () => renderAdminUI('departments'));
     }
-    if (currentAdminTab === 'user-permissions') {
-        const userFilter = document.getElementById('user-perm-user-filter');
-        if (userFilter) {
-            // Xóa sự kiện cũ để tránh trùng lặp
-            userFilter.removeEventListener('change', handleUserFilterChange);
-            userFilter.addEventListener('change', handleUserFilterChange);
-        }
-    }
-}
-
-function handleUserFilterChange() {
-    renderUserPermissionsTab();
 }
 
 function switchAdminTab(tab) {
@@ -171,19 +228,10 @@ function switchAdminTab(tab) {
 // 1. TAB NGƯỜI DÙNG
 // ===================================================================
 function renderUsersTab() {
-    const users = getUsers();
-    const departments = getDepartments();
+    const users = getUsersData();
+    const departments = getDepartmentsData();
     const currentUser = getUser();
-
-    const roles = [
-        { value: 'ADMIN', label: 'Admin (Toàn quyền)' },
-        { value: 'PLANNING', label: 'Phòng Kế hoạch' },
-        { value: 'PROJECT', label: 'Phòng Dự án' },
-        { value: 'CEO', label: 'Tổng Giám đốc' },
-        { value: 'PURCHASING', label: 'Phòng Mua hàng' },
-        { value: 'SITE_COMMANDER', label: 'Chỉ huy trưởng' },
-        { value: 'QC', label: 'QC' }
-    ];
+    const roles = getRoles();
 
     let html = `
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
@@ -217,8 +265,8 @@ function renderUsersTab() {
     const roleFilter = document.getElementById('admin-role-filter')?.value || '';
 
     const filtered = users.filter(u => {
-        const matchName = u.name.toLowerCase().includes(filter);
-        const matchEmail = u.email.toLowerCase().includes(filter);
+        const matchName = (u.name || '').toLowerCase().includes(filter);
+        const matchEmail = (u.email || '').toLowerCase().includes(filter);
         const matchRole = roleFilter ? u.role === roleFilter : true;
         return (matchName || matchEmail) && matchRole;
     });
@@ -268,8 +316,8 @@ function renderUsersTab() {
 // 2. TAB PHÒNG BAN
 // ===================================================================
 function renderDepartmentsTab() {
-    const departments = getDepartments();
-    const users = getUsers();
+    const departments = getDepartmentsData();
+    const users = getUsersData();
 
     let html = `
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
@@ -284,7 +332,7 @@ function renderDepartmentsTab() {
 
     const filter = document.getElementById('dept-filter')?.value?.toLowerCase() || '';
     const filtered = departments.filter(d =>
-        d.code.toLowerCase().includes(filter) || d.name.toLowerCase().includes(filter)
+        (d.code || '').toLowerCase().includes(filter) || (d.name || '').toLowerCase().includes(filter)
     );
 
     if (!filtered.length) {
@@ -340,62 +388,320 @@ function renderDepartmentsTab() {
 }
 
 // ===================================================================
-// 3. TAB WORKFLOW
+// 3. TAB WORKFLOW (QUẢN LÝ ĐA MẪU)
 // ===================================================================
 function renderWorkflowsTab() {
-    const workflows = getWorkflows();
-    const roles = [
-        { value: 'ADMIN', label: 'Admin' },
-        { value: 'PLANNING', label: 'Kế hoạch' },
-        { value: 'PROJECT', label: 'Dự án' },
-        { value: 'CEO', label: 'CEO' },
-        { value: 'PURCHASING', label: 'Mua hàng' },
-        { value: 'SITE_COMMANDER', label: 'Chỉ huy' },
-        { value: 'QC', label: 'QC' }
-    ];
+    const workflows = _adminWorkflows || [];
+    const modules = ['mr', 'pr', 'po', 'grn', 'sto', 'issue', 'materialreturn'];
+    
+    // Nhóm theo module
+    const grouped = {};
+    modules.forEach(mod => {
+        grouped[mod] = workflows.filter(w => w.module === mod);
+    });
 
     let html = `
-        <div style="margin-bottom:12px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-            <button class="btn btn-sm btn-success" onclick="saveWorkflows()"><i class="fas fa-save"></i> Lưu workflow</button>
-            <button class="btn btn-sm btn-warning" onclick="resetDefaultWorkflows()"><i class="fas fa-undo"></i> Khôi phục mặc định</button>
-            <span style="font-size:13px; color:#888; margin-left:8px;">
-                <i class="fas fa-info-circle"></i> Cấu hình luồng duyệt cho từng loại đơn hàng
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
+            <h3 style="margin:0;">⚙️ Quản lý Workflow</h3>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <button class="btn btn-success" onclick="createDefaultWorkflows()"><i class="fas fa-plus"></i> Tạo mặc định</button>
+                <button class="btn btn-info" onclick="refreshWorkflows()"><i class="fas fa-sync"></i> Làm mới</button>
+            </div>
+        </div>
+        <div style="font-size:13px; color:#888; margin-bottom:12px; padding:12px; background:#f8fafc; border-radius:6px; border:1px solid #e2e8f0;">
+            <i class="fas fa-info-circle"></i> 
+            <strong>Hướng dẫn:</strong> Mỗi module chỉ có <strong>1</strong> workflow được kích hoạt (is_active = true). 
+            Mẫu hệ thống (is_system = true) không thể xóa. 
+            <span style="display:block; margin-top:4px;">
+                <span class="badge badge-approved">✅ Đang áp dụng</span>
+                <span class="badge badge-draft">⏸️ Không áp dụng</span>
+                <span class="badge badge-info">Hệ thống</span>
+                <span class="badge badge-draft">Tùy chỉnh</span>
             </span>
         </div>
     `;
 
-    Object.keys(workflows).forEach(module => {
-        const wf = workflows[module];
+    for (const module of modules) {
+        const list = grouped[module] || [];
+        const active = list.find(w => w.isActive === true);
+
         html += `
             <div style="background:white; border-radius:8px; padding:16px; margin-bottom:16px; border:1px solid #e2e8f0;">
-                <h4 style="margin:0 0 12px 0; color:#1a3c6e;">${wf.name}</h4>
-                <div style="display:flex; flex-direction:column; gap:8px;" id="wf-${module}">
-                    ${wf.steps.map((step) => `
-                        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-                            <span style="min-width:60px; font-weight:600;">Bước ${step.step}:</span>
-                            <select class="wf-role-select" data-module="${module}" data-step="${step.step}" style="padding:6px 10px; border:1px solid #ccc; border-radius:4px;">
-                                ${roles.map(r => `<option value="${r.value}" ${r.value === step.role ? 'selected' : ''}>${r.label}</option>`).join('')}
-                            </select>
-                            <input type="text" class="wf-label-input" data-module="${module}" data-step="${step.step}" value="${step.label}" placeholder="Tên bước" style="flex:1; min-width:150px; padding:6px 10px; border:1px solid #ccc; border-radius:4px;">
-                            <button class="btn btn-sm btn-danger" onclick="removeWorkflowStep('${module}', ${step.step})"><i class="fas fa-minus"></i></button>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
+                    <h4 style="margin:0; color:#1a3c6e; text-transform:uppercase; font-size:16px;">
+                        ${module.toUpperCase()}
+                        <span style="font-size:13px; font-weight:400; color:#888; margin-left:8px;">${list.length} mẫu</span>
+                    </h4>
+                    <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+                        <button class="btn btn-sm btn-info" onclick="showCreateWorkflowModal('${module}')"><i class="fas fa-plus"></i> Thêm mẫu</button>
+                        ${active ? `<span class="badge badge-approved" style="font-size:13px;">✅ Đang áp dụng: ${active.name}</span>` : '<span class="badge badge-draft" style="font-size:13px;">⚠️ Chưa có workflow active</span>'}
+                    </div>
+                </div>
+                <div style="max-height:500px; overflow-y:auto;">
+                    ${list.length === 0 ? '<div style="color:#999; padding:12px; text-align:center;">Chưa có workflow nào</div>' : ''}
+                    ${list.map(w => `
+                        <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; margin-bottom:6px; background:${w.isActive ? '#f0fdf4' : '#f8fafc'}; border-radius:6px; border-left:4px solid ${w.isActive ? '#22c55e' : '#94a3b8'};">
+                            <div style="flex:1; min-width:0;">
+                                <div style="font-weight:600; font-size:14px;">${w.name}</div>
+                                <div style="font-size:12px; color:#888; flex-wrap:wrap; display:flex; gap:6px; margin-top:2px;">
+                                    ${w.isSystem ? '<span class="badge badge-info">Hệ thống</span>' : '<span class="badge badge-draft">Tùy chỉnh</span>'}
+                                    ${w.isActive ? '<span class="badge badge-approved">✅ Đang áp dụng</span>' : '<span class="badge badge-draft">⏸️ Không áp dụng</span>'}
+                                    ${w.description ? `<span style="color:#94a3b8;">${w.description}</span>` : ''}
+                                    <span style="color:#94a3b8;">| ${w.steps ? JSON.parse(w.steps).length : 0} bước</span>
+                                </div>
+                            </div>
+                            <div style="display:flex; gap:4px; flex-wrap:wrap; margin-left:8px;">
+                                ${!w.isActive ? `<button class="btn btn-success btn-sm" onclick="activateWorkflow('${module}', ${w.id})" title="Kích hoạt"><i class="fas fa-check"></i></button>` : ''}
+                                <button class="btn btn-info btn-sm" onclick="editWorkflow(${w.id})" title="Sửa"><i class="fas fa-edit"></i></button>
+                                <button class="btn btn-warning btn-sm" onclick="duplicateWorkflow(${w.id})" title="Sao chép"><i class="fas fa-copy"></i></button>
+                                ${!w.isSystem && !w.isActive ? `<button class="btn btn-danger btn-sm" onclick="deleteWorkflow(${w.id})" title="Xóa"><i class="fas fa-trash"></i></button>` : ''}
+                            </div>
                         </div>
                     `).join('')}
                 </div>
-                <div style="margin-top:8px;">
-                    <button class="btn btn-sm btn-info" onclick="addWorkflowStep('${module}')"><i class="fas fa-plus"></i> Thêm bước</button>
-                </div>
             </div>
         `;
-    });
+    }
 
     return html;
 }
 
+// ====== WORKFLOW ACTIONS ======
+async function activateWorkflow(module, id) {
+    if (!confirm(`Xác nhận kích hoạt workflow ID ${id} cho module ${module}? Các workflow khác sẽ bị hủy kích hoạt.`)) return;
+    try {
+        await api.activateWorkflow(module, id);
+        showSuccess('Kích hoạt workflow thành công!');
+        await refreshAdminWorkflows();
+        renderAdminUI('workflows');
+    } catch (error) {
+        showError('Lỗi kích hoạt: ' + error.message);
+    }
+}
+
+async function duplicateWorkflow(id) {
+    try {
+        const result = await api.duplicateWorkflow(id);
+        showSuccess(`Đã sao chép workflow "${result.name}"`);
+        await refreshAdminWorkflows();
+        renderAdminUI('workflows');
+    } catch (error) {
+        showError('Lỗi sao chép: ' + error.message);
+    }
+}
+
+async function deleteWorkflow(id) {
+    if (!confirm('Xóa workflow này? (Chỉ xóa được mẫu tùy chỉnh và không active)')) return;
+    try {
+        await api.deleteWorkflow(id);
+        showSuccess('Xóa workflow thành công!');
+        await refreshAdminWorkflows();
+        renderAdminUI('workflows');
+    } catch (error) {
+        showError('Lỗi xóa: ' + error.message);
+    }
+}
+
+function showCreateWorkflowModal(module) {
+    const roles = getRoles();
+    const roleOpts = roles.map(r => `<option value="${r.value}">${r.label}</option>`).join('');
+    const departments = getDepartmentsData();
+    const deptOpts = `<option value="">-- Không giới hạn --</option>` + departments.map(d => `<option value="${d.id}">${d.code} - ${d.name}</option>`).join('');
+
+    showModal('Tạo workflow mới', `
+        <div class="form-group">
+            <label>Module</label>
+            <input id="f-wf-module" value="${module}" readonly style="background:#f0f0f0; width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">
+        </div>
+        <div class="form-group">
+            <label>Tên workflow <span style="color:red;">*</span></label>
+            <input id="f-wf-name" placeholder="Ví dụ: Quy trình 4 bước nâng cao" class="form-control">
+        </div>
+        <div class="form-group">
+            <label>Mô tả</label>
+            <textarea id="f-wf-desc" rows="2" class="form-control"></textarea>
+        </div>
+        <div class="form-group">
+            <label>Các bước duyệt (JSON) <span style="color:red;">*</span></label>
+            <textarea id="f-wf-steps" rows="6" class="form-control" placeholder='[{"step":1,"role":"PLANNING","label":"Kế hoạch duyệt","departmentId":2}]'></textarea>
+            <div style="font-size:12px; color:#888; margin-top:4px;">
+                <i class="fas fa-info-circle"></i> Mỗi bước gồm: step, role, label, departmentId (có thể null)
+            </div>
+        </div>
+        <div class="modal-actions">
+            <button class="btn" onclick="saveNewWorkflow()"><i class="fas fa-save"></i> Lưu</button>
+            <button class="btn btn-danger" onclick="closeModal()">Hủy</button>
+        </div>
+    `);
+}
+
+async function saveNewWorkflow() {
+    const module = document.getElementById('f-wf-module').value.trim();
+    const name = document.getElementById('f-wf-name').value.trim();
+    const description = document.getElementById('f-wf-desc').value.trim();
+    const stepsRaw = document.getElementById('f-wf-steps').value.trim();
+    if (!name || !stepsRaw) {
+        showError('Vui lòng nhập tên và steps');
+        return;
+    }
+    let steps;
+    try { steps = JSON.parse(stepsRaw); } catch(e) { showError('Steps không đúng định dạng JSON'); return; }
+    if (!Array.isArray(steps) || steps.length === 0) {
+        showError('Steps phải là mảng và có ít nhất 1 bước');
+        return;
+    }
+
+    try {
+        await api.createWorkflow({ module, name, description, steps: JSON.stringify(steps) });
+        closeModal();
+        showSuccess('Tạo workflow thành công!');
+        await refreshAdminWorkflows();
+        renderAdminUI('workflows');
+    } catch (error) {
+        showError('Lỗi tạo workflow: ' + error.message);
+    }
+}
+
+async function editWorkflow(id) {
+    try {
+        const wf = _adminWorkflows.find(w => w.id === id);
+        if (!wf) { showError('Không tìm thấy workflow'); return; }
+
+        showModal('Sửa workflow', `
+            <div class="form-group">
+                <label>Module</label>
+                <input value="${wf.module}" readonly style="background:#f0f0f0; width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">
+            </div>
+            <div class="form-group">
+                <label>Tên workflow <span style="color:red;">*</span></label>
+                <input id="f-wf-edit-name" value="${wf.name || ''}" class="form-control">
+            </div>
+            <div class="form-group">
+                <label>Mô tả</label>
+                <textarea id="f-wf-edit-desc" rows="2" class="form-control">${wf.description || ''}</textarea>
+            </div>
+            <div class="form-group">
+                <label>Các bước duyệt (JSON) <span style="color:red;">*</span></label>
+                <textarea id="f-wf-edit-steps" rows="6" class="form-control">${wf.steps || '[]'}</textarea>
+                <div style="font-size:12px; color:#888; margin-top:4px;">
+                    <i class="fas fa-info-circle"></i> Mỗi bước gồm: step, role, label, departmentId (có thể null)
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn" onclick="updateWorkflow(${id})"><i class="fas fa-save"></i> Cập nhật</button>
+                <button class="btn btn-danger" onclick="closeModal()">Hủy</button>
+            </div>
+        `);
+    } catch (error) {
+        showError('Lỗi tải workflow: ' + error.message);
+    }
+}
+
+async function updateWorkflow(id) {
+    const name = document.getElementById('f-wf-edit-name').value.trim();
+    const description = document.getElementById('f-wf-edit-desc').value.trim();
+    const stepsRaw = document.getElementById('f-wf-edit-steps').value.trim();
+    if (!name || !stepsRaw) {
+        showError('Vui lòng nhập tên và steps');
+        return;
+    }
+    let steps;
+    try { steps = JSON.parse(stepsRaw); } catch(e) { showError('Steps không đúng định dạng JSON'); return; }
+    if (!Array.isArray(steps) || steps.length === 0) {
+        showError('Steps phải là mảng và có ít nhất 1 bước');
+        return;
+    }
+
+    try {
+        await api.updateWorkflow(id, { name, description, steps: JSON.stringify(steps) });
+        closeModal();
+        showSuccess('Cập nhật workflow thành công!');
+        await refreshAdminWorkflows();
+        renderAdminUI('workflows');
+    } catch (error) {
+        showError('Lỗi cập nhật: ' + error.message);
+    }
+}
+
+async function createDefaultWorkflows() {
+    if (!confirm('Tạo các workflow mặc định cho tất cả module? (sẽ không ghi đè nếu đã có)')) return;
+    try {
+        const defaults = {
+            mr: [{ step: 1, role: 'SITE_COMMANDER', label: 'Chỉ huy trưởng duyệt', departmentId: 5 }],
+            pr: [
+                { step: 1, role: 'PLANNING', label: 'Kế hoạch duyệt', departmentId: 2 },
+                { step: 2, role: 'PROJECT', label: 'Dự án duyệt', departmentId: 3 },
+                { step: 3, role: 'CEO', label: 'Tổng Giám đốc duyệt', departmentId: 1 }
+            ],
+            po: [
+                { step: 1, role: 'PLANNING', label: 'Kế hoạch duyệt', departmentId: 2 },
+                { step: 2, role: 'PROJECT', label: 'Dự án duyệt', departmentId: 3 },
+                { step: 3, role: 'CEO', label: 'Tổng Giám đốc duyệt', departmentId: 1 }
+            ],
+            grn: [
+                { step: 1, role: 'PURCHASING', label: 'Lập phiếu', departmentId: 4 },
+                { step: 2, role: 'WAREHOUSE', label: 'Thủ kho nhận', departmentId: null },
+                { step: 3, role: 'QC', label: 'QC kiểm tra', departmentId: 6 },
+                { step: 4, role: 'PURCHASING', label: 'Hoàn thành', departmentId: 4 }
+            ],
+            sto: [
+                { step: 1, role: 'PURCHASING', label: 'Lập phiếu', departmentId: 4 },
+                { step: 2, role: 'PURCHASING', label: 'Duyệt', departmentId: 4 },
+                { step: 3, role: 'PURCHASING', label: 'Xuất kho', departmentId: 4 }
+            ],
+            issue: [
+                { step: 1, role: 'SITE_COMMANDER', label: 'Tạo phiếu', departmentId: 5 },
+                { step: 2, role: 'SITE_COMMANDER', label: 'Duyệt', departmentId: 5 },
+                { step: 3, role: 'PURCHASING', label: 'Cấp phát', departmentId: 4 },
+                { step: 4, role: 'SITE_COMMANDER', label: 'Xác nhận', departmentId: 5 }
+            ],
+            materialreturn: [
+                { step: 1, role: 'SITE_COMMANDER', label: 'Tạo phiếu', departmentId: 5 },
+                { step: 2, role: 'PURCHASING', label: 'Thủ kho nhận', departmentId: 4 },
+                { step: 3, role: 'SITE_COMMANDER', label: 'Xác nhận', departmentId: 5 }
+            ]
+        };
+
+        for (const [module, steps] of Object.entries(defaults)) {
+            const existing = await api.getWorkflowsByModule(module);
+            if (existing && existing.length > 0) {
+                console.log(`Module ${module} đã có workflow, bỏ qua`);
+                continue;
+            }
+            const name = `${module.toUpperCase()} - Mặc định`;
+            await api.createWorkflow({
+                module,
+                name,
+                description: `Quy trình mặc định cho ${module}`,
+                steps: JSON.stringify(steps)
+            });
+        }
+        showSuccess('Đã tạo workflow mặc định cho các module chưa có!');
+        await refreshAdminWorkflows();
+        renderAdminUI('workflows');
+    } catch (error) {
+        showError('Lỗi tạo workflow mặc định: ' + error.message);
+    }
+}
+
+async function refreshWorkflows() {
+    showLoading('Đang tải workflow...');
+    try {
+        await refreshAdminWorkflows();
+        renderAdminUI('workflows');
+        showSuccess('Làm mới thành công!');
+    } catch(e) {
+        showError('Lỗi làm mới: ' + e.message);
+    } finally {
+        hideLoading();
+    }
+}
+
 // ===================================================================
-// 4. TAB PHÂN QUYỀN THEO ROLE (DẠNG BẢNG)
+// 4. TAB PHÂN QUYỀN THEO ROLE
 // ===================================================================
 function renderRolePermissionsTab() {
-    const permissions = getPermissions();
+    const permissions = getPermissionsSafe();
     const roles = getRoles();
     const allPermissions = getAllPermissionKeys();
 
@@ -569,7 +875,7 @@ function updatePermissionCounts() {
 }
 
 function saveRolePermissions() {
-    const permissions = getPermissions();
+    const permissions = getPermissionsSafe();
     const roles = getRoles();
 
     roles.forEach(r => { if (!permissions[r.value]) permissions[r.value] = {}; });
@@ -581,50 +887,30 @@ function saveRolePermissions() {
         permissions[role][perm] = cb.checked;
     });
 
-    savePermissionsData(permissions);
+    saveData('permissions', permissions);
     showSuccess('Đã lưu phân quyền role thành công!');
     updatePermissionCounts();
 }
 
 function resetRolePermissions() {
-    const role = 'ADMIN';
-    if (!confirm(`Reset toàn bộ quyền của role ${role} về mặc định?`)) return;
-
-    const permissions = getPermissions();
-    if (permissions[role]) {
-        delete permissions[role];
-        savePermissionsData(permissions);
-    }
+    if (!confirm('Reset toàn bộ quyền của tất cả role về mặc định?')) return;
+    saveData('permissions', {});
     if (typeof initData === 'function') initData();
-
     renderAdminUI('role-permissions');
-    showSuccess(`Đã reset quyền của role ${role}`);
+    showSuccess('Đã reset phân quyền role');
 }
 
 // ===================================================================
-// 5. TAB PHÂN QUYỀN THEO USER (ĐÃ SỬA LỖI HOÀN TOÀN)
+// 5. TAB PHÂN QUYỀN THEO USER
 // ===================================================================
 function renderUserPermissionsTab() {
-    const users = getUsers();
+    const users = getUsersData();
     const allPermissions = getAllPermissionKeys();
-    let userPermissions = getUserPermissions();
+    let userPermissions = getUserPermissionsCache();
     
-    // Khởi tạo nếu chưa có dữ liệu
-    if (Object.keys(userPermissions).length === 0) {
-        users.forEach(u => {
-            userPermissions[u.id] = {};
-        });
-        saveUserPermissionsData(userPermissions);
-    }
-    
-    // Lấy user được chọn từ dropdown
     const userFilter = document.getElementById('user-perm-user-filter');
-    let selectedUserId = null;
-    if (userFilter) {
-        selectedUserId = parseInt(userFilter.value);
-    }
+    let selectedUserId = userFilter ? parseInt(userFilter.value) : null;
     
-    // Nếu không có user nào được chọn hoặc không tìm thấy, chọn user đầu tiên
     if (!selectedUserId || !users.find(u => u.id === selectedUserId)) {
         if (users.length > 0) {
             selectedUserId = users[0].id;
@@ -639,14 +925,12 @@ function renderUserPermissionsTab() {
         return `<div style="color:#999;">Không tìm thấy user</div>`;
     }
 
-    // Đảm bảo user này có entry trong userPermissions
     if (!userPermissions[selectedUser.id]) {
         userPermissions[selectedUser.id] = {};
-        saveUserPermissionsData(userPermissions);
+        saveData('user_permissions', userPermissions);
     }
-    const userPerms = userPermissions[selectedUser.id];
+    const userPerms = userPermissions[selectedUser.id] || {};
 
-    // Nhóm quyền theo module
     const grouped = {};
     allPermissions.forEach(key => {
         const parts = key.split('.');
@@ -674,7 +958,6 @@ function renderUserPermissionsTab() {
         </div>
     `;
 
-    // Hiển thị thông tin user
     html += `
         <div style="background:#f8fafc; padding:10px 16px; border-radius:8px; margin-bottom:16px; border:1px solid #e2e8f0;">
             <span style="font-weight:600;">👤 ${selectedUser.name}</span>
@@ -684,7 +967,6 @@ function renderUserPermissionsTab() {
         </div>
     `;
 
-    // Grid các box module
     html += `<div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap:16px;">`;
 
     Object.keys(grouped).forEach(module => {
@@ -735,10 +1017,8 @@ function renderUserPermissionsTab() {
     return html;
 }
 
-// ===================================================================
-// HÀM LƯU USER PERMISSIONS
-// ===================================================================
-function getUserPermissions() {
+// ====== HÀM LƯU USER PERMISSIONS ======
+function getUserPermissionsCache() {
     return getData('user_permissions') || {};
 }
 
@@ -753,7 +1033,7 @@ function saveUserPermissions() {
     const selectedUserId = parseInt(userFilter.value);
     if (!selectedUserId) { showError('Vui lòng chọn user'); return; }
 
-    const userPermissions = getUserPermissions();
+    const userPermissions = getUserPermissionsCache();
     if (!userPermissions[selectedUserId]) userPermissions[selectedUserId] = {};
 
     document.querySelectorAll('.user-perm-checkbox').forEach(cb => {
@@ -777,17 +1057,13 @@ function resetUserPermissions() {
     
     if (!confirm(`Reset toàn bộ quyền của user này?`)) return;
 
-    const userPermissions = getUserPermissions();
+    const userPermissions = getUserPermissionsCache();
     if (userPermissions[selectedUserId]) {
         delete userPermissions[selectedUserId];
         saveUserPermissionsData(userPermissions);
     }
     renderUserPermissionsTab();
     showSuccess('Đã reset quyền của user.');
-}
-
-function toggleAllUserPermissions(userId, checked) {
-    document.querySelectorAll(`.user-perm-checkbox[data-user="${userId}"]`).forEach(cb => cb.checked = checked);
 }
 
 function toggleModuleUserPermissions(userId, module) {
@@ -798,22 +1074,10 @@ function toggleModuleUserPermissions(userId, module) {
 }
 
 // ===================================================================
-// HÀM LẤY DỮ LIỆU (SỬ DỤNG API)
-// ===================================================================
-function getUsers() { return getData('users') || []; }
-function saveUsers(data) { saveData('users', data); }
-function getDepartments() { return getData('departments') || []; }
-function saveDepartments(data) { saveData('departments', data); }
-function getWorkflows() { return getData('workflows') || {}; }
-function saveWorkflowsData(data) { saveData('workflows', data); }
-function getPermissions() { return getData('permissions') || {}; }
-function savePermissionsData(data) { saveData('permissions', data); }
-
-// ===================================================================
 // QUẢN LÝ USER (CRUD)
 // ===================================================================
 function viewUser(id) {
-    const users = getUsers();
+    const users = getUsersData();
     const u = users.find(user => user.id === id);
     if (!u) { showError('Không tìm thấy người dùng!'); return; }
 
@@ -827,7 +1091,7 @@ function viewUser(id) {
         'QC': 'QC'
     };
 
-    const dept = getDepartments().find(d => d.id === u.departmentId);
+    const dept = getDepartmentsData().find(d => d.id === u.departmentId);
     showModal('Chi tiết người dùng', `
         <div class="detail-grid">
             <div><span class="label">ID:</span> <span class="value">${u.id}</span></div>
@@ -845,31 +1109,22 @@ function viewUser(id) {
 }
 
 function showAddUserModal() {
-    const departments = getDepartments();
+    const departments = getDepartmentsData();
     const deptOpts = departments.map(d => `<option value="${d.id}">${d.code} - ${d.name}</option>`).join('');
-
-    const roles = [
-        { value: 'ADMIN', label: 'Admin (Toàn quyền)' },
-        { value: 'PLANNING', label: 'Phòng Kế hoạch' },
-        { value: 'PROJECT', label: 'Phòng Dự án' },
-        { value: 'CEO', label: 'Tổng Giám đốc' },
-        { value: 'PURCHASING', label: 'Phòng Mua hàng' },
-        { value: 'SITE_COMMANDER', label: 'Chỉ huy trưởng' },
-        { value: 'QC', label: 'QC' }
-    ];
+    const roles = getRoles();
     const roleOpts = roles.map(r => `<option value="${r.value}">${r.label}</option>`).join('');
 
     showModal('Thêm người dùng mới', `
         <div class="form-group">
-            <label>Họ tên</label>
+            <label>Họ tên <span style="color:red;">*</span></label>
             <input id="f-admin-name" placeholder="Nguyễn Văn A" required>
         </div>
         <div class="form-group">
-            <label>Email</label>
+            <label>Email <span style="color:red;">*</span></label>
             <input id="f-admin-email" type="email" placeholder="user@mep.com" required>
         </div>
         <div class="form-group">
-            <label>Mật khẩu</label>
+            <label>Mật khẩu <span style="color:red;">*</span></label>
             <input id="f-admin-password" type="password" placeholder="Mật khẩu (mặc định: password)" value="password">
         </div>
         <div class="form-group">
@@ -894,7 +1149,7 @@ function showAddUserModal() {
     `);
 }
 
-function saveUser() {
+async function saveUser() {
     const name = document.getElementById('f-admin-name').value.trim();
     const email = document.getElementById('f-admin-email').value.trim();
     const password = document.getElementById('f-admin-password').value.trim() || 'password';
@@ -911,34 +1166,20 @@ function saveUser() {
         return;
     }
 
-    let users = getUsers();
-    if (users.some(u => u.email === email)) {
-        showError('Email đã tồn tại!');
-        return;
+    try {
+        const newUser = { name, email, password, role, departmentId, position: position || '' };
+        await api.createUser(newUser);
+        closeModal();
+        await refreshAdminUsers();
+        renderAdminUI('users');
+        showSuccess(`Thêm người dùng ${name} thành công!`);
+    } catch (error) {
+        showError('Lỗi khi thêm user: ' + error.message);
     }
-
-    const dept = departmentId ? getDepartments().find(d => d.id === departmentId) : null;
-    const newUser = {
-        id: genId(users),
-        name,
-        email,
-        password,
-        role,
-        departmentId,
-        department: dept ? dept.name : '',
-        position: position || '',
-        createdAt: new Date().toISOString().slice(0, 10)
-    };
-
-    users.push(newUser);
-    saveUsers(users);
-    closeModal();
-    renderAdminUI('users');
-    showSuccess(`Thêm người dùng ${name} thành công!`);
 }
 
-function editUser(id) {
-    const users = getUsers();
+async function editUser(id) {
+    const users = getUsersData();
     const u = users.find(user => user.id === id);
     if (!u) { showError('Không tìm thấy người dùng!'); return; }
 
@@ -948,20 +1189,11 @@ function editUser(id) {
         return;
     }
 
-    const departments = getDepartments();
+    const departments = getDepartmentsData();
     const deptOpts = departments.map(d =>
         `<option value="${d.id}" ${d.id === u.departmentId ? 'selected' : ''}>${d.code} - ${d.name}</option>`
     ).join('');
-
-    const roles = [
-        { value: 'ADMIN', label: 'Admin (Toàn quyền)' },
-        { value: 'PLANNING', label: 'Phòng Kế hoạch' },
-        { value: 'PROJECT', label: 'Phòng Dự án' },
-        { value: 'CEO', label: 'Tổng Giám đốc' },
-        { value: 'PURCHASING', label: 'Phòng Mua hàng' },
-        { value: 'SITE_COMMANDER', label: 'Chỉ huy trưởng' },
-        { value: 'QC', label: 'QC' }
-    ];
+    const roles = getRoles();
     const roleOpts = roles.map(r =>
         `<option value="${r.value}" ${r.value === u.role ? 'selected' : ''}>${r.label}</option>`
     ).join('');
@@ -1001,7 +1233,7 @@ function editUser(id) {
     `);
 }
 
-function updateUser(id) {
+async function updateUser(id) {
     const name = document.getElementById('f-admin-name').value.trim();
     const email = document.getElementById('f-admin-email').value.trim();
     const password = document.getElementById('f-admin-password').value.trim();
@@ -1018,36 +1250,21 @@ function updateUser(id) {
         return;
     }
 
-    let users = getUsers();
-    const idx = users.findIndex(u => u.id === id);
-    if (idx === -1) { showError('Không tìm thấy người dùng!'); return; }
-
-    if (users.some((u, i) => u.email === email && i !== idx)) {
-        showError('Email đã tồn tại!');
-        return;
+    try {
+        const updatedUser = { name, email, role, departmentId, position: position || '' };
+        if (password) updatedUser.password = password;
+        await api.updateUser(id, updatedUser);
+        closeModal();
+        await refreshAdminUsers();
+        renderAdminUI('users');
+        showSuccess('Cập nhật người dùng thành công!');
+    } catch (error) {
+        showError('Lỗi khi cập nhật user: ' + error.message);
     }
-
-    const dept = departmentId ? getDepartments().find(d => d.id === departmentId) : null;
-    users[idx] = {
-        ...users[idx],
-        name,
-        email,
-        role,
-        departmentId,
-        department: dept ? dept.name : '',
-        position: position || ''
-    };
-    if (password) users[idx].password = password;
-    users[idx].updatedAt = new Date().toISOString().slice(0, 10);
-
-    saveUsers(users);
-    closeModal();
-    renderAdminUI('users');
-    showSuccess('Cập nhật người dùng thành công!');
 }
 
-function deleteUser(id) {
-    const users = getUsers();
+async function deleteUser(id) {
+    const users = getUsersData();
     const u = users.find(user => user.id === id);
     if (!u) { showError('Không tìm thấy người dùng!'); return; }
 
@@ -1059,18 +1276,22 @@ function deleteUser(id) {
 
     if (!confirm(`Xóa người dùng "${u.name}" (${u.email})?`)) return;
 
-    let newUsers = users.filter(user => user.id !== id);
-    saveUsers(newUsers);
-    renderAdminUI('users');
-    showSuccess(`Đã xóa người dùng ${u.name}`);
+    try {
+        await api.deleteUser(id);
+        await refreshAdminUsers();
+        renderAdminUI('users');
+        showSuccess(`Đã xóa người dùng ${u.name}`);
+    } catch (error) {
+        showError('Lỗi khi xóa user: ' + error.message);
+    }
 }
 
 // ===================================================================
 // QUẢN LÝ THÀNH VIÊN TRONG PHÒNG BAN
 // ===================================================================
 function showAddUserToDepartment(deptId) {
-    const users = getUsers();
-    const dept = getDepartments().find(d => d.id === deptId);
+    const users = getUsersData();
+    const dept = getDepartmentsData().find(d => d.id === deptId);
     if (!dept) { showError('Không tìm thấy phòng ban'); return; }
 
     const availableUsers = users.filter(u => !u.departmentId);
@@ -1093,59 +1314,64 @@ function showAddUserToDepartment(deptId) {
     `);
 }
 
-function confirmAddUserToDept(deptId) {
+async function confirmAddUserToDept(deptId) {
     const userId = parseInt(document.getElementById('f-add-user-dept').value);
     if (!userId) { showError('Vui lòng chọn user'); return; }
 
-    let users = getUsers();
-    const idx = users.findIndex(u => u.id === userId);
-    if (idx === -1) { showError('Không tìm thấy user'); return; }
+    try {
+        const users = await api.getUsers();
+        const user = users.find(u => u.id === userId);
+        if (!user) { showError('Không tìm thấy user'); return; }
 
-    const dept = getDepartments().find(d => d.id === deptId);
-    if (!dept) { showError('Không tìm thấy phòng ban'); return; }
-
-    users[idx].departmentId = deptId;
-    users[idx].department = dept.name;
-    saveUsers(users);
-
-    closeModal();
-    renderAdminUI('departments');
-    showSuccess(`Đã thêm ${users[idx].name} vào ${dept.name}`);
+        user.departmentId = deptId;
+        await api.updateUser(userId, user);
+        closeModal();
+        await refreshAdminUsers();
+        await refreshAdminDepartments();
+        renderAdminUI('departments');
+        showSuccess(`Đã thêm ${user.name} vào phòng ban`);
+    } catch (error) {
+        showError('Lỗi khi thêm user vào phòng ban: ' + error.message);
+    }
 }
 
 function editUserInDept(userId) {
     editUser(userId);
 }
 
-function removeUserFromDept(userId) {
+async function removeUserFromDept(userId) {
     if (!confirm('Xóa user khỏi phòng ban này?')) return;
 
-    let users = getUsers();
-    const idx = users.findIndex(u => u.id === userId);
-    if (idx === -1) { showError('Không tìm thấy user'); return; }
+    try {
+        const users = await api.getUsers();
+        const user = users.find(u => u.id === userId);
+        if (!user) { showError('Không tìm thấy user'); return; }
 
-    users[idx].departmentId = null;
-    users[idx].department = '';
-    saveUsers(users);
-
-    renderAdminUI('departments');
-    showSuccess(`Đã xóa ${users[idx].name} khỏi phòng ban`);
+        user.departmentId = null;
+        await api.updateUser(userId, user);
+        await refreshAdminUsers();
+        await refreshAdminDepartments();
+        renderAdminUI('departments');
+        showSuccess(`Đã xóa ${user.name} khỏi phòng ban`);
+    } catch (error) {
+        showError('Lỗi khi xóa user khỏi phòng ban: ' + error.message);
+    }
 }
 
 // ===================================================================
 // QUẢN LÝ PHÒNG BAN (CRUD)
 // ===================================================================
 function showAddDepartmentModal() {
-    const users = getUsers();
+    const users = getUsersData();
     const userOpts = users.map(u => `<option value="${u.id}">${u.name} (${u.email})</option>`).join('');
 
     showModal('Thêm phòng ban mới', `
         <div class="form-group">
-            <label>Mã phòng ban</label>
+            <label>Mã phòng ban <span style="color:red;">*</span></label>
             <input id="f-dept-code" placeholder="Ví dụ: HR, FINANCE..." required>
         </div>
         <div class="form-group">
-            <label>Tên phòng ban</label>
+            <label>Tên phòng ban <span style="color:red;">*</span></label>
             <input id="f-dept-name" placeholder="Ví dụ: Phòng Nhân sự" required>
         </div>
         <div class="form-group">
@@ -1162,7 +1388,7 @@ function showAddDepartmentModal() {
     `);
 }
 
-function saveDepartment() {
+async function saveDepartment() {
     const code = document.getElementById('f-dept-code').value.trim().toUpperCase();
     const name = document.getElementById('f-dept-name').value.trim();
     const managerId = parseInt(document.getElementById('f-dept-manager').value) || null;
@@ -1172,35 +1398,24 @@ function saveDepartment() {
         return;
     }
 
-    let departments = getDepartments();
-    if (departments.some(d => d.code === code)) {
-        showError('Mã phòng ban đã tồn tại');
-        return;
+    try {
+        const newDept = { code, name, managerId };
+        await api.createDepartment(newDept);
+        closeModal();
+        await refreshAdminDepartments();
+        renderAdminUI('departments');
+        showSuccess(`Thêm phòng ban ${name} thành công!`);
+    } catch (error) {
+        showError('Lỗi khi thêm phòng ban: ' + error.message);
     }
-
-    const manager = managerId ? getUsers().find(u => u.id === managerId) : null;
-    const newDept = {
-        id: genId(departments),
-        code,
-        name,
-        managerId,
-        managerName: manager ? manager.name : '',
-        createdAt: new Date().toISOString().slice(0, 10)
-    };
-
-    departments.push(newDept);
-    saveDepartments(departments);
-    closeModal();
-    renderAdminUI('departments');
-    showSuccess(`Thêm phòng ban ${name} thành công!`);
 }
 
-function editDepartment(id) {
-    const departments = getDepartments();
+async function editDepartment(id) {
+    const departments = getDepartmentsData();
     const dept = departments.find(d => d.id === id);
     if (!dept) { showError('Không tìm thấy phòng ban!'); return; }
 
-    const users = getUsers();
+    const users = getUsersData();
     const userOpts = users.map(u =>
         `<option value="${u.id}" ${u.id === dept.managerId ? 'selected' : ''}>${u.name} (${u.email})</option>`
     ).join('');
@@ -1228,7 +1443,7 @@ function editDepartment(id) {
     `);
 }
 
-function updateDepartment(id) {
+async function updateDepartment(id) {
     const code = document.getElementById('f-dept-code').value.trim().toUpperCase();
     const name = document.getElementById('f-dept-name').value.trim();
     const managerId = parseInt(document.getElementById('f-dept-manager').value) || null;
@@ -1238,154 +1453,89 @@ function updateDepartment(id) {
         return;
     }
 
-    let departments = getDepartments();
-    const idx = departments.findIndex(d => d.id === id);
-    if (idx === -1) { showError('Không tìm thấy phòng ban!'); return; }
-
-    if (departments.some((d, i) => d.code === code && i !== idx)) {
-        showError('Mã phòng ban đã tồn tại');
-        return;
+    try {
+        const updatedDept = { code, name, managerId };
+        await api.updateDepartment(id, updatedDept);
+        closeModal();
+        await refreshAdminDepartments();
+        renderAdminUI('departments');
+        showSuccess('Cập nhật phòng ban thành công!');
+    } catch (error) {
+        showError('Lỗi khi cập nhật phòng ban: ' + error.message);
     }
-
-    const manager = managerId ? getUsers().find(u => u.id === managerId) : null;
-    departments[idx] = {
-        ...departments[idx],
-        code,
-        name,
-        managerId,
-        managerName: manager ? manager.name : ''
-    };
-
-    saveDepartments(departments);
-    closeModal();
-    renderAdminUI('departments');
-    showSuccess('Cập nhật phòng ban thành công!');
 }
 
-function deleteDepartment(id) {
+async function deleteDepartment(id) {
     if (!confirm('Xóa phòng ban này? Các user thuộc phòng ban sẽ bị xóa phòng ban.')) return;
 
-    let departments = getDepartments();
-    departments = departments.filter(d => d.id !== id);
-    saveDepartments(departments);
-
-    let users = getUsers();
-    users = users.map(u => {
-        if (u.departmentId === id) {
-            u.departmentId = null;
-            u.department = '';
-        }
-        return u;
-    });
-    saveUsers(users);
-
-    renderAdminUI('departments');
-    showSuccess('Xóa phòng ban thành công!');
+    try {
+        await api.deleteDepartment(id);
+        await refreshAdminDepartments();
+        await refreshAdminUsers();
+        renderAdminUI('departments');
+        showSuccess('Xóa phòng ban thành công!');
+    } catch (error) {
+        showError('Lỗi khi xóa phòng ban: ' + error.message);
+    }
 }
 
 // ===================================================================
-// QUẢN LÝ WORKFLOW
-// ===================================================================
-function addWorkflowStep(module) {
-    const workflows = getWorkflows();
-    if (!workflows[module]) return;
-
-    const steps = workflows[module].steps;
-    const maxStep = steps.reduce((max, s) => Math.max(max, s.step), 0);
-    const newStep = maxStep + 1;
-
-    steps.push({ step: newStep, role: 'ADMIN', label: `Bước ${newStep}` });
-    saveWorkflowsData(workflows);
-    renderAdminUI('workflows');
-    showSuccess(`Đã thêm bước ${newStep} cho ${workflows[module].name}`);
-}
-
-function removeWorkflowStep(module, step) {
-    if (!confirm(`Xóa bước ${step} của ${getWorkflows()[module]?.name || ''}?`)) return;
-
-    const workflows = getWorkflows();
-    if (!workflows[module]) return;
-
-    workflows[module].steps = workflows[module].steps.filter(s => s.step !== step);
-    workflows[module].steps.forEach((s, idx) => { s.step = idx + 1; });
-
-    saveWorkflowsData(workflows);
-    renderAdminUI('workflows');
-    showSuccess('Đã xóa bước và đánh số lại.');
-}
-
-function saveWorkflows() {
-    const workflows = getWorkflows();
-
-    document.querySelectorAll('.wf-role-select').forEach(sel => {
-        const module = sel.dataset.module;
-        const step = parseInt(sel.dataset.step);
-        if (workflows[module]) {
-            const found = workflows[module].steps.find(s => s.step === step);
-            if (found) found.role = sel.value;
-        }
-    });
-
-    document.querySelectorAll('.wf-label-input').forEach(inp => {
-        const module = inp.dataset.module;
-        const step = parseInt(inp.dataset.step);
-        if (workflows[module]) {
-            const found = workflows[module].steps.find(s => s.step === step);
-            if (found) found.label = inp.value.trim() || found.label;
-        }
-    });
-
-    saveWorkflowsData(workflows);
-    showSuccess('Đã lưu workflow thành công!');
-}
-
-function resetDefaultWorkflows() {
-    if (!confirm('Khôi phục workflow về mặc định?')) return;
-    localStorage.removeItem('workflows');
-    if (typeof initData === 'function') initData();
-    renderAdminUI('workflows');
-    showSuccess('Đã khôi phục workflow mặc định.');
-}
-
-// ===================================================================
-// EXPORT GLOBAL
+// EXPORT GLOBAL (QUAN TRỌNG - ĐỂ DÙNG TỪ HTML)
 // ===================================================================
 window.renderAdminPage = renderAdminPage;
 window.renderAdminUI = renderAdminUI;
 window.switchAdminTab = switchAdminTab;
+
+// Users
 window.viewUser = viewUser;
 window.showAddUserModal = showAddUserModal;
 window.saveUser = saveUser;
 window.editUser = editUser;
 window.updateUser = updateUser;
 window.deleteUser = deleteUser;
-window.showAddUserToDepartment = showAddUserToDepartment;
-window.confirmAddUserToDept = confirmAddUserToDept;
-window.editUserInDept = editUserInDept;
-window.removeUserFromDept = removeUserFromDept;
+
+// Departments
 window.showAddDepartmentModal = showAddDepartmentModal;
 window.saveDepartment = saveDepartment;
 window.editDepartment = editDepartment;
 window.updateDepartment = updateDepartment;
 window.deleteDepartment = deleteDepartment;
-window.addWorkflowStep = addWorkflowStep;
-window.removeWorkflowStep = removeWorkflowStep;
-window.saveWorkflows = saveWorkflows;
-window.resetDefaultWorkflows = resetDefaultWorkflows;
-window.saveRolePermissions = saveRolePermissions;
-window.resetRolePermissions = resetRolePermissions;
-window.renderUserPermissionsTab = renderUserPermissionsTab;
-window.saveUserPermissions = saveUserPermissions;
-window.resetUserPermissions = resetUserPermissions;
-window.toggleAllUserPermissions = toggleAllUserPermissions;
-window.toggleModuleUserPermissions = toggleModuleUserPermissions;
+window.showAddUserToDepartment = showAddUserToDepartment;
+window.confirmAddUserToDept = confirmAddUserToDept;
+window.editUserInDept = editUserInDept;
+window.removeUserFromDept = removeUserFromDept;
+
+// Workflows
+window.renderWorkflowsTab = renderWorkflowsTab;
+window.activateWorkflow = activateWorkflow;
+window.duplicateWorkflow = duplicateWorkflow;
+window.deleteWorkflow = deleteWorkflow;
+window.showCreateWorkflowModal = showCreateWorkflowModal;
+window.saveNewWorkflow = saveNewWorkflow;
+window.editWorkflow = editWorkflow;
+window.updateWorkflow = updateWorkflow;
+window.createDefaultWorkflows = createDefaultWorkflows;
+window.refreshWorkflows = refreshWorkflows;
+
+// Role Permissions
+window.renderRolePermissionsTab = renderRolePermissionsTab;
 window.setAllPermissions = setAllPermissions;
 window.toggleAllPermissionsForRole = toggleAllPermissionsForRole;
 window.toggleModulePermissions = toggleModulePermissions;
 window.updatePermissionCounts = updatePermissionCounts;
+window.saveRolePermissions = saveRolePermissions;
+window.resetRolePermissions = resetRolePermissions;
+
+// User Permissions
+window.renderUserPermissionsTab = renderUserPermissionsTab;
+window.saveUserPermissions = saveUserPermissions;
+window.resetUserPermissions = resetUserPermissions;
+window.toggleModuleUserPermissions = toggleModuleUserPermissions;
+
+// Helpers
 window.getRoles = getRoles;
 window.getAllPermissionKeys = getAllPermissionKeys;
 window.getModuleLabel = getModuleLabel;
 window.getActionLabel = getActionLabel;
 
-console.log('✅ Admin module (Users + Departments + Workflows + Role Permissions + User Permissions) loaded successfully.');
+console.log('✅ Admin module loaded successfully (FULL API + Workflow dynamic + User Permission)');

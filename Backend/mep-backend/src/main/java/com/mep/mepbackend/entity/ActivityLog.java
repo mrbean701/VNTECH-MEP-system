@@ -1,7 +1,9 @@
 package com.mep.mepbackend.entity;
 
 import jakarta.persistence.*;
+import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.LocalDateTime;
@@ -9,6 +11,8 @@ import java.time.LocalDateTime;
 @Data
 @Entity
 @Table(name = "activity_logs")
+@NoArgsConstructor  // ✅ Thêm dòng này
+@AllArgsConstructor // ✅ Thêm nếu cần
 public class ActivityLog {
 
     @Id

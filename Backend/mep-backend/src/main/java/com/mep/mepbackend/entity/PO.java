@@ -36,13 +36,13 @@ public class PO {
     private String vendorName;
 
     @Column(columnDefinition = "JSON")
-    private String items; // JSON: [{itemId, quantity, price?}]
+    private String items;
 
     @Column(length = 20)
-    private String status; // DRAFT, PENDING, APPROVED, REJECTED
+    private String status;
 
     @Column(name = "approval_step")
-    private Integer approvalStep; // 1, 2, 3
+    private Integer approvalStep; // ✅ Đã sửa từ int → Integer
 
     @Column(name = "created_by")
     private Long createdBy;

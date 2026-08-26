@@ -1,12 +1,17 @@
 package com.mep.mepbackend.entity;
 
 import jakarta.persistence.*;
+import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.NoArgsConstructor;
+
 import java.time.LocalDate;
 
 @Entity
 @Table(name = "grn")
 @Data
+@NoArgsConstructor  // ✅ Thêm dòng này
+@AllArgsConstructor // ✅ Thêm nếu cần
 public class GRN {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

@@ -1,5 +1,5 @@
 // ================================================================
-// PR (Purchase Request) - SỬ DỤNG API
+// PR (Purchase Request) - SỬ DỤNG API - ĐÃ SỬA LỖI NULL
 // ================================================================
 
 // ====== HÀM LẤY ACTION ======
@@ -43,9 +43,10 @@ async function renderPR() {
         const statusFilter = document.getElementById('pr-status-filter')?.value || '';
         
         const filtered = prs.filter(p => {
-            const matchCode = p.code.toLowerCase().includes(filter) || (p.projectName || '').toLowerCase().includes(filter);
+            const matchCode = (p.code || '').toLowerCase().includes(filter);
+            const matchProject = (p.projectName || p.projectCode || '').toLowerCase().includes(filter);
             const matchStatus = statusFilter ? p.status === statusFilter : true;
-            return matchCode && matchStatus;
+            return (matchCode || matchProject) && matchStatus;
         });
         
         let html = `
@@ -65,15 +66,21 @@ async function renderPR() {
         if (!filtered.length) html += `<tr><td colspan="6" style="text-align:center; color:#999;">Không có dữ liệu</td></tr>`;
         
         for (const p of filtered) {
-            const items = p.items ? JSON.parse(p.items) : [];
-            const itemsStr = items.map(it => `${getItemCode(it.itemId)} (${it.quantity})`).join(', ');
+            let itemsStr = '';
+            try {
+                if (p.items) {
+                    const items = typeof p.items === 'string' ? JSON.parse(p.items) : p.items;
+                    itemsStr = items.map(it => `${getItemCode(it.itemId)} (${it.quantity})`).join(', ');
+                }
+            } catch (e) { itemsStr = 'Lỗi parse'; }
+            
             const statusBadge = getStatusBadge(p.status);
             const actions = getPRActions(p);
             const projectId = getProjectIdByCode(p.projectCode);
             html += `<tr>
-                <td style="cursor:pointer; color:#1a3c6e; font-weight:500;" onclick="viewPR(${p.id})">${p.code}</td>
-                <td style="cursor:pointer; color:#1a3c6e;" onclick="${projectId ? `viewProject(${projectId})` : 'alert("Không tìm thấy dự án")'}">${p.projectName || p.projectCode || ''}</td>
-                <td>${p.vendorName || p.vendorCode || ''}</td>
+                <td style="cursor:pointer; color:#1a3c6e; font-weight:500;" onclick="viewPR(${p.id})">${p.code || '--'}</td>
+                <td style="cursor:pointer; color:#1a3c6e;" onclick="${projectId ? `viewProject(${projectId})` : 'alert("Không tìm thấy dự án")'}">${p.projectName || p.projectCode || '--'}</td>
+                <td>${p.vendorName || p.vendorCode || '--'}</td>
                 <td>${itemsStr}</td>
                 <td>${statusBadge}</td>
                 <td>${actions}</td>
@@ -98,22 +105,28 @@ async function viewPR(id) {
             return;
         }
         
-        const items = pr.items ? JSON.parse(pr.items) : [];
+        let items = [];
+        try {
+            if (pr.items) {
+                items = typeof pr.items === 'string' ? JSON.parse(pr.items) : pr.items;
+            }
+        } catch (e) { items = []; }
+        
         const itemsHtml = buildItemsTable(items);
         const approvalHtml = renderApprovalProgress(pr.status, pr.approvalStep);
         const projectId = getProjectIdByCode(pr.projectCode);
         const projectLink = projectId ? 
-            `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="closeModal(); viewProject(${projectId});">${pr.projectName || pr.projectCode}</span>` :
-            (pr.projectName || pr.projectCode || '');
-        const totalAmount = items.reduce((sum, it) => sum + (it.price || 0) * it.quantity, 0);
+            `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="closeModal(); viewProject(${projectId});">${pr.projectName || pr.projectCode || '--'}</span>` :
+            (pr.projectName || pr.projectCode || '--');
+        const totalAmount = items.reduce((sum, it) => sum + ((it.price || 0) * (it.quantity || 0)), 0);
         
         showModal('Chi tiết PR', `
             <div class="detail-grid">
-                <div><span class="label">Mã PR:</span> <span class="value">${pr.code}</span></div>
+                <div><span class="label">Mã PR:</span> <span class="value">${pr.code || '--'}</span></div>
                 <div><span class="label">Ngày tạo:</span> <span class="value">${pr.createdAt || ''}</span></div>
                 <div><span class="label">MR liên quan:</span> <span class="value">${pr.mrId ? 'MR-'+String(pr.mrId).padStart(3,'0') : ''}</span></div>
                 <div><span class="label">Dự án:</span> <span class="value">${projectLink}</span></div>
-                <div><span class="label">Nhà cung cấp:</span> <span class="value">${pr.vendorName || pr.vendorCode || ''}</span></div>
+                <div><span class="label">Nhà cung cấp:</span> <span class="value">${pr.vendorName || pr.vendorCode || '--'}</span></div>
                 <div><span class="label">Trạng thái:</span> <span class="value">${getStatusBadge(pr.status)}</span></div>
                 ${totalAmount > 0 ? `<div><span class="label">Tổng tiền:</span> <span class="value">${totalAmount.toLocaleString()} VND</span></div>` : ''}
                 <div style="grid-column:1/-1;"><span class="label">Tiến độ duyệt:</span><br>${approvalHtml}</div>
@@ -141,7 +154,15 @@ async function showCreatePRModal(mr = null) {
         const projectOpts = projects.map(p => `<option value="${p.code}" ${mr && p.code === mr.projectCode ? 'selected' : ''}>${p.code} - ${p.name}</option>`).join('');
         const vendors = await api.getVendors();
         const vendorOpts = vendors.map(v => `<option value="${v.code}" ${mr && v.vendorCode === v.code ? 'selected' : ''}>${v.code} - ${v.name}</option>`).join('');
-        const itemsData = mr ? (mr.items ? JSON.parse(mr.items) : [{ itemId: '', quantity: '' }]) : [{ itemId: '', quantity: '' }];
+        let itemsData = [{ itemId: '', quantity: '' }];
+        if (mr) {
+            try {
+                if (mr.items) {
+                    itemsData = typeof mr.items === 'string' ? JSON.parse(mr.items) : mr.items;
+                    if (!itemsData.length) itemsData = [{ itemId: '', quantity: '' }];
+                }
+            } catch (e) { itemsData = [{ itemId: '', quantity: '' }]; }
+        }
         
         showModal('Tạo Purchase Request (PR)', `
             <div class="form-group"><label>Dự án</label>
@@ -224,7 +245,14 @@ async function editPR(id) {
         const vendors = await api.getVendors();
         const vendorOpts = vendors.map(v =>
             `<option value="${v.code}" ${v.code === pr.vendorCode ? 'selected' : ''}>${v.code} - ${v.name}</option>`).join('');
-        const itemsData = pr.items ? JSON.parse(pr.items) : [{ itemId: '', quantity: '' }];
+        
+        let itemsData = [{ itemId: '', quantity: '' }];
+        try {
+            if (pr.items) {
+                itemsData = typeof pr.items === 'string' ? JSON.parse(pr.items) : pr.items;
+                if (!itemsData.length) itemsData = [{ itemId: '', quantity: '' }];
+            }
+        } catch (e) { itemsData = [{ itemId: '', quantity: '' }]; }
         
         showModal('Sửa Purchase Request', `
             <div class="form-group"><label>Dự án</label><select id="f-pr-project">${projectOpts}</select></div>
@@ -243,6 +271,7 @@ async function editPR(id) {
     }
 }
 
+// ====== CẬP NHẬT PR ======
 async function updatePR(id) {
     const projectCode = document.getElementById('f-pr-project').value;
     const vendorCode = document.getElementById('f-pr-vendor').value;
@@ -292,6 +321,7 @@ async function submitPR(id) {
     }
 }
 
+// ====== DUYỆT PR ======
 async function approvePR(id) {
     try {
         await api.approvePR(id);
@@ -302,6 +332,7 @@ async function approvePR(id) {
     }
 }
 
+// ====== TỪ CHỐI PR ======
 async function rejectPR(id) {
     try {
         await api.rejectPR(id);
@@ -312,6 +343,7 @@ async function rejectPR(id) {
     }
 }
 
+// ====== XÓA PR ======
 async function deletePR(id) {
     if (!confirm('Xóa PR này?')) return;
     try {
@@ -335,7 +367,6 @@ function createPOFromPR(prId) {
 }
 
 function showCreatePRFromMRModal(mrId) {
-    // Gọi từ MR, lấy MR và hiển thị modal tạo PR với dữ liệu từ MR
     api.getMRs().then(mrs => {
         const mr = mrs.find(m => m.id === mrId);
         if (mr) {
@@ -367,4 +398,4 @@ window.getPRActions = getPRActions;
 window.savePRManual = savePRManual;
 window.showCreatePRFromMRModal = showCreatePRFromMRModal;
 
-console.log('✅ PR module updated to use API.');
+console.log('✅ PR module updated to use API (fixed null display).');

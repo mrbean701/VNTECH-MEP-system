@@ -1,5 +1,5 @@
 // ================================================================
-// MR (Material Request) - SỬ DỤNG API
+// MR (Material Request) - SỬ DỤNG API - ĐÃ SỬA LỖI NULL
 // ================================================================
 
 // ====== HÀM LẤY ACTION ======
@@ -36,9 +36,10 @@ async function renderMR() {
         const statusFilter = document.getElementById('mr-status-filter')?.value || '';
         
         const filtered = mrs.filter(m => {
-            const matchCode = m.code.toLowerCase().includes(filter) || (m.projectName || '').toLowerCase().includes(filter);
+            const matchCode = (m.code || '').toLowerCase().includes(filter);
+            const matchProject = (m.projectName || m.projectCode || '').toLowerCase().includes(filter);
             const matchStatus = statusFilter ? m.status === statusFilter : true;
-            return matchCode && matchStatus;
+            return (matchCode || matchProject) && matchStatus;
         });
         
         let html = `
@@ -58,13 +59,20 @@ async function renderMR() {
         if (!filtered.length) html += `<tr><td colspan="6" style="text-align:center; color:#999;">Không có dữ liệu</td></tr>`;
         
         for (const m of filtered) {
-            const itemsStr = m.items ? JSON.parse(m.items).map(it => `${getItemCode(it.itemId)} (${it.quantity})`).join(', ') : '';
+            let itemsStr = '';
+            try {
+                if (m.items) {
+                    const items = typeof m.items === 'string' ? JSON.parse(m.items) : m.items;
+                    itemsStr = items.map(it => `${getItemCode(it.itemId)} (${it.quantity})`).join(', ');
+                }
+            } catch (e) { itemsStr = 'Lỗi parse'; }
+            
             const statusBadge = getStatusBadge(m.status);
             const actions = getMRActions(m);
             const projectId = getProjectIdByCode(m.projectCode);
             html += `<tr>
-                <td style="cursor:pointer; color:#1a3c6e; font-weight:500;" onclick="viewMR(${m.id})">${m.code}</td>
-                <td style="cursor:pointer; color:#1a3c6e;" onclick="${projectId ? `viewProject(${projectId})` : 'alert("Không tìm thấy dự án")'}">${m.projectName || m.projectCode || ''}</td>
+                <td style="cursor:pointer; color:#1a3c6e; font-weight:500;" onclick="viewMR(${m.id})">${m.code || '--'}</td>
+                <td style="cursor:pointer; color:#1a3c6e;" onclick="${projectId ? `viewProject(${projectId})` : 'alert("Không tìm thấy dự án")'}">${m.projectName || m.projectCode || '--'}</td>
                 <td>${itemsStr}</td>
                 <td>${m.needDate || ''}</td>
                 <td>${statusBadge}</td>
@@ -92,21 +100,27 @@ async function viewMR(id) {
             }
         }
         
-        const items = mr.items ? JSON.parse(mr.items) : [];
+        let items = [];
+        try {
+            if (mr.items) {
+                items = typeof mr.items === 'string' ? JSON.parse(mr.items) : mr.items;
+            }
+        } catch (e) { items = []; }
+        
         const itemsHtml = buildItemsTable(items);
         const mrSteps = [{ id: 1, label: 'Chỉ huy trưởng' }];
         const approvalHtml = renderApprovalProgress(mr.status, mr.status === 'APPROVED' ? 1 : 1, mrSteps);
         const projectId = getProjectIdByCode(mr.projectCode);
         const projectLink = projectId ? 
-            `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="closeModal(); viewProject(${projectId});">${mr.projectName || mr.projectCode}</span>` :
-            (mr.projectName || mr.projectCode || '');
+            `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="closeModal(); viewProject(${projectId});">${mr.projectName || mr.projectCode || '--'}</span>` :
+            (mr.projectName || mr.projectCode || '--');
         
         showModal('Chi tiết MR', `
             <div class="detail-grid">
-                <div><span class="label">Mã MR:</span> <span class="value">${mr.code}</span></div>
+                <div><span class="label">Mã MR:</span> <span class="value">${mr.code || '--'}</span></div>
                 <div><span class="label">Ngày tạo:</span> <span class="value">${mr.createdAt || ''}</span></div>
                 <div><span class="label">Dự án:</span> <span class="value">${projectLink}</span></div>
-                <div><span class="label">Người yêu cầu:</span> <span class="value">${mr.requester || mr.createdByName || ''}</span></div>
+                <div><span class="label">Người yêu cầu:</span> <span class="value">${mr.requester || mr.createdByName || '--'}</span></div>
                 <div><span class="label">Ngày cần:</span> <span class="value">${mr.needDate || ''}</span></div>
                 <div><span class="label">Mục đích/Khu vực:</span> <span class="value">${mr.purpose || ''}</span></div>
                 <div style="grid-column:1/-1;"><span class="label">Tiến độ duyệt:</span><br>${approvalHtml}</div>
@@ -208,7 +222,14 @@ async function editMR(id) {
         const projects = await api.getProjects();
         const projectOpts = projects.map(p =>
             `<option value="${p.code}" ${p.code === mr.projectCode ? 'selected' : ''}>${p.code} - ${p.name}</option>`).join('');
-        const itemsData = mr.items ? JSON.parse(mr.items) : [{ itemId: '', quantity: '' }];
+        
+        let itemsData = [{ itemId: '', quantity: '' }];
+        try {
+            if (mr.items) {
+                itemsData = typeof mr.items === 'string' ? JSON.parse(mr.items) : mr.items;
+                if (!itemsData.length) itemsData = [{ itemId: '', quantity: '' }];
+            }
+        } catch (e) { itemsData = [{ itemId: '', quantity: '' }]; }
         
         showModal('Sửa Material Request', `
             <div class="form-group"><label>Dự án</label>
@@ -344,4 +365,4 @@ window.createPRFromMR = createPRFromMR;
 window.printMR = printMR;
 window.getMRActions = getMRActions;
 
-console.log('✅ MR module updated to use API.');
+console.log('✅ MR module updated to use API (fixed null display).');

@@ -1,5 +1,5 @@
 // ================================================================
-// VENDORS - QUẢN LÝ NHÀ CUNG CẤP (SỬ DỤNG API)
+// VENDORS - QUẢN LÝ NHÀ CUNG CẤP (SỬ DỤNG API) - ĐÃ SỬA LỖI NULL
 // ================================================================
 
 // ====== RENDER DANH SÁCH NHÀ CUNG CẤP ======
@@ -7,9 +7,9 @@ async function renderVendors() {
     try {
         const vendors = await api.getVendors();
         const filter = document.getElementById('vendor-filter')?.value?.toLowerCase() || '';
-        const filtered = vendors.filter(v => 
-            v.code.toLowerCase().includes(filter) || 
-            v.name.toLowerCase().includes(filter)
+        const filtered = vendors.filter(v =>
+            (v.code || '').toLowerCase().includes(filter) ||
+            (v.name || '').toLowerCase().includes(filter)
         );
         const user = getUser();
         const canEdit = ['ADMIN', 'PURCHASING'].includes(user?.role || '');
@@ -44,8 +44,8 @@ async function renderVendors() {
                 }
             }
             html += `<tr>
-                <td><strong>${v.code}</strong></td>
-                <td>${v.name}</td>
+                <td><strong>${v.code || '--'}</strong></td>
+                <td>${v.name || '--'}</td>
                 <td>${v.vendorGroup || '--'}</td>
                 <td>${v.contact || '--'}</td>
                 <td>${v.phone || '--'}</td>
@@ -61,7 +61,6 @@ async function renderVendors() {
         `;
         document.getElementById('vendors-container').innerHTML = html;
 
-        // Ẩn/Hiện nút thêm theo quyền
         const btnCreate = document.getElementById('btn-create-vendor');
         if (btnCreate) {
             btnCreate.style.display = canEdit ? 'inline-block' : 'none';
@@ -75,9 +74,7 @@ async function renderVendors() {
 // ====== XEM CHI TIẾT NCC ======
 async function viewVendor(id) {
     try {
-        const vendor = await api.getVendorById ? await api.getVendorById(id) : null;
-        // Nếu chưa có API getVendorById, dùng dữ liệu từ danh sách
-        let v = vendor;
+        let v = await api.getVendorById ? await api.getVendorById(id) : null;
         if (!v) {
             const vendors = await api.getVendors();
             v = vendors.find(item => item.id === id);
@@ -89,8 +86,8 @@ async function viewVendor(id) {
 
         showModal('Chi tiết nhà cung cấp', `
             <div class="detail-grid">
-                <div><span class="label">Mã NCC:</span> <span class="value"><strong>${v.code}</strong></span></div>
-                <div><span class="label">Tên NCC:</span> <span class="value">${v.name}</span></div>
+                <div><span class="label">Mã NCC:</span> <span class="value"><strong>${v.code || '--'}</strong></span></div>
+                <div><span class="label">Tên NCC:</span> <span class="value">${v.name || '--'}</span></div>
                 <div><span class="label">Nhóm hàng:</span> <span class="value">${v.vendorGroup || '--'}</span></div>
                 <div><span class="label">Người liên hệ:</span> <span class="value">${v.contact || '--'}</span></div>
                 <div><span class="label">Số điện thoại:</span> <span class="value">${v.phone || '--'}</span></div>
@@ -138,7 +135,7 @@ async function saveVendor() {
     }
 }
 
-// ====== SỬA NCC (HIỂN THỊ MODAL) ======
+// ====== SỬA NCC ======
 async function editVendor(id) {
     try {
         const vendors = await api.getVendors();
@@ -155,8 +152,8 @@ async function editVendor(id) {
         }
 
         showModal('Sửa nhà cung cấp', `
-            <div class="form-group"><label>Mã NCC</label><input id="f-vendor-code" value="${v.code}" required></div>
-            <div class="form-group"><label>Tên NCC</label><input id="f-vendor-name" value="${v.name}" required></div>
+            <div class="form-group"><label>Mã NCC</label><input id="f-vendor-code" value="${v.code || ''}" required></div>
+            <div class="form-group"><label>Tên NCC</label><input id="f-vendor-name" value="${v.name || ''}" required></div>
             <div class="form-group"><label>Nhóm hàng</label><input id="f-vendor-group" value="${v.vendorGroup || ''}"></div>
             <div class="form-group"><label>Người liên hệ</label><input id="f-vendor-contact" value="${v.contact || ''}"></div>
             <div class="form-group"><label>Số điện thoại</label><input id="f-vendor-phone" value="${v.phone || ''}"></div>
@@ -212,7 +209,6 @@ async function deleteVendor(id) {
     }
 
     try {
-        // Lấy thông tin vendor để hiển thị tên
         const vendors = await api.getVendors();
         const v = vendors.find(item => item.id === id);
         if (!v) {
@@ -220,14 +216,12 @@ async function deleteVendor(id) {
             return;
         }
 
-        // Kiểm tra xem NCC có đang được sử dụng trong PR/PO không (có thể do backend tự kiểm tra)
         if (!confirm(`Xóa nhà cung cấp "${v.name}"?`)) return;
 
         await api.deleteVendor(id);
         await renderVendors();
         showSuccess('Xóa nhà cung cấp thành công!');
     } catch (error) {
-        // Nếu backend trả về lỗi ràng buộc
         if (error.message && error.message.includes('đang được sử dụng')) {
             showWarning('Nhà cung cấp này đang được sử dụng trong các đơn hàng, không thể xóa!');
         } else {
@@ -283,7 +277,7 @@ document.getElementById('btn-create-vendor')?.addEventListener('click', function
     `);
 });
 
-// ====== EXPORT GLOBAL ======
+// ====== EXPORT ======
 window.renderVendors = renderVendors;
 window.viewVendor = viewVendor;
 window.editVendor = editVendor;
@@ -291,4 +285,4 @@ window.updateVendor = updateVendor;
 window.deleteVendor = deleteVendor;
 window.saveVendor = saveVendor;
 
-console.log('✅ Vendors module updated to use API.');
+console.log('✅ Vendors module updated to use API (fixed null display).');

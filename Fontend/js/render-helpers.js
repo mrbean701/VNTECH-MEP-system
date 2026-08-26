@@ -2,31 +2,17 @@
 // RENDER HELPERS - Hàm dùng chung cho MR, PR, PO
 // ================================================================
 
-// ====== TẠO HTML BẢNG DANH SÁCH ======
-function renderApprovalList({
-    data,
-    filterId,
-    statusFilterId,
-    containerId,
-    columns,
-    getActions,
-    viewFunction,
-    emptyMessage = 'Không có dữ liệu'
-}) {
+function renderApprovalList({ data, filterId, statusFilterId, containerId, columns, getActions, viewFunction, emptyMessage = 'Không có dữ liệu' }) {
     const filter = document.getElementById(filterId)?.value?.toLowerCase() || '';
     const statusFilter = document.getElementById(statusFilterId)?.value || '';
-    
     const filtered = data.filter(item => {
-        const matchSearch = item.code?.toLowerCase().includes(filter) || 
-                           (item.projectName || '').toLowerCase().includes(filter);
+        const matchSearch = item.code?.toLowerCase().includes(filter) || (item.projectName || '').toLowerCase().includes(filter);
         const matchStatus = statusFilter ? item.status === statusFilter : true;
         return matchSearch && matchStatus;
     });
 
     let html = `<div class="table-responsive"><table><thead><tr>`;
-    columns.forEach(col => {
-        html += `<th>${col}</th>`;
-    });
+    columns.forEach(col => html += `<th>${col}</th>`);
     html += `</tr></thead><tbody>`;
 
     if (!filtered.length) {
@@ -36,11 +22,9 @@ function renderApprovalList({
     filtered.forEach(item => {
         const projectId = getProjectIdByCode(item.projectCode);
         html += `<tr>`;
-        // Cột Mã (click xem chi tiết)
         html += `<td style="cursor:pointer; color:#1a3c6e; font-weight:500;" onclick="${viewFunction}(${item.id})">${item.code}</td>`;
-        // Cột Dự án (click xem chi tiết dự án)
         html += `<td style="cursor:pointer; color:#1a3c6e;" onclick="${projectId ? `viewProject(${projectId})` : `alert('Không tìm thấy dự án')`}">${item.projectName || item.projectCode || ''}</td>`;
-        // Các cột khác sẽ được xử lý riêng trong từng file
+        // Các cột khác sẽ được xử lý riêng trong từng module
         html += `</tr>`;
     });
 
@@ -48,16 +32,7 @@ function renderApprovalList({
     document.getElementById(containerId).innerHTML = html;
 }
 
-// ====== TẠO HTML CHI TIẾT ĐƠN HÀNG ======
-function renderApprovalDetail({
-    item,
-    title,
-    extraFields,
-    itemsTable,
-    approvalHtml,
-    projectLink,
-    actions
-}) {
+function renderApprovalDetail({ item, title, extraFields, itemsTable, approvalHtml, projectLink, actions }) {
     let detailHtml = `
         <div class="detail-grid">
             <div><span class="label">Mã ${title}:</span> <span class="value">${item.code}</span></div>
@@ -75,11 +50,8 @@ function renderApprovalDetail({
     showModal(`Chi tiết ${title}`, detailHtml);
 }
 
-// ====== TẠO HTML VẬT TƯ TRONG CHI TIẾT ======
 function buildItemsTable(items) {
-    if (!items || items.length === 0) {
-        return '<p>Không có vật tư</p>';
-    }
+    if (!items || items.length === 0) return '<p>Không có vật tư</p>';
     return `
         <div class="table-responsive">
             <table>
@@ -99,13 +71,10 @@ function buildItemsTable(items) {
     `;
 }
 
-// ====== TẠO HTML DANH SÁCH VẬT TƯ TRONG FORM ======
 function buildItemRowsForForm(itemsData, namePrefix) {
-    const allItems = getItems();
+    const allItems = window._itemsCache || [];
     let html = '';
-    if (!itemsData || itemsData.length === 0) {
-        itemsData = [{ itemId: '', quantity: '' }];
-    }
+    if (!itemsData || itemsData.length === 0) itemsData = [{ itemId: '', quantity: '' }];
     itemsData.forEach((item, index) => {
         const selected = item.itemId || '';
         html += `<div class="item-row" data-index="${index}">
@@ -121,7 +90,6 @@ function buildItemRowsForForm(itemsData, namePrefix) {
     return html;
 }
 
-// ====== THU THẬP VẬT TƯ TỪ FORM ======
 function collectItemsFromForm(container) {
     const rows = container.querySelectorAll('.item-row');
     const items = [];
@@ -130,18 +98,15 @@ function collectItemsFromForm(container) {
         const qty = row.querySelector('.item-qty');
         const itemId = parseInt(sel.value);
         const quantity = parseFloat(qty.value);
-        if (itemId && !isNaN(quantity) && quantity > 0) {
-            items.push({ itemId, quantity });
-        }
+        if (itemId && !isNaN(quantity) && quantity > 0) items.push({ itemId, quantity });
     });
     return items;
 }
 
-// ====== THÊM/XÓA DÒNG VẬT TƯ ======
 function addItemRow(btn) {
     const container = btn.parentElement;
     const index = container.querySelectorAll('.item-row').length;
-    const allItems = getItems();
+    const allItems = window._itemsCache || [];
     let opts = allItems.map(it => `<option value="${it.id}">${it.code} - ${it.name}</option>`).join('');
     const row = document.createElement('div');
     row.className = 'item-row';
@@ -171,4 +136,13 @@ function removeItemRow(btn) {
     });
 }
 
-console.log('✅ Render helpers loaded.');
+// Export ra window
+window.renderApprovalList = renderApprovalList;
+window.renderApprovalDetail = renderApprovalDetail;
+window.buildItemsTable = buildItemsTable;
+window.buildItemRowsForForm = buildItemRowsForForm;
+window.collectItemsFromForm = collectItemsFromForm;
+window.addItemRow = addItemRow;
+window.removeItemRow = removeItemRow;
+
+console.log('✅ Render helpers loaded successfully.');

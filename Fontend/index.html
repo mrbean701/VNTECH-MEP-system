@@ -11,8 +11,6 @@
 </head>
 <body>
 
-    
-
     <!-- Toggle floating -->
     <button id="sidebar-toggle" class="sidebar-toggle" aria-label="Toggle menu">
         <i class="fas fa-bars"></i>
@@ -65,6 +63,9 @@
                 <!-- Dashboard -->
                 <div class="page active" id="page-dashboard">
                     <div id="stats-container"></div>
+                    <!-- Containers cho top warehouses và items (tránh lỗi null) -->
+                    <div id="top-warehouses-list" style="display:none;"></div>
+                    <div id="top-items-list" style="display:none;"></div>
                 </div>
 
                 <!-- Projects -->
@@ -189,7 +190,7 @@
                     <div id="inventory-content"></div>
                 </div>
 
-                <!-- Các trang khác (issue, material-return, min-stock, auto-reorder, admin) sẽ được tạo động -->
+                <!-- Các trang khác sẽ được tạo động -->
             </div>
         </div>
     </div>
@@ -199,233 +200,32 @@
         <div class="modal-content" id="modal-content"></div>
     </div>
 
-    <script>
-    // Tạm thời tạo object api nếu chưa có
-    if (typeof window.api === 'undefined') {
-        window.api = {
-            login: function(email, password) {
-                return fetch('http://localhost:8080/api/auth/login', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ email, password })
-                }).then(res => res.json());
-            }
-        };
-        console.warn('⚠️ API tạm thời được tạo trong index.html');
-    }
-</script>
+    <!-- ====== JAVASCRIPT FILES ====== -->
+    <script src="js/data.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/utils.js"></script>
+    <script src="js/toast.js"></script>
+    <script src="js/loading.js"></script>
+    <script src="js/render-helpers.js"></script>
 
-    <!-- ====== SIDEBAR FIX - ĐỘC LẬP ====== -->
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    const toggleBtn = document.getElementById('sidebar-toggle');
-    const app = document.getElementById('app');
-    const overlay = document.getElementById('sidebar-overlay');
+    <!-- Các module -->
+    <script src="js/projects.js"></script>
+    <script src="js/vendors.js"></script>
+    <script src="js/items.js"></script>
+    <script src="js/mr.js"></script>
+    <script src="js/pr.js"></script>
+    <script src="js/po.js"></script>
+    <script src="js/warehouse.js"></script>
+    <script src="js/issue.js"></script>
+    <script src="js/material-return.js"></script>
+    <script src="js/min-stock.js"></script>
+    <script src="js/auto-reorder.js"></script>
+    <script src="js/admin.js"></script>
+    <script src="js/dashboard.js"></script>
+    <script src="js/export.js"></script>
 
-    if (!toggleBtn || !app) {
-        console.error('Sidebar elements not found!');
-        return;
-    }
-
-    // Loại bỏ sự kiện cũ bằng cách clone và thay thế
-    const newToggle = toggleBtn.cloneNode(true);
-    toggleBtn.parentNode.replaceChild(newToggle, toggleBtn);
-
-    // Hàm đóng sidebar
-    function closeSidebar() {
-        app.classList.add('sidebar-hidden');
-        newToggle.innerHTML = '<i class="fas fa-bars"></i>';
-        newToggle.style.display = 'block'; // ✅ Hiện nút khi đóng
-        if (overlay) overlay.classList.remove('active');
-    }
-
-    // Hàm mở sidebar
-    function openSidebar() {
-        app.classList.remove('sidebar-hidden');
-        newToggle.innerHTML = '<i class="fas fa-times"></i>';
-        newToggle.style.display = 'none'; // ✅ Ẩn nút khi mở
-        if (overlay) overlay.classList.add('active');
-    }
-
-    // Sự kiện click toggle
-    newToggle.addEventListener('click', function(e) {
-        e.stopPropagation();
-        const isHidden = app.classList.contains('sidebar-hidden');
-        if (isHidden) {
-            openSidebar();
-        } else {
-            closeSidebar();
-        }
-    });
-
-    // Click overlay để đóng
-    if (overlay) {
-        overlay.addEventListener('click', function() {
-            closeSidebar();
-        });
-    }
-
-    // Đóng sidebar khi click ra ngoài (mobile)
-    document.addEventListener('click', function(e) {
-        if (window.innerWidth > 992) return;
-        if (newToggle.contains(e.target)) return;
-        if (overlay && overlay.contains(e.target)) return;
-        const sidebar = document.querySelector('.sidebar');
-        if (sidebar && sidebar.contains(e.target)) return;
-        if (!app.classList.contains('sidebar-hidden')) {
-            closeSidebar();
-        }
-    });
-
-    // Khởi tạo trạng thái ban đầu
-    function initSidebar() {
-        const isMobile = window.innerWidth <= 992;
-        if (isMobile) {
-            newToggle.style.display = 'block';
-            app.classList.add('sidebar-hidden');
-            if (overlay) overlay.classList.remove('active');
-            newToggle.innerHTML = '<i class="fas fa-bars"></i>';
-        } else {
-            newToggle.style.display = 'none';
-            app.classList.remove('sidebar-hidden');
-            if (overlay) overlay.classList.remove('active');
-        }
-    }
-
-    initSidebar();
-
-    // Xử lý resize
-    let resizeTimer;
-    window.addEventListener('resize', function() {
-        clearTimeout(resizeTimer);
-        resizeTimer = setTimeout(function() {
-            const isMobile = window.innerWidth <= 992;
-            if (isMobile) {
-                newToggle.style.display = 'block';
-                if (app.classList.contains('sidebar-collapsed')) {
-                    app.classList.remove('sidebar-collapsed');
-                }
-                // Nếu sidebar đang mở mà không có overlay, đóng lại
-                if (!app.classList.contains('sidebar-hidden') && overlay && !overlay.classList.contains('active')) {
-                    closeSidebar();
-                }
-            } else {
-                newToggle.style.display = 'none';
-                app.classList.remove('sidebar-hidden');
-                if (overlay) overlay.classList.remove('active');
-            }
-        }, 200);
-    });
-
-    console.log('✅ Sidebar fix applied (toggle hidden when open).');
-});
-</script>
-<script type="module">
-    import { getProjects, createProject, updateProject, deleteProject } from './js/services/projectService.js';
-
-    // Hàm tải danh sách
-    window.loadProjects = async function() {
-        try {
-            const response = await getProjects();
-            // Giả sử response có dạng { success: true, data: [...] }
-            const projects = response.data || response; // tùy cấu trúc
-            renderTable(projects);
-        } catch (error) {
-            alert('Không thể tải dữ liệu: ' + error.message);
-        }
-    };
-
-    // Hàm render bảng (giữ nguyên logic hiển thị)
-    function renderTable(projects) {
-        const tbody = document.querySelector('#projects-table tbody');
-        if (!tbody) return;
-        tbody.innerHTML = '';
-        projects.forEach(p => {
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td>${p.id}</td>
-                <td>${p.projectCode}</td>
-                <td>${p.projectName}</td>
-                <td>
-                    <button onclick="editProject(${p.id})">Sửa</button>
-                    <button onclick="deleteProjectHandler(${p.id})">Xóa</button>
-                </td>
-            `;
-            tbody.appendChild(row);
-        });
-    }
-
-    // Hàm thêm mới
-    window.addProject = async function() {
-        const name = document.getElementById('projectName').value;
-        const code = document.getElementById('projectCode').value;
-        if (!name || !code) {
-            alert('Vui lòng nhập đầy đủ');
-            return;
-        }
-        try {
-            await createProject({ projectName: name, projectCode: code });
-            alert('Thêm thành công');
-            await window.loadProjects();
-        } catch (error) {
-            alert('Lỗi: ' + error.message);
-        }
-    };
-
-    // Hàm sửa (tương tự)
-    window.editProject = async function(id) {
-        const newName = prompt('Nhập tên mới:');
-        if (newName) {
-            try {
-                await updateProject(id, { projectName: newName });
-                alert('Cập nhật thành công');
-                await window.loadProjects();
-            } catch (error) {
-                alert('Lỗi: ' + error.message);
-            }
-        }
-    };
-
-    // Hàm xóa
-    window.deleteProjectHandler = async function(id) {
-        if (!confirm('Bạn có chắc muốn xóa?')) return;
-        try {
-            await deleteProject(id);
-            alert('Xóa thành công');
-            await window.loadProjects();
-        } catch (error) {
-            alert('Lỗi: ' + error.message);
-        }
-    };
-
-    // Tải dữ liệu khi trang load
-    document.addEventListener('DOMContentLoaded', window.loadProjects);
-</script>
-<!-- ====== JAVASCRIPT FILES ====== -->
-<script src="js/api.js"></script>
-<script src="js/utils.js"></script>
-<script src="js/toast.js"></script>
-<script src="js/loading.js"></script>
-<script src="js/render-helpers.js"></script>
-
-<!-- Các module -->
-<script src="js/projects.js"></script>
-<script src="js/vendors.js"></script>
-<script src="js/items.js"></script>
-<script src="js/mr.js"></script>
-<script src="js/pr.js"></script>
-<script src="js/po.js"></script>
-<script src="js/warehouse.js"></script>
-<script src="js/issue.js"></script>
-<script src="js/material-return.js"></script>
-<script src="js/min-stock.js"></script>
-<script src="js/auto-reorder.js"></script>
-<script src="js/admin.js"></script>
-<script src="js/dashboard.js"></script>
-<script src="js/export.js"></script>
-
-<!-- app và auth load sau cùng -->
-<script src="js/app.js"></script>
-<script src="js/auth.js"></script>
+    <!-- app và auth load sau cùng -->
+    <script src="js/app.js"></script>
+    <script src="js/auth.js"></script>
 </body>
 </html>

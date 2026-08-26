@@ -3,8 +3,12 @@
 // ================================================================
 
 // ====== HÀM RENDER PAGE ======
-function renderAutoReorderPage() {
+async function renderAutoReorderPage() {
     console.log('🔄 renderAutoReorderPage được gọi');
+
+    // Đảm bảo dữ liệu mẫu luôn có nếu localStorage trống
+    if (typeof initData === 'function') initData();
+
     let page = document.getElementById('page-auto-reorder');
     if (!page) {
         const content = document.querySelector('.content');
@@ -25,6 +29,12 @@ function renderAutoReorderPage() {
     }
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     page.classList.add('active');
+
+    // Nạp dữ liệu từ API (nếu backend chạy) hoặc localStorage (fallback)
+    try { await api.getVendors(); } catch(e) {}
+    try { await api.getPRs(); } catch(e) {}
+    try { await api.getItems(); } catch(e) {}
+
     renderAutoReorderConfig();
 }
 
@@ -32,8 +42,8 @@ function renderAutoReorderPage() {
 function renderAutoReorderConfig() {
     const container = document.getElementById('auto-reorder-container');
     if (!container) return;
-    const config = getAutoReorderConfig();
-    const vendors = getVendors();
+    const config = getAutoReorderConfig(); // Đồng bộ từ data.js
+    const vendors = getVendors(); // Đồng bộ từ data.js
     const vendorOpts = vendors.map(v =>
         `<option value="${v.code}" ${v.code === config.defaultVendor ? 'selected' : ''}>${v.code} - ${v.name}</option>`
     ).join('');
@@ -48,8 +58,8 @@ function renderAutoReorderConfig() {
                 <tr>
                     <td style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="viewPR(${pr.id})">${pr.code}</td>
                     <td>${pr.projectName || ''}</td>
-                    <td>${pr.items.map(it => getItemName(it.itemId)).join(', ')}</td>
-                    <td>${pr.items.reduce((sum, it) => sum + it.quantity, 0)}</td>
+                    <td>${pr.items ? JSON.parse(pr.items).map(it => getItemName(it.itemId)).join(', ') : ''}</td>
+                    <td>${pr.items ? JSON.parse(pr.items).reduce((sum, it) => sum + it.quantity, 0) : 0}</td>
                     <td>${getStatusBadge(pr.status)}</td>
                     <td>${pr.createdAt || ''}</td>
                 </tr>
@@ -97,7 +107,6 @@ function renderAutoReorderConfig() {
     `;
     container.innerHTML = html;
 
-    // Gắn sự kiện cho checkbox
     document.getElementById('f-auto-reorder-enabled')?.addEventListener('change', function() {
         const label = this.parentElement;
         label.innerHTML = this.checked ? '🟢 Đã bật' : '🔴 Đã tắt';
@@ -110,15 +119,15 @@ function saveAutoReorderConfig() {
     const multiplier = parseFloat(document.getElementById('f-auto-reorder-multiplier').value) || 2;
     const defaultVendor = document.getElementById('f-auto-reorder-vendor').value;
     if (multiplier < 1) { showError('Hệ số nhân phải >= 1'); return; }
-    saveAutoReorderConfig({ enabled, multiplier, defaultVendor });
+    saveData('auto_reorder_config', { enabled, multiplier, defaultVendor });
     showSuccess('Đã lưu cấu hình!');
     renderAutoReorderConfig();
 }
 
 // ====== CHẠY KIỂM TRA VÀ TẠO ĐƠN ======
-function runAutoReorder() {
+async function runAutoReorder() {
     withLoading(async () => {
-        const created = checkAndCreateAutoOrders();
+        const created = await checkAndCreateAutoOrders();
         if (created.length === 0) {
             showInfo('Không có vật tư nào cần đặt hàng.');
         } else {
@@ -165,11 +174,11 @@ function showAutoReorderRules() {
 
 // ====== LẤY QUY TẮC ======
 function getAutoReorderRules() {
-    return getData('auto-reorder-rules') || [];
+    return Array.isArray(getData('auto_reorder_rules')) ? getData('auto_reorder_rules') : [];
 }
 
 function saveAutoReorderRules(data) {
-    saveData('auto-reorder-rules', data);
+    saveData('auto_reorder_rules', data);
 }
 
 // ====== THÊM QUY TẮC ======
@@ -259,7 +268,7 @@ function deleteAutoReorderRule(id) {
     showSuccess('Đã xóa quy tắc.');
 }
 
-// ====== THÊM MENU (đã có trong DOM) ======
+// ====== THÊM MENU ======
 function addAutoReorderMenu() {
     const menu = document.getElementById('menu');
     if (!menu) return;
@@ -285,6 +294,17 @@ document.addEventListener('DOMContentLoaded', function() {
     setTimeout(addAutoReorderMenu, 300);
 });
 
+// Hàm kiểm tra và tạo đơn (gọi API backend nếu có)
+async function checkAndCreateAutoOrders() {
+    try {
+        const result = await api.checkAutoReorder();
+        return result || [];
+    } catch (e) {
+        console.warn('Không thể gọi API checkAutoReorder, fallback về []');
+        return [];
+    }
+}
+
 // ====== EXPORT GLOBAL ======
 window.renderAutoReorderPage = renderAutoReorderPage;
 window.renderAutoReorderConfig = renderAutoReorderConfig;
@@ -295,5 +315,6 @@ window.showAddAutoReorderRule = showAddAutoReorderRule;
 window.saveAutoReorderRule = saveAutoReorderRule;
 window.deleteAutoReorderRule = deleteAutoReorderRule;
 window.getAutoReorderRules = getAutoReorderRules;
+window.checkAndCreateAutoOrders = checkAndCreateAutoOrders;
 
 console.log('✅ Auto Reorder module loaded successfully.');

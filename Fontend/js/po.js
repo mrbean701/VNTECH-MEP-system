@@ -1,5 +1,5 @@
 // ================================================================
-// PO (Purchase Order) - SỬ DỤNG API
+// PO (Purchase Order) - SỬ DỤNG API - ĐÃ SỬA LỖI NULL
 // ================================================================
 
 // ====== HÀM LẤY ACTION ======
@@ -40,9 +40,10 @@ async function renderPO() {
         const statusFilter = document.getElementById('po-status-filter')?.value || '';
         
         const filtered = pos.filter(p => {
-            const matchCode = p.code.toLowerCase().includes(filter) || (p.projectName || '').toLowerCase().includes(filter);
+            const matchCode = (p.code || '').toLowerCase().includes(filter);
+            const matchProject = (p.projectName || p.projectCode || '').toLowerCase().includes(filter);
             const matchStatus = statusFilter ? p.status === statusFilter : true;
-            return matchCode && matchStatus;
+            return (matchCode || matchProject) && matchStatus;
         });
         
         let html = `
@@ -62,15 +63,21 @@ async function renderPO() {
         if (!filtered.length) html += `<tr><td colspan="6" style="text-align:center; color:#999;">Không có dữ liệu</td></tr>`;
         
         for (const p of filtered) {
-            const items = p.items ? JSON.parse(p.items) : [];
-            const itemsStr = items.map(it => `${getItemCode(it.itemId)} (${it.quantity})`).join(', ');
+            let itemsStr = '';
+            try {
+                if (p.items) {
+                    const items = typeof p.items === 'string' ? JSON.parse(p.items) : p.items;
+                    itemsStr = items.map(it => `${getItemCode(it.itemId)} (${it.quantity})`).join(', ');
+                }
+            } catch (e) { itemsStr = 'Lỗi parse'; }
+            
             const statusBadge = getStatusBadge(p.status);
             const actions = getPOActions(p);
             const projectId = getProjectIdByCode(p.projectCode);
             html += `<tr>
-                <td style="cursor:pointer; color:#1a3c6e; font-weight:500;" onclick="viewPO(${p.id})">${p.code}</td>
-                <td style="cursor:pointer; color:#1a3c6e;" onclick="${projectId ? `viewProject(${projectId})` : 'alert("Không tìm thấy dự án")'}">${p.projectName || p.projectCode || ''}</td>
-                <td>${p.vendorName || p.vendorCode || ''}</td>
+                <td style="cursor:pointer; color:#1a3c6e; font-weight:500;" onclick="viewPO(${p.id})">${p.code || '--'}</td>
+                <td style="cursor:pointer; color:#1a3c6e;" onclick="${projectId ? `viewProject(${projectId})` : 'alert("Không tìm thấy dự án")'}">${p.projectName || p.projectCode || '--'}</td>
+                <td>${p.vendorName || p.vendorCode || '--'}</td>
                 <td>${itemsStr}</td>
                 <td>${statusBadge}</td>
                 <td>${actions}</td>
@@ -95,22 +102,28 @@ async function viewPO(id) {
             return;
         }
         
-        const items = po.items ? JSON.parse(po.items) : [];
+        let items = [];
+        try {
+            if (po.items) {
+                items = typeof po.items === 'string' ? JSON.parse(po.items) : po.items;
+            }
+        } catch (e) { items = []; }
+        
         const itemsHtml = buildItemsTable(items);
         const approvalHtml = renderApprovalProgress(po.status, po.approvalStep);
         const projectId = getProjectIdByCode(po.projectCode);
         const projectLink = projectId ? 
-            `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="closeModal(); viewProject(${projectId});">${po.projectName || po.projectCode}</span>` :
-            (po.projectName || po.projectCode || '');
-        const totalAmount = items.reduce((sum, it) => sum + (it.price || 0) * it.quantity, 0);
+            `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="closeModal(); viewProject(${projectId});">${po.projectName || po.projectCode || '--'}</span>` :
+            (po.projectName || po.projectCode || '--');
+        const totalAmount = items.reduce((sum, it) => sum + ((it.price || 0) * (it.quantity || 0)), 0);
         
         showModal('Chi tiết PO', `
             <div class="detail-grid">
-                <div><span class="label">Mã PO:</span> <span class="value">${po.code}</span></div>
+                <div><span class="label">Mã PO:</span> <span class="value">${po.code || '--'}</span></div>
                 <div><span class="label">Ngày tạo:</span> <span class="value">${po.createdAt || ''}</span></div>
                 <div><span class="label">PR liên quan:</span> <span class="value">${po.prId ? 'PR-'+String(po.prId).padStart(3,'0') : ''}</span></div>
                 <div><span class="label">Dự án:</span> <span class="value">${projectLink}</span></div>
-                <div><span class="label">Nhà cung cấp:</span> <span class="value">${po.vendorName || po.vendorCode || ''}</span></div>
+                <div><span class="label">Nhà cung cấp:</span> <span class="value">${po.vendorName || po.vendorCode || '--'}</span></div>
                 <div><span class="label">Trạng thái:</span> <span class="value">${getStatusBadge(po.status)}</span></div>
                 ${totalAmount > 0 ? `<div><span class="label">Tổng tiền:</span> <span class="value">${totalAmount.toLocaleString()} VND</span></div>` : ''}
                 <div style="grid-column:1/-1;"><span class="label">Tiến độ duyệt:</span><br>${approvalHtml}</div>
@@ -138,7 +151,15 @@ async function showCreatePOModal(pr = null) {
         const projectOpts = projects.map(p => `<option value="${p.code}" ${pr && p.code === pr.projectCode ? 'selected' : ''}>${p.code} - ${p.name}</option>`).join('');
         const vendors = await api.getVendors();
         const vendorOpts = vendors.map(v => `<option value="${v.code}" ${pr && v.code === pr.vendorCode ? 'selected' : ''}>${v.code} - ${v.name}</option>`).join('');
-        const itemsData = pr ? (pr.items ? JSON.parse(pr.items) : [{ itemId: '', quantity: '' }]) : [{ itemId: '', quantity: '' }];
+        let itemsData = [{ itemId: '', quantity: '' }];
+        if (pr) {
+            try {
+                if (pr.items) {
+                    itemsData = typeof pr.items === 'string' ? JSON.parse(pr.items) : pr.items;
+                    if (!itemsData.length) itemsData = [{ itemId: '', quantity: '' }];
+                }
+            } catch (e) { itemsData = [{ itemId: '', quantity: '' }]; }
+        }
         
         showModal('Tạo Purchase Order (PO)', `
             <div class="form-group"><label>Dự án</label>
@@ -221,7 +242,14 @@ async function editPO(id) {
         const vendors = await api.getVendors();
         const vendorOpts = vendors.map(v =>
             `<option value="${v.code}" ${v.code === po.vendorCode ? 'selected' : ''}>${v.code} - ${v.name}</option>`).join('');
-        const itemsData = po.items ? JSON.parse(po.items) : [{ itemId: '', quantity: '' }];
+        
+        let itemsData = [{ itemId: '', quantity: '' }];
+        try {
+            if (po.items) {
+                itemsData = typeof po.items === 'string' ? JSON.parse(po.items) : po.items;
+                if (!itemsData.length) itemsData = [{ itemId: '', quantity: '' }];
+            }
+        } catch (e) { itemsData = [{ itemId: '', quantity: '' }]; }
         
         showModal('Sửa Purchase Order', `
             <div class="form-group"><label>Dự án</label><select id="f-po-project">${projectOpts}</select></div>
@@ -240,6 +268,7 @@ async function editPO(id) {
     }
 }
 
+// ====== CẬP NHẬT PO ======
 async function updatePO(id) {
     const projectCode = document.getElementById('f-po-project').value;
     const vendorCode = document.getElementById('f-po-vendor').value;
@@ -289,6 +318,7 @@ async function submitPO(id) {
     }
 }
 
+// ====== DUYỆT PO ======
 async function approvePO(id) {
     try {
         await api.approvePO(id);
@@ -299,6 +329,7 @@ async function approvePO(id) {
     }
 }
 
+// ====== TỪ CHỐI PO ======
 async function rejectPO(id) {
     try {
         await api.rejectPO(id);
@@ -309,6 +340,7 @@ async function rejectPO(id) {
     }
 }
 
+// ====== XÓA PO ======
 async function deletePO(id) {
     if (!confirm('Xóa PO này?')) return;
     try {
@@ -321,7 +353,6 @@ async function deletePO(id) {
 }
 
 function showCreatePOFromPRModal(prId) {
-    // Gọi từ PR, lấy PR và hiển thị modal tạo PO với dữ liệu từ PR
     api.getPRs().then(prs => {
         const pr = prs.find(p => p.id === prId);
         if (pr) {
@@ -352,4 +383,4 @@ window.getPOActions = getPOActions;
 window.savePOManual = savePOManual;
 window.showCreatePOFromPRModal = showCreatePOFromPRModal;
 
-console.log('✅ PO module updated to use API.');
+console.log('✅ PO module updated to use API (fixed null display).');

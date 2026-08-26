@@ -1,5 +1,5 @@
 // ================================================================
-// DASHBOARD - SỬ DỤNG API
+// DASHBOARD - SỬ DỤNG API (FIX LỖI NULL & THIẾU CONTAINER)
 // ================================================================
 
 let orderStatusChartInstance = null;
@@ -24,51 +24,57 @@ async function renderDashboard() {
         ]);
 
         const user = getUser();
-        const totalQty = inventory.reduce((sum, i) => sum + (i.quantity || 0), 0);
+        const totalQty = Array.isArray(inventory) ? inventory.reduce((sum, i) => sum + (i.quantity || 0), 0) : 0;
 
         // Thống kê chờ duyệt
-        const mrPending = mr.filter(m => m.status === 'PENDING').length;
-        const prPending = pr.filter(p => p.status === 'PENDING').length;
-        const poPending = po.filter(p => p.status === 'PENDING').length;
+        const mrPending = Array.isArray(mr) ? mr.filter(m => m.status === 'PENDING').length : 0;
+        const prPending = Array.isArray(pr) ? pr.filter(p => p.status === 'PENDING').length : 0;
+        const poPending = Array.isArray(po) ? po.filter(p => p.status === 'PENDING').length : 0;
 
         // GRN/STO chờ xử lý
-        const grnPending = grn.filter(g => g.status === 'DRAFT').length;
-        const stoPending = sto.filter(s => s.status === 'PENDING' || s.status === 'DRAFT').length;
+        const grnPending = Array.isArray(grn) ? grn.filter(g => g.status === 'DRAFT').length : 0;
+        const stoPending = Array.isArray(sto) ? sto.filter(s => s.status === 'PENDING' || s.status === 'DRAFT').length : 0;
 
         // Thống kê theo trạng thái
-        const mrApproved = mr.filter(m => m.status === 'APPROVED').length;
-        const prApproved = pr.filter(p => p.status === 'APPROVED').length;
-        const poApproved = po.filter(p => p.status === 'APPROVED').length;
-        const mrRejected = mr.filter(m => m.status === 'REJECTED').length;
-        const prRejected = pr.filter(p => p.status === 'REJECTED').length;
-        const poRejected = po.filter(p => p.status === 'REJECTED').length;
+        const mrApproved = Array.isArray(mr) ? mr.filter(m => m.status === 'APPROVED').length : 0;
+        const prApproved = Array.isArray(pr) ? pr.filter(p => p.status === 'APPROVED').length : 0;
+        const poApproved = Array.isArray(po) ? po.filter(p => p.status === 'APPROVED').length : 0;
+        const mrRejected = Array.isArray(mr) ? mr.filter(m => m.status === 'REJECTED').length : 0;
+        const prRejected = Array.isArray(pr) ? pr.filter(p => p.status === 'REJECTED').length : 0;
+        const poRejected = Array.isArray(po) ? po.filter(p => p.status === 'REJECTED').length : 0;
 
         // Issue
-        const issueDraft = issues.filter(i => i.status === 'DRAFT').length;
-        const issuePending = issues.filter(i => i.status === 'PENDING').length;
-        const issueApproved = issues.filter(i => i.status === 'APPROVED').length;
-        const issueCompleted = issues.filter(i => i.status === 'COMPLETED').length;
-        const issueConfirmed = issues.filter(i => i.status === 'CONFIRMED').length;
-        const issueRejected = issues.filter(i => i.status === 'REJECTED').length;
+        const issueDraft = Array.isArray(issues) ? issues.filter(i => i.status === 'DRAFT').length : 0;
+        const issuePending = Array.isArray(issues) ? issues.filter(i => i.status === 'PENDING').length : 0;
+        const issueApproved = Array.isArray(issues) ? issues.filter(i => i.status === 'APPROVED').length : 0;
+        const issueCompleted = Array.isArray(issues) ? issues.filter(i => i.status === 'COMPLETED').length : 0;
+        const issueConfirmed = Array.isArray(issues) ? issues.filter(i => i.status === 'CONFIRMED').length : 0;
+        const issueRejected = Array.isArray(issues) ? issues.filter(i => i.status === 'REJECTED').length : 0;
 
         // Material Return
-        const returnDraft = materialReturns.filter(r => r.status === 'DRAFT').length;
-        const returnPending = materialReturns.filter(r => r.status === 'PENDING').length;
-        const returnApproved = materialReturns.filter(r => r.status === 'APPROVED').length;
-        const returnConfirmed = materialReturns.filter(r => r.status === 'CONFIRMED').length;
-        const returnRejected = materialReturns.filter(r => r.status === 'REJECTED').length;
+        const returnDraft = Array.isArray(materialReturns) ? materialReturns.filter(r => r.status === 'DRAFT').length : 0;
+        const returnPending = Array.isArray(materialReturns) ? materialReturns.filter(r => r.status === 'PENDING').length : 0;
+        const returnApproved = Array.isArray(materialReturns) ? materialReturns.filter(r => r.status === 'APPROVED').length : 0;
+        const returnConfirmed = Array.isArray(materialReturns) ? materialReturns.filter(r => r.status === 'CONFIRMED').length : 0;
+        const returnRejected = Array.isArray(materialReturns) ? materialReturns.filter(r => r.status === 'REJECTED').length : 0;
 
         // Hoạt động gần đây
         const recentActivities = [];
-        mr.forEach(m => {
-            recentActivities.push({ type: 'MR', code: m.code, project: m.projectName || m.projectCode || '', date: m.createdAt || '', status: m.status, id: m.id });
-        });
-        pr.forEach(p => {
-            recentActivities.push({ type: 'PR', code: p.code, project: p.projectName || p.projectCode || '', date: p.createdAt || '', status: p.status, id: p.id });
-        });
-        po.forEach(p => {
-            recentActivities.push({ type: 'PO', code: p.code, project: p.projectName || p.projectCode || '', date: p.createdAt || '', status: p.status, id: p.id });
-        });
+        if (Array.isArray(mr)) {
+            mr.forEach(m => {
+                recentActivities.push({ type: 'MR', code: m.code, project: m.projectName || m.projectCode || '', date: m.createdAt || '', status: m.status, id: m.id });
+            });
+        }
+        if (Array.isArray(pr)) {
+            pr.forEach(p => {
+                recentActivities.push({ type: 'PR', code: p.code, project: p.projectName || p.projectCode || '', date: p.createdAt || '', status: p.status, id: p.id });
+            });
+        }
+        if (Array.isArray(po)) {
+            po.forEach(p => {
+                recentActivities.push({ type: 'PO', code: p.code, project: p.projectName || p.projectCode || '', date: p.createdAt || '', status: p.status, id: p.id });
+            });
+        }
         recentActivities.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
         const latestActivities = recentActivities.slice(0, 5);
 
@@ -76,20 +82,36 @@ async function renderDashboard() {
         const dateStr = new Date().toLocaleDateString('vi-VN', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' });
 
         // Min stock
-        const minStats = await api.getMinStock ? { under: 0, warning: 0, safe: 0 } : { under: 0, warning: 0, safe: 0 };
+        let minStats = { under: 0, warning: 0, safe: 0 };
+        try {
+            if (typeof api.getMinStock === 'function') {
+                const minData = await api.getMinStock();
+                if (minData && typeof minData === 'object') {
+                    minStats = minData;
+                }
+            }
+        } catch (e) {
+            console.warn('Không thể lấy min stock:', e);
+        }
         const totalUnder = minStats.under || 0;
         const totalWarning = minStats.warning || 0;
         const totalSafe = minStats.safe || 0;
 
         // Auto Reorder
-        const autoConfig = await api.getAutoReorderConfig ? await api.getAutoReorderConfig() : { enabled: false };
+        let autoConfig = { enabled: false };
+        try {
+            if (typeof api.getAutoReorderConfig === 'function') {
+                autoConfig = await api.getAutoReorderConfig() || { enabled: false };
+            }
+        } catch (e) {
+            console.warn('Không thể lấy auto reorder config:', e);
+        }
         const isAutoEnabled = autoConfig.enabled || false;
         const autoStatusIcon = isAutoEnabled ? '🟢' : '🔴';
         const autoStatusText = isAutoEnabled ? 'Đang bật' : 'Đã tắt';
         const autoStatusColor = isAutoEnabled ? '#15803d' : '#dc3545';
-        const autoNoti = { draft: pr.filter(p => p.status === 'DRAFT' && p.note && p.note.includes('Auto Reorder')).length, pending: pr.filter(p => p.status === 'PENDING' && p.note && p.note.includes('Auto Reorder')).length };
-        const autoDraft = autoNoti.draft || 0;
-        const autoPending = autoNoti.pending || 0;
+        const autoDraft = Array.isArray(pr) ? pr.filter(p => p.status === 'DRAFT' && p.note && p.note.includes('Auto Reorder')).length : 0;
+        const autoPending = Array.isArray(pr) ? pr.filter(p => p.status === 'PENDING' && p.note && p.note.includes('Auto Reorder')).length : 0;
         const hasAutoOrder = (autoDraft + autoPending) > 0;
 
         // Widget min stock
@@ -148,8 +170,8 @@ async function renderDashboard() {
                 </div>
             </div>
             <div style="display:flex; justify-content:space-between; margin-top:8px; font-size:12px; color:#888;">
-                <span>📤 Cấp phát: ${issues.length} phiếu</span>
-                <span>🔄 Hoàn trả: ${materialReturns.length} phiếu</span>
+                <span>📤 Cấp phát: ${Array.isArray(issues) ? issues.length : 0} phiếu</span>
+                <span>🔄 Hoàn trả: ${Array.isArray(materialReturns) ? materialReturns.length : 0} phiếu</span>
             </div>
         `;
 
@@ -162,7 +184,7 @@ async function renderDashboard() {
                 <div class="dashboard-header">
                     <div>
                         <h2><i class="fas fa-chart-line"></i> Dashboard</h2>
-                        ${user ? `<span style="font-size:14px; color:#888; margin-left:8px;">👋 Chào, ${user.name} (${user.role})</span>` : ''}
+                        ${user ? `<span style="font-size:14px; color:#888; margin-left:8px;">👋 Chào, ${user.name || 'Người dùng'} (${user.role || 'Không xác định'})</span>` : ''}
                         ${user && user.department ? `<span style="font-size:13px; color:#888; margin-left:8px;">🏢 ${user.department}</span>` : ''}
                     </div>
                     <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
@@ -178,19 +200,19 @@ async function renderDashboard() {
                             <div class="stats-grid">
                                 <div class="stat-card-main" onclick="window.navigateTo('projects')" style="cursor:pointer;">
                                     <div class="stat-icon-wrapper" style="background: #ebf5fb; color: #3498db;"><i class="fas fa-project-diagram"></i></div>
-                                    <div class="stat-content"><div class="stat-number">${projects.length}</div><div class="stat-label">Dự án</div></div>
+                                    <div class="stat-content"><div class="stat-number">${Array.isArray(projects) ? projects.length : 0}</div><div class="stat-label">Dự án</div></div>
                                 </div>
                                 <div class="stat-card-main" onclick="window.navigateTo('vendors')" style="cursor:pointer;">
                                     <div class="stat-icon-wrapper" style="background: #f4ecf7; color: #9b59b6;"><i class="fas fa-truck"></i></div>
-                                    <div class="stat-content"><div class="stat-number">${vendors.length}</div><div class="stat-label">Nhà cung cấp</div></div>
+                                    <div class="stat-content"><div class="stat-number">${Array.isArray(vendors) ? vendors.length : 0}</div><div class="stat-label">Nhà cung cấp</div></div>
                                 </div>
                                 <div class="stat-card-main" onclick="window.navigateTo('items')" style="cursor:pointer;">
                                     <div class="stat-icon-wrapper" style="background: #e8f8f5; color: #1abc9c;"><i class="fas fa-cubes"></i></div>
-                                    <div class="stat-content"><div class="stat-number">${items.length}</div><div class="stat-label">Vật tư</div></div>
+                                    <div class="stat-content"><div class="stat-number">${Array.isArray(items) ? items.length : 0}</div><div class="stat-label">Vật tư</div></div>
                                 </div>
                                 <div class="stat-card-main" onclick="window.navigateTo('warehouse')" style="cursor:pointer;">
                                     <div class="stat-icon-wrapper" style="background: #fef5e7; color: #e67e22;"><i class="fas fa-warehouse"></i></div>
-                                    <div class="stat-content"><div class="stat-number">${warehouses.length}</div><div class="stat-label">Kho</div></div>
+                                    <div class="stat-content"><div class="stat-number">${Array.isArray(warehouses) ? warehouses.length : 0}</div><div class="stat-label">Kho</div></div>
                                 </div>
                                 <div class="stat-card-main" onclick="window.navigateTo('warehouse')" style="cursor:pointer;">
                                     <div class="stat-icon-wrapper" style="background: #eafaf1; color: #27ae60;"><i class="fas fa-weight-hanging"></i></div>
@@ -204,15 +226,15 @@ async function renderDashboard() {
                             <div class="order-grid">
                                 <div class="stat-card-main stat-card-order" onclick="window.navigateTo('mr')" style="cursor:pointer;">
                                     <div class="stat-icon-wrapper" style="background: #fef9e7; color: #f39c12;"><i class="fas fa-clipboard-list"></i></div>
-                                    <div class="stat-content"><div class="stat-number">${mr.length}</div><div class="stat-label">MR</div></div>
+                                    <div class="stat-content"><div class="stat-number">${Array.isArray(mr) ? mr.length : 0}</div><div class="stat-label">MR</div></div>
                                 </div>
                                 <div class="stat-card-main stat-card-order" onclick="window.navigateTo('pr')" style="cursor:pointer;">
                                     <div class="stat-icon-wrapper" style="background: #fef5e7; color: #e67e22;"><i class="fas fa-file-invoice"></i></div>
-                                    <div class="stat-content"><div class="stat-number">${pr.length}</div><div class="stat-label">PR</div></div>
+                                    <div class="stat-content"><div class="stat-number">${Array.isArray(pr) ? pr.length : 0}</div><div class="stat-label">PR</div></div>
                                 </div>
                                 <div class="stat-card-main stat-card-order" onclick="window.navigateTo('po')" style="cursor:pointer;">
                                     <div class="stat-icon-wrapper" style="background: #eafaf1; color: #2ecc71;"><i class="fas fa-shopping-cart"></i></div>
-                                    <div class="stat-content"><div class="stat-number">${po.length}</div><div class="stat-label">PO</div></div>
+                                    <div class="stat-content"><div class="stat-number">${Array.isArray(po) ? po.length : 0}</div><div class="stat-label">PO</div></div>
                                 </div>
                             </div>
                         </div>
@@ -222,11 +244,11 @@ async function renderDashboard() {
                             <div class="order-grid">
                                 <div class="stat-card-main stat-card-order" onclick="window.navigateTo('grn')" style="cursor:pointer;">
                                     <div class="stat-icon-wrapper" style="background: #ebf5fb; color: #3498db;"><i class="fas fa-arrow-left"></i></div>
-                                    <div class="stat-content"><div class="stat-number">${grn.length}</div><div class="stat-label">GRN</div></div>
+                                    <div class="stat-content"><div class="stat-number">${Array.isArray(grn) ? grn.length : 0}</div><div class="stat-label">GRN</div></div>
                                 </div>
                                 <div class="stat-card-main stat-card-order" onclick="window.navigateTo('sto')" style="cursor:pointer;">
                                     <div class="stat-icon-wrapper" style="background: #f4ecf7; color: #9b59b6;"><i class="fas fa-arrow-right"></i></div>
-                                    <div class="stat-content"><div class="stat-number">${sto.length}</div><div class="stat-label">STO</div></div>
+                                    <div class="stat-content"><div class="stat-number">${Array.isArray(sto) ? sto.length : 0}</div><div class="stat-label">STO</div></div>
                                 </div>
                             </div>
                         </div>
@@ -264,7 +286,7 @@ async function renderDashboard() {
                                 ${latestActivities.length === 0 ? `<div class="widget-empty">Chưa có hoạt động nào</div>` : latestActivities.map(item => `
                                     <div class="widget-item" onclick="view${item.type}(${item.id})">
                                         <span class="widget-badge" style="background: #fef9e7; color: #f39c12;">${item.type}</span>
-                                        <span class="widget-text">${item.code} - ${item.project}</span>
+                                        <span class="widget-text">${item.code} - ${item.project || 'N/A'}</span>
                                         <span class="widget-time">${item.date || ''}</span>
                                         <span class="widget-status">${getStatusBadge(item.status)}</span>
                                     </div>
@@ -395,9 +417,9 @@ function drawOrderStatusChart(mr, pr, po) {
 
     const ctx = canvas.getContext('2d');
     const statuses = ['DRAFT', 'PENDING', 'APPROVED', 'REJECTED'];
-    const mrCounts = statuses.map(s => mr.filter(m => m.status === s).length);
-    const prCounts = statuses.map(s => pr.filter(p => p.status === s).length);
-    const poCounts = statuses.map(s => po.filter(p => p.status === s).length);
+    const mrCounts = statuses.map(s => Array.isArray(mr) ? mr.filter(m => m.status === s).length : 0);
+    const prCounts = statuses.map(s => Array.isArray(pr) ? pr.filter(p => p.status === s).length : 0);
+    const poCounts = statuses.map(s => Array.isArray(po) ? po.filter(p => p.status === s).length : 0);
 
     orderStatusChartInstance = new Chart(ctx, {
         type: 'bar',
@@ -420,7 +442,9 @@ function drawItemGroupChart(items) {
 
     const ctx = canvas.getContext('2d');
     const groups = {};
-    items.forEach(item => { const g = item.itemGroup || 'Chưa phân nhóm'; groups[g] = (groups[g] || 0) + 1; });
+    if (Array.isArray(items)) {
+        items.forEach(item => { const g = item.itemGroup || 'Chưa phân nhóm'; groups[g] = (groups[g] || 0) + 1; });
+    }
     const labels = Object.keys(groups);
     const data = Object.values(groups);
     const colors = ['#3498db', '#e74c3c', '#2ecc71', '#f1c40f', '#9b59b6', '#e67e22', '#1abc9c', '#e84393', '#00b894', '#6c5ce7'];
@@ -440,7 +464,20 @@ function drawItemGroupChart(items) {
 // ====== TOP TỒN KHO ======
 function renderTopWarehouses(warehouses, inventory) {
     const container = document.getElementById('top-warehouses-list');
-    if (!container) return;
+    if (!container) {
+        // Tạo container nếu chưa có
+        const statsContainer = document.getElementById('stats-container');
+        if (statsContainer) {
+            const newContainer = document.createElement('div');
+            newContainer.id = 'top-warehouses-list';
+            statsContainer.appendChild(newContainer);
+        }
+        return;
+    }
+    if (!Array.isArray(warehouses) || !Array.isArray(inventory)) {
+        container.innerHTML = '<div style="color:#999; font-size:13px;">Chưa có dữ liệu tồn kho</div>';
+        return;
+    }
     const totals = warehouses.map(w => ({ ...w, total: inventory.filter(i => i.warehouseId === w.id).reduce((s, i) => s + (i.quantity || 0), 0) }));
     const top = totals.sort((a, b) => b.total - a.total).slice(0, 3);
     if (top.length === 0 || top.every(t => t.total === 0)) { container.innerHTML = '<div style="color:#999; font-size:13px;">Chưa có dữ liệu tồn kho</div>'; return; }
@@ -461,7 +498,20 @@ function renderTopWarehouses(warehouses, inventory) {
 
 function renderTopItems(items, inventory) {
     const container = document.getElementById('top-items-list');
-    if (!container) return;
+    if (!container) {
+        // Tạo container nếu chưa có
+        const statsContainer = document.getElementById('stats-container');
+        if (statsContainer) {
+            const newContainer = document.createElement('div');
+            newContainer.id = 'top-items-list';
+            statsContainer.appendChild(newContainer);
+        }
+        return;
+    }
+    if (!Array.isArray(items) || !Array.isArray(inventory)) {
+        container.innerHTML = '<div style="color:#999; font-size:13px;">Chưa có dữ liệu tồn kho</div>';
+        return;
+    }
     const totals = items.map(item => ({ ...item, total: inventory.filter(i => i.itemId === item.id).reduce((s, i) => s + (i.quantity || 0), 0) }));
     const top = totals.sort((a, b) => b.total - a.total).slice(0, 3);
     if (top.length === 0 || top.every(t => t.total === 0)) { container.innerHTML = '<div style="color:#999; font-size:13px;">Chưa có dữ liệu tồn kho</div>'; return; }
@@ -486,9 +536,9 @@ async function showPendingModal() {
         const mr = await api.getMRs();
         const pr = await api.getPRs();
         const po = await api.getPOs();
-        const mrPending = mr.filter(m => m.status === 'PENDING');
-        const prPending = pr.filter(p => p.status === 'PENDING');
-        const poPending = po.filter(p => p.status === 'PENDING');
+        const mrPending = Array.isArray(mr) ? mr.filter(m => m.status === 'PENDING') : [];
+        const prPending = Array.isArray(pr) ? pr.filter(p => p.status === 'PENDING') : [];
+        const poPending = Array.isArray(po) ? po.filter(p => p.status === 'PENDING') : [];
 
         if (mrPending.length === 0 && prPending.length === 0 && poPending.length === 0) {
             showInfo('Không có đơn hàng nào đang chờ duyệt.');
@@ -531,8 +581,8 @@ async function showPendingWarehouseModal() {
     try {
         const grn = await api.getGRNs();
         const sto = await api.getSTOs();
-        const grnPending = grn.filter(g => g.status === 'DRAFT');
-        const stoPending = sto.filter(s => s.status === 'PENDING' || s.status === 'DRAFT');
+        const grnPending = Array.isArray(grn) ? grn.filter(g => g.status === 'DRAFT') : [];
+        const stoPending = Array.isArray(sto) ? sto.filter(s => s.status === 'PENDING' || s.status === 'DRAFT') : [];
 
         if (grnPending.length === 0 && stoPending.length === 0) {
             showInfo('Không có phiếu xuất/nhập nào đang chờ xử lý.');
@@ -581,4 +631,4 @@ window.renderTopItems = renderTopItems;
 window.showPendingModal = showPendingModal;
 window.showPendingWarehouseModal = showPendingWarehouseModal;
 
-console.log('✅ Dashboard module updated to use API.');
+console.log('✅ Dashboard module updated: fixed null values, added container fallback.');

@@ -1,40 +1,43 @@
 // ================================================================
-// API LAYER - Gọi API từ Backend Spring Boot
+// API LAYER - GỌI BACKEND + FALLBACK LOCALSTORAGE
 // ================================================================
 
 const API_BASE_URL = 'http://localhost:8080/api';
 
-// Lấy token từ sessionStorage
 function getAuthToken() {
     const user = JSON.parse(sessionStorage.getItem('user') || '{}');
     return user.token || null;
 }
 
-// Hàm gọi API với token
 async function apiRequest(endpoint, method = 'GET', body = null) {
     const url = `${API_BASE_URL}${endpoint}`;
-    const headers = {
-        'Content-Type': 'application/json',
-    };
+    const headers = { 'Content-Type': 'application/json' };
     const token = getAuthToken();
-    if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-    }
-
-    const options = {
-        method,
-        headers,
-    };
-    if (body) {
-        options.body = JSON.stringify(body);
-    }
-
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const options = { method, headers };
+    if (body) options.body = JSON.stringify(body);
     const response = await fetch(url, options);
     if (!response.ok) {
-        const error = await response.text();
-        throw new Error(error || `HTTP error! status: ${response.status}`);
+        let errorMessage = `HTTP error! status: ${response.status}`;
+        try {
+            const errorData = await response.json();
+            errorMessage = errorData.message || errorData.error || errorMessage;
+        } catch(e) {}
+        throw new Error(errorMessage);
     }
     return response.json();
+}
+
+function extractArray(data) {
+    if (Array.isArray(data)) return data;
+    if (data && Array.isArray(data.data)) return data.data;
+    return null;
+}
+
+function extractObject(data) {
+    if (data && typeof data === 'object' && !Array.isArray(data)) return data;
+    if (data && data.data && typeof data.data === 'object') return data.data;
+    return null;
 }
 
 // ====== AUTH ======
@@ -44,426 +47,407 @@ async function login(email, password) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
     });
-    if (!response.ok) {
-        const error = await response.text();
-        throw new Error(error || 'Login failed');
-    }
+    if (!response.ok) throw new Error(await response.text());
     return response.json();
 }
 
-// ====== PROJECTS ======
+// ====== CÁC HÀM GET (fallback localStorage) ======
 async function getProjects() {
-    return apiRequest('/projects');
+    try {
+        const data = await apiRequest('/projects');
+        const arr = extractArray(data);
+        if (arr && arr.length > 0) {
+            saveData('projects', arr);
+            return arr;
+        }
+    } catch(e) { console.warn('getProjects fallback:', e); }
+    return getData('projects') || [];
 }
 
-async function getProjectById(id) {
-    return apiRequest(`/projects/${id}`);
-}
-
-async function createProject(project) {
-    return apiRequest('/projects', 'POST', project);
-}
-
-async function updateProject(id, project) {
-    return apiRequest(`/projects/${id}`, 'PUT', project);
-}
-
-async function deleteProject(id) {
-    return apiRequest(`/projects/${id}`, 'DELETE');
-}
-
-// ====== VENDORS ======
 async function getVendors() {
-    return apiRequest('/vendors');
+    try {
+        const data = await apiRequest('/vendors');
+        const arr = extractArray(data);
+        if (arr && arr.length > 0) {
+            saveData('vendors', arr);
+            return arr;
+        }
+    } catch(e) { console.warn('getVendors fallback:', e); }
+    return getData('vendors') || [];
 }
 
-async function createVendor(vendor) {
-    return apiRequest('/vendors', 'POST', vendor);
-}
-
-async function updateVendor(id, vendor) {
-    return apiRequest(`/vendors/${id}`, 'PUT', vendor);
-}
-
-async function deleteVendor(id) {
-    return apiRequest(`/vendors/${id}`, 'DELETE');
-}
-
-// ====== ITEMS ======
 async function getItems() {
-    return apiRequest('/items');
+    try {
+        const data = await apiRequest('/items');
+        const arr = extractArray(data);
+        if (arr && arr.length > 0) {
+            saveData('items', arr);
+            return arr;
+        }
+    } catch(e) { console.warn('getItems fallback:', e); }
+    return getData('items') || [];
 }
 
-async function createItem(item) {
-    return apiRequest('/items', 'POST', item);
+async function getMRs() {
+    try {
+        const data = await apiRequest('/mr');
+        const arr = extractArray(data);
+        if (arr && arr.length > 0) {
+            saveData('mrs', arr);
+            return arr;
+        }
+    } catch(e) { console.warn('getMRs fallback:', e); }
+    return getData('mrs') || [];
 }
 
-async function updateItem(id, item) {
-    return apiRequest(`/items/${id}`, 'PUT', item);
+async function getPRs() {
+    try {
+        const data = await apiRequest('/pr');
+        const arr = extractArray(data);
+        if (arr && arr.length > 0) {
+            saveData('prs', arr);
+            return arr;
+        }
+    } catch(e) { console.warn('getPRs fallback:', e); }
+    return getData('prs') || [];
 }
 
-async function deleteItem(id) {
-    return apiRequest(`/items/${id}`, 'DELETE');
+async function getPOs() {
+    try {
+        const data = await apiRequest('/po');
+        const arr = extractArray(data);
+        if (arr && arr.length > 0) {
+            saveData('pos', arr);
+            return arr;
+        }
+    } catch(e) { console.warn('getPOs fallback:', e); }
+    return getData('pos') || [];
 }
 
-// MR
-async function getMRs() { return apiRequest('/mr'); }
-async function createMR(mr) { return apiRequest('/mr', 'POST', mr); }
-async function updateMR(id, mr) { return apiRequest(`/mr/${id}`, 'PUT', mr); }
-async function submitMR(id) { return apiRequest(`/mr/${id}/submit`, 'POST'); }
-async function approveMR(id) { return apiRequest(`/mr/${id}/approve`, 'POST'); }
-async function rejectMR(id) { return apiRequest(`/mr/${id}/reject`, 'POST'); }
-async function deleteMR(id) { return apiRequest(`/mr/${id}`, 'DELETE'); }
-
-// PR
-async function getPRs() { return apiRequest('/pr'); }
-async function createPR(pr) { return apiRequest('/pr', 'POST', pr); }
-async function updatePR(id, pr) { return apiRequest(`/pr/${id}`, 'PUT', pr); }
-async function submitPR(id) { return apiRequest(`/pr/${id}/submit`, 'POST'); }
-async function approvePR(id) { return apiRequest(`/pr/${id}/approve`, 'POST'); }
-async function rejectPR(id) { return apiRequest(`/pr/${id}/reject`, 'POST'); }
-async function deletePR(id) { return apiRequest(`/pr/${id}`, 'DELETE'); }
-
-// PO
-async function getPOs() { return apiRequest('/po'); }
-async function createPO(po) { return apiRequest('/po', 'POST', po); }
-async function updatePO(id, po) { return apiRequest(`/po/${id}`, 'PUT', po); }
-async function submitPO(id) { return apiRequest(`/po/${id}/submit`, 'POST'); }
-async function approvePO(id) { return apiRequest(`/po/${id}/approve`, 'POST'); }
-async function rejectPO(id) { return apiRequest(`/po/${id}/reject`, 'POST'); }
-async function deletePO(id) { return apiRequest(`/po/${id}`, 'DELETE'); }
-
-// ====== WAREHOUSES ======
 async function getWarehouses() {
-    return apiRequest('/warehouses');
+    try {
+        const data = await apiRequest('/warehouses');
+        const arr = extractArray(data);
+        if (arr && arr.length > 0) {
+            saveData('warehouses', arr);
+            return arr;
+        }
+    } catch(e) { console.warn('getWarehouses fallback:', e); }
+    return getData('warehouses') || [];
 }
 
-async function createWarehouse(wh) {
-    return apiRequest('/warehouses', 'POST', wh);
-}
-
-async function updateWarehouse(id, wh) {
-    return apiRequest(`/warehouses/${id}`, 'PUT', wh);
-}
-
-async function deleteWarehouse(id) {
-    return apiRequest(`/warehouses/${id}`, 'DELETE');
-}
-
-// ====== INVENTORY ======
 async function getInventory() {
-    return apiRequest('/inventory');
+    try {
+        const data = await apiRequest('/inventory');
+        const arr = extractArray(data);
+        if (arr && arr.length > 0) {
+            saveData('inventory', arr);
+            return arr;
+        }
+    } catch(e) { console.warn('getInventory fallback:', e); }
+    return getData('inventory') || [];
 }
 
-async function getInventoryByWarehouse(warehouseId) {
-    return apiRequest(`/inventory/warehouse/${warehouseId}`);
-}
-
-async function updateInventoryQuantity(warehouseId, itemId, quantity) {
-    return apiRequest(`/inventory/warehouse/${warehouseId}/item/${itemId}?quantity=${quantity}`, 'PATCH');
-}
-
-// ====== GRN ======
 async function getGRNs() {
-    return apiRequest('/grn');
+    try {
+        const data = await apiRequest('/grn');
+        const arr = extractArray(data);
+        if (arr && arr.length > 0) {
+            saveData('grns', arr);
+            return arr;
+        }
+    } catch(e) { console.warn('getGRNs fallback:', e); }
+    return getData('grns') || [];
 }
 
-async function createGRN(grn) {
-    return apiRequest('/grn', 'POST', grn);
-}
-
-async function updateGRN(id, grn) {
-    return apiRequest(`/grn/${id}`, 'PUT', grn);
-}
-
-async function receiveGRN(id, warehouseStaff, receiptDate) {
-    return apiRequest(`/grn/${id}/receive?warehouseStaff=${warehouseStaff}&receiptDate=${receiptDate}`, 'POST');
-}
-
-async function qcCheckGRN(id, qcName, result, note) {
-    return apiRequest(`/grn/${id}/qc?qcName=${qcName}&result=${result}&note=${note || ''}`, 'POST');
-}
-
-async function completeGRN(id) {
-    return apiRequest(`/grn/${id}/complete`, 'POST');
-}
-
-async function deleteGRN(id) {
-    return apiRequest(`/grn/${id}`, 'DELETE');
-}
-
-// ====== STO ======
 async function getSTOs() {
-    return apiRequest('/sto');
+    try {
+        const data = await apiRequest('/sto');
+        const arr = extractArray(data);
+        if (arr && arr.length > 0) {
+            saveData('stos', arr);
+            return arr;
+        }
+    } catch(e) { console.warn('getSTOs fallback:', e); }
+    return getData('stos') || [];
 }
 
-async function createSTO(sto) {
-    return apiRequest('/sto', 'POST', sto);
-}
-
-async function updateSTO(id, sto) {
-    return apiRequest(`/sto/${id}`, 'PUT', sto);
-}
-
-async function submitSTO(id) {
-    return apiRequest(`/sto/${id}/submit`, 'POST');
-}
-
-async function approveSTO(id) {
-    return apiRequest(`/sto/${id}/approve`, 'POST');
-}
-
-async function completeSTO(id) {
-    return apiRequest(`/sto/${id}/complete`, 'POST');
-}
-
-async function deleteSTO(id) {
-    return apiRequest(`/sto/${id}`, 'DELETE');
-}
-
-// ====== ISSUE ======
 async function getIssues() {
-    return apiRequest('/issue');
+    try {
+        const data = await apiRequest('/issue');
+        const arr = extractArray(data);
+        if (arr && arr.length > 0) {
+            saveData('issues', arr);
+            return arr;
+        }
+    } catch(e) { console.warn('getIssues fallback:', e); }
+    return getData('issues') || [];
 }
 
-async function createIssue(issue) {
-    return apiRequest('/issue', 'POST', issue);
-}
-
-async function updateIssue(id, issue) {
-    return apiRequest(`/issue/${id}`, 'PUT', issue);
-}
-
-async function submitIssue(id) {
-    return apiRequest(`/issue/${id}/submit`, 'POST');
-}
-
-async function approveIssue(id) {
-    return apiRequest(`/issue/${id}/approve`, 'POST');
-}
-
-async function rejectIssue(id) {
-    return apiRequest(`/issue/${id}/reject`, 'POST');
-}
-
-async function completeIssue(id, warehouseId, itemsUpdateJson) {
-    return apiRequest(`/issue/${id}/complete?warehouseId=${warehouseId}`, 'POST', itemsUpdateJson);
-}
-
-async function confirmIssue(id) {
-    return apiRequest(`/issue/${id}/confirm`, 'POST');
-}
-
-async function deleteIssue(id) {
-    return apiRequest(`/issue/${id}`, 'DELETE');
-}
-
-// ====== MATERIAL RETURN ======
 async function getMaterialReturns() {
-    return apiRequest('/material-return');
+    try {
+        const data = await apiRequest('/material-return');
+        const arr = extractArray(data);
+        if (arr && arr.length > 0) {
+            saveData('material_returns', arr);
+            return arr;
+        }
+    } catch(e) { console.warn('getMaterialReturns fallback:', e); }
+    return getData('material_returns') || [];
 }
 
-async function createMaterialReturn(data) {
-    return apiRequest('/material-return', 'POST', data);
-}
-
-async function updateMaterialReturn(id, data) {
-    return apiRequest(`/material-return/${id}`, 'PUT', data);
-}
-
-async function submitMaterialReturn(id) {
-    return apiRequest(`/material-return/${id}/submit`, 'POST');
-}
-
-async function approveMaterialReturn(id, itemsUpdateJson) {
-    return apiRequest(`/material-return/${id}/approve`, 'POST', itemsUpdateJson);
-}
-
-async function confirmMaterialReturn(id) {
-    return apiRequest(`/material-return/${id}/confirm`, 'POST');
-}
-
-async function rejectMaterialReturn(id) {
-    return apiRequest(`/material-return/${id}/reject`, 'POST');
-}
-
-async function deleteMaterialReturn(id) {
-    return apiRequest(`/material-return/${id}`, 'DELETE');
-}
-
-// ====== MIN STOCK ======
 async function getMinStock() {
-    return apiRequest('/min-stock');
+    try {
+        const data = await apiRequest('/min-stock');
+        const arr = extractArray(data);
+        if (arr && arr.length > 0) {
+            saveData('min_stock', arr);
+            return arr;
+        }
+    } catch(e) { console.warn('getMinStock fallback:', e); }
+    return getData('min_stock') || [];
 }
 
-async function saveMinStock(warehouseId, itemId, minQuantity) {
-    return apiRequest(`/min-stock/save?warehouseId=${warehouseId}&itemId=${itemId}&minQuantity=${minQuantity}`, 'POST');
-}
-
-async function deleteMinStock(id) {
-    return apiRequest(`/min-stock/${id}`, 'DELETE');
-}
-
-// ====== AUTO REORDER ======
-async function getAutoReorderConfig() {
-    return apiRequest('/auto-reorder/config');
-}
-
-async function updateAutoReorderConfig(config) {
-    return apiRequest('/auto-reorder/config', 'PUT', config);
-}
-
-async function checkAutoReorder() {
-    return apiRequest('/auto-reorder/check', 'POST');
-}
-
-// ====== USERS (ADMIN) ======
 async function getUsers() {
-    return apiRequest('/users');
+    try {
+        const data = await apiRequest('/users');
+        const arr = extractArray(data);
+        if (arr && arr.length > 0) {
+            saveData('users', arr);
+            return arr;
+        }
+    } catch(e) { console.warn('getUsers fallback:', e); }
+    return getData('users') || [];
 }
 
-async function createUser(user) {
-    return apiRequest('/users', 'POST', user);
-}
-
-async function updateUser(id, user) {
-    return apiRequest(`/users/${id}`, 'PUT', user);
-}
-
-async function deleteUser(id) {
-    return apiRequest(`/users/${id}`, 'DELETE');
-}
-
-// ====== DEPARTMENTS (ADMIN) ======
 async function getDepartments() {
-    return apiRequest('/departments');
+    try {
+        const data = await apiRequest('/departments');
+        const arr = extractArray(data);
+        if (arr && arr.length > 0) {
+            saveData('departments', arr);
+            return arr;
+        }
+    } catch(e) { console.warn('getDepartments fallback:', e); }
+    return getData('departments') || [];
 }
 
-async function createDepartment(dept) {
-    return apiRequest('/departments', 'POST', dept);
+async function getPermissions() {
+    try {
+        const data = await apiRequest('/permissions');
+        const arr = extractArray(data);
+        if (arr && arr.length > 0) {
+            saveData('permissions', arr);
+            return arr;
+        }
+    } catch(e) { console.warn('getPermissions fallback:', e); }
+    return getData('permissions') || {};
 }
 
-async function updateDepartment(id, dept) {
-    return apiRequest(`/departments/${id}`, 'PUT', dept);
-}
-
-async function deleteDepartment(id) {
-    return apiRequest(`/departments/${id}`, 'DELETE');
-}
-
-// ====== WORKFLOWS (ADMIN) ======
+// ====== WORKFLOW API (MỚI – HỖ TRỢ ĐA MẪU) ======
 async function getWorkflows() {
-    return apiRequest('/workflows');
+    try {
+        const data = await apiRequest('/workflows');
+        const arr = extractArray(data);
+        if (arr && arr.length > 0) {
+            saveData('workflows', arr);
+            return arr;
+        }
+    } catch(e) { console.warn('getWorkflows fallback:', e); }
+    return getData('workflows') || [];
+}
+
+async function getWorkflowsByModule(module) {
+    try {
+        const data = await apiRequest(`/workflows/module/${module}`);
+        const arr = extractArray(data);
+        if (arr && arr.length > 0) return arr;
+    } catch(e) { console.warn('getWorkflowsByModule fallback:', e); }
+    const all = getData('workflows') || [];
+    return all.filter(w => w.module === module);
+}
+
+async function getActiveWorkflow(module) {
+    try {
+        const data = await apiRequest(`/workflows/module/${module}/active`);
+        const obj = extractObject(data);
+        if (obj && obj.id) return obj;
+    } catch(e) { console.warn('getActiveWorkflow fallback:', e); }
+    const all = getData('workflows') || [];
+    return all.find(w => w.module === module && w.isActive === true) || null;
+}
+
+async function createWorkflow(workflow) {
+    return apiRequest('/workflows', 'POST', workflow);
 }
 
 async function updateWorkflow(id, workflow) {
     return apiRequest(`/workflows/${id}`, 'PUT', workflow);
 }
 
-// ====== PERMISSIONS (ADMIN) ======
-async function getPermissions() {
-    return apiRequest('/permissions');
+async function activateWorkflow(module, id) {
+    return apiRequest(`/workflows/module/${module}/activate/${id}`, 'PUT');
 }
 
-async function updatePermission(id, permission) {
-    return apiRequest(`/permissions/${id}`, 'PUT', permission);
+async function duplicateWorkflow(id) {
+    return apiRequest(`/workflows/duplicate/${id}`, 'POST');
 }
 
-// Export các hàm ra window để sử dụng trong các module khác
+async function deleteWorkflow(id) {
+    return apiRequest(`/workflows/${id}`, 'DELETE');
+}
+
+// ====== USER PERMISSIONS (MỚI) ======
+async function getUserPermissions(userId) {
+    try {
+        const data = await apiRequest(`/permissions/user/${userId}`);
+        const arr = extractArray(data);
+        if (arr && arr.length > 0) {
+            // Lưu vào localStorage dạng { userId: { permissionKey: enabled } }
+            const map = {};
+            arr.forEach(p => { map[p.permissionKey] = p.enabled; });
+            const allUserPerms = getData('user_permissions') || {};
+            allUserPerms[userId] = map;
+            saveData('user_permissions', allUserPerms);
+            return map;
+        }
+    } catch(e) { console.warn('getUserPermissions fallback:', e); }
+    const all = getData('user_permissions') || {};
+    return all[userId] || {};
+}
+
+async function assignUserPermission(userId, permissionKey, enabled = true) {
+    const result = await apiRequest(`/permissions/user/${userId}/assign?permissionKey=${permissionKey}&enabled=${enabled}`, 'POST');
+    // Cập nhật lại cache
+    await getUserPermissions(userId);
+    return result;
+}
+
+async function removeUserPermission(userId, permissionKey) {
+    await apiRequest(`/permissions/user/${userId}/remove?permissionKey=${permissionKey}`, 'DELETE');
+    // Cập nhật lại cache
+    await getUserPermissions(userId);
+}
+
+// ====== CRUD CHUNG ======
+async function createProject(project) { return apiRequest('/projects', 'POST', project); }
+async function updateProject(id, project) { return apiRequest(`/projects/${id}`, 'PUT', project); }
+async function deleteProject(id) { return apiRequest(`/projects/${id}`, 'DELETE'); }
+
+async function createVendor(vendor) { return apiRequest('/vendors', 'POST', vendor); }
+async function updateVendor(id, vendor) { return apiRequest(`/vendors/${id}`, 'PUT', vendor); }
+async function deleteVendor(id) { return apiRequest(`/vendors/${id}`, 'DELETE'); }
+
+async function createItem(item) { return apiRequest('/items', 'POST', item); }
+async function updateItem(id, item) { return apiRequest(`/items/${id}`, 'PUT', item); }
+async function deleteItem(id) { return apiRequest(`/items/${id}`, 'DELETE'); }
+
+async function createMR(mr) { return apiRequest('/mr', 'POST', mr); }
+async function updateMR(id, mr) { return apiRequest(`/mr/${id}`, 'PUT', mr); }
+async function deleteMR(id) { return apiRequest(`/mr/${id}`, 'DELETE'); }
+async function submitMR(id) { return apiRequest(`/mr/${id}/submit`, 'POST'); }
+async function approveMR(id) { return apiRequest(`/mr/${id}/approve`, 'POST'); }
+async function rejectMR(id) { return apiRequest(`/mr/${id}/reject`, 'POST'); }
+
+async function createPR(pr) { return apiRequest('/pr', 'POST', pr); }
+async function updatePR(id, pr) { return apiRequest(`/pr/${id}`, 'PUT', pr); }
+async function deletePR(id) { return apiRequest(`/pr/${id}`, 'DELETE'); }
+async function submitPR(id) { return apiRequest(`/pr/${id}/submit`, 'POST'); }
+async function approvePR(id) { return apiRequest(`/pr/${id}/approve`, 'POST'); }
+async function rejectPR(id) { return apiRequest(`/pr/${id}/reject`, 'POST'); }
+
+async function createPO(po) { return apiRequest('/po', 'POST', po); }
+async function updatePO(id, po) { return apiRequest(`/po/${id}`, 'PUT', po); }
+async function deletePO(id) { return apiRequest(`/po/${id}`, 'DELETE'); }
+async function submitPO(id) { return apiRequest(`/po/${id}/submit`, 'POST'); }
+async function approvePO(id) { return apiRequest(`/po/${id}/approve`, 'POST'); }
+async function rejectPO(id) { return apiRequest(`/po/${id}/reject`, 'POST'); }
+
+async function createGRN(grn) { return apiRequest('/grn', 'POST', grn); }
+async function updateGRN(id, grn) { return apiRequest(`/grn/${id}`, 'PUT', grn); }
+async function deleteGRN(id) { return apiRequest(`/grn/${id}`, 'DELETE'); }
+async function receiveGRN(id, warehouseStaff, receiptDate) {
+    return apiRequest(`/grn/${id}/receive?warehouseStaff=${warehouseStaff}&receiptDate=${receiptDate}`, 'POST');
+}
+async function qcCheckGRN(id, qcName, result, note) {
+    return apiRequest(`/grn/${id}/qc?qcName=${qcName}&result=${result}&note=${note || ''}`, 'POST');
+}
+async function completeGRN(id) { return apiRequest(`/grn/${id}/complete`, 'POST'); }
+
+async function createSTO(sto) { return apiRequest('/sto', 'POST', sto); }
+async function updateSTO(id, sto) { return apiRequest(`/sto/${id}`, 'PUT', sto); }
+async function deleteSTO(id) { return apiRequest(`/sto/${id}`, 'DELETE'); }
+async function submitSTO(id) { return apiRequest(`/sto/${id}/submit`, 'POST'); }
+async function approveSTO(id) { return apiRequest(`/sto/${id}/approve`, 'POST'); }
+async function completeSTO(id) { return apiRequest(`/sto/${id}/complete`, 'POST'); }
+
+async function createIssue(issue) { return apiRequest('/issue', 'POST', issue); }
+async function updateIssue(id, issue) { return apiRequest(`/issue/${id}`, 'PUT', issue); }
+async function deleteIssue(id) { return apiRequest(`/issue/${id}`, 'DELETE'); }
+async function submitIssue(id) { return apiRequest(`/issue/${id}/submit`, 'POST'); }
+async function approveIssue(id) { return apiRequest(`/issue/${id}/approve`, 'POST'); }
+async function rejectIssue(id) { return apiRequest(`/issue/${id}/reject`, 'POST'); }
+async function completeIssue(id, warehouseId, itemsUpdateJson) {
+    return apiRequest(`/issue/${id}/complete?warehouseId=${warehouseId}`, 'POST', itemsUpdateJson);
+}
+async function confirmIssue(id) { return apiRequest(`/issue/${id}/confirm`, 'POST'); }
+
+async function createMaterialReturn(data) { return apiRequest('/material-return', 'POST', data); }
+async function updateMaterialReturn(id, data) { return apiRequest(`/material-return/${id}`, 'PUT', data); }
+async function deleteMaterialReturn(id) { return apiRequest(`/material-return/${id}`, 'DELETE'); }
+async function submitMaterialReturn(id) { return apiRequest(`/material-return/${id}/submit`, 'POST'); }
+async function approveMaterialReturn(id, itemsUpdateJson) {
+    return apiRequest(`/material-return/${id}/approve`, 'POST', itemsUpdateJson);
+}
+async function confirmMaterialReturn(id) { return apiRequest(`/material-return/${id}/confirm`, 'POST'); }
+async function rejectMaterialReturn(id) { return apiRequest(`/material-return/${id}/reject`, 'POST'); }
+
+async function saveMinStock(warehouseId, itemId, minQuantity) {
+    return apiRequest(`/min-stock/save?warehouseId=${warehouseId}&itemId=${itemId}&minQuantity=${minQuantity}`, 'POST');
+}
+async function deleteMinStock(id) { return apiRequest(`/min-stock/${id}`, 'DELETE'); }
+
+async function updateAutoReorderConfig(config) { return apiRequest('/auto-reorder/config', 'PUT', config); }
+async function checkAutoReorder() { return apiRequest('/auto-reorder/check', 'POST'); }
+
+async function createUser(user) { return apiRequest('/users', 'POST', user); }
+async function updateUser(id, user) { return apiRequest(`/users/${id}`, 'PUT', user); }
+async function deleteUser(id) { return apiRequest(`/users/${id}`, 'DELETE'); }
+
+async function createDepartment(dept) { return apiRequest('/departments', 'POST', dept); }
+async function updateDepartment(id, dept) { return apiRequest(`/departments/${id}`, 'PUT', dept); }
+async function deleteDepartment(id) { return apiRequest(`/departments/${id}`, 'DELETE'); }
+
+// ====== EXPORT RA WINDOW ======
 window.api = {
+    // Auth
     login,
-    getProjects,
-    getProjectById,
-    createProject,
-    updateProject,
-    deleteProject,
-    getVendors,
-    createVendor,
-    updateVendor,
-    deleteVendor,
-    getItems,
-    createItem,
-    updateItem,
-    deleteItem,
-    getMRs,
-    createMR,
-    updateMR,
-    submitMR,
-    approveMR,
-    rejectMR,
-    deleteMR,
-    getPRs,
-    createPR,
-    createPRFromMR,
-    updatePR,
-    submitPR,
-    approvePR,
-    rejectPR,
-    deletePR,
-    getPOs,
-    createPO,
-    createPOFromPR,
-    updatePO,
-    submitPO,
-    approvePO,
-    rejectPO,
-    deletePO,
-    getWarehouses,
-    createWarehouse,
-    updateWarehouse,
-    deleteWarehouse,
-    getInventory,
-    getInventoryByWarehouse,
-    updateInventoryQuantity,
-    getGRNs,
-    createGRN,
-    updateGRN,
-    receiveGRN,
-    qcCheckGRN,
-    completeGRN,
-    deleteGRN,
-    getSTOs,
-    createSTO,
-    updateSTO,
-    submitSTO,
-    approveSTO,
-    completeSTO,
-    deleteSTO,
-    getIssues,
-    createIssue,
-    updateIssue,
-    submitIssue,
-    approveIssue,
-    rejectIssue,
-    completeIssue,
-    confirmIssue,
-    deleteIssue,
-    getMaterialReturns,
-    createMaterialReturn,
-    updateMaterialReturn,
-    submitMaterialReturn,
-    approveMaterialReturn,
-    confirmMaterialReturn,
-    rejectMaterialReturn,
-    deleteMaterialReturn,
-    getMinStock,
-    saveMinStock,
-    deleteMinStock,
-    getAutoReorderConfig,
-    updateAutoReorderConfig,
-    checkAutoReorder,
-    getUsers,
-    createUser,
-    updateUser,
-    deleteUser,
-    getDepartments,
-    createDepartment,
-    updateDepartment,
-    deleteDepartment,
-    getWorkflows,
-    updateWorkflow,
-    getPermissions,
-    updatePermission,
+    // GETs
+    getProjects, getVendors, getItems, getMRs, getPRs, getPOs,
+    getWarehouses, getInventory, getGRNs, getSTOs, getIssues, getMaterialReturns,
+    getMinStock, getUsers, getDepartments, getPermissions,
+    // Workflow (mới)
+    getWorkflows, getWorkflowsByModule, getActiveWorkflow,
+    createWorkflow, updateWorkflow, activateWorkflow,
+    duplicateWorkflow, deleteWorkflow,
+    // User Permissions (mới)
+    getUserPermissions, assignUserPermission, removeUserPermission,
+    // CRUD
+    createProject, updateProject, deleteProject,
+    createVendor, updateVendor, deleteVendor,
+    createItem, updateItem, deleteItem,
+    createMR, updateMR, deleteMR, submitMR, approveMR, rejectMR,
+    createPR, updatePR, deletePR, submitPR, approvePR, rejectPR,
+    createPO, updatePO, deletePO, submitPO, approvePO, rejectPO,
+    createGRN, updateGRN, deleteGRN, receiveGRN, qcCheckGRN, completeGRN,
+    createSTO, updateSTO, deleteSTO, submitSTO, approveSTO, completeSTO,
+    createIssue, updateIssue, deleteIssue, submitIssue, approveIssue, rejectIssue, completeIssue, confirmIssue,
+    createMaterialReturn, updateMaterialReturn, deleteMaterialReturn,
+    submitMaterialReturn, approveMaterialReturn, confirmMaterialReturn, rejectMaterialReturn,
+    saveMinStock, deleteMinStock,
+    updateAutoReorderConfig, checkAutoReorder,
+    createUser, updateUser, deleteUser,
+    createDepartment, updateDepartment, deleteDepartment
 };
 
-console.log('✅ API layer ready for backend integration.');
+console.log('✅ API layer updated with workflow + user permission endpoints');

@@ -1,22 +1,22 @@
 // ================================================================
-// ITEMS - QUẢN LÝ DANH MỤC VẬT TƯ (DÙNG API)
+// ITEMS - QUẢN LÝ DANH MỤC VẬT TƯ (DÙNG API) - ĐÃ SỬA LỖI NULL
 // ================================================================
 
 // ====== RENDER DANH SÁCH VẬT TƯ ======
 async function renderItems() {
     try {
         const items = await api.getItems();
-        // Cập nhật cache cho các helper
+        // Cập nhật cache
         if (typeof updateItemsCache === 'function') {
             updateItemsCache(items);
         } else {
-            window._itemsCache = items;
+            window._itemsCache = items || [];
         }
 
         const filter = document.getElementById('item-filter')?.value?.toLowerCase() || '';
-        const filtered = items.filter(it => 
-            it.code.toLowerCase().includes(filter) || 
-            it.name.toLowerCase().includes(filter)
+        const filtered = items.filter(it =>
+            (it.code || '').toLowerCase().includes(filter) ||
+            (it.name || '').toLowerCase().includes(filter)
         );
         const user = getUser();
         const isAdmin = user && (user.role === 'ADMIN' || (typeof hasPermission === 'function' && hasPermission('items.edit')));
@@ -44,18 +44,18 @@ async function renderItems() {
         }
 
         for (const it of filtered) {
-            const statusBadge = it.status === 'ACTIVE' 
-                ? '<span class="badge badge-active"><i class="fas fa-check-circle"></i> Sử dụng</span>' 
+            const statusBadge = it.status === 'ACTIVE'
+                ? '<span class="badge badge-active"><i class="fas fa-check-circle"></i> Sử dụng</span>'
                 : '<span class="badge badge-inactive"><i class="fas fa-times-circle"></i> Ngừng</span>';
-            
+
             let actions = `<button class="btn btn-info btn-sm" onclick="viewItem(${it.id})"><i class="fas fa-eye"></i></button>`;
             if (isAdmin) {
                 actions += ` <button class="btn btn-warning btn-sm" onclick="editItem(${it.id})"><i class="fas fa-edit"></i></button>`;
                 actions += ` <button class="btn btn-danger btn-sm" onclick="deleteItem(${it.id})"><i class="fas fa-trash"></i></button>`;
             }
             html += `<tr>
-                <td><strong>${it.code}</strong></td>
-                <td>${it.name}</td>
+                <td><strong>${it.code || '--'}</strong></td>
+                <td>${it.name || '--'}</td>
                 <td>${it.itemGroup || '--'}</td>
                 <td>${it.model || '--'}</td>
                 <td>${it.unit || '--'}</td>
@@ -72,7 +72,6 @@ async function renderItems() {
         `;
         document.getElementById('items-container').innerHTML = html;
 
-        // Ẩn/Hiện nút thêm theo quyền
         const btnAdd = document.getElementById('btn-add-item');
         const btnExport = document.getElementById('btn-export-items');
         if (btnAdd) btnAdd.style.display = isAdmin ? 'inline-block' : 'none';
@@ -87,7 +86,6 @@ async function renderItems() {
 // ====== XEM CHI TIẾT VẬT TƯ ======
 async function viewItem(id) {
     try {
-        // Lấy từ cache nếu có, nếu không thì gọi API
         let item = window._itemsCache ? window._itemsCache.find(i => i.id === id) : null;
         if (!item) {
             const items = await api.getItems();
@@ -105,7 +103,6 @@ async function viewItem(id) {
             return;
         }
 
-        // Lấy tồn kho của vật tư này
         const inventory = await api.getInventory();
         const warehouses = await api.getWarehouses();
         const invData = inventory.filter(i => i.itemId === id);
@@ -117,7 +114,7 @@ async function viewItem(id) {
             invData.forEach(inv => {
                 const wh = warehouses.find(w => w.id === inv.warehouseId);
                 const whName = wh ? wh.name : `Kho #${inv.warehouseId}`;
-                whHtml += `<div style="padding:4px 8px; background:#f8fafc; border-radius:4px; font-size:13px;">${whName}: <strong>${inv.quantity}</strong></div>`;
+                whHtml += `<div style="padding:4px 8px; background:#f8fafc; border-radius:4px; font-size:13px;">${whName}: <strong>${inv.quantity || 0}</strong></div>`;
                 totalQty += inv.quantity || 0;
             });
             whHtml += `</div></div>`;
@@ -125,8 +122,8 @@ async function viewItem(id) {
 
         showModal('Chi tiết vật tư', `
             <div class="detail-grid">
-                <div><span class="label">Mã:</span> <span class="value"><strong>${item.code}</strong></span></div>
-                <div><span class="label">Tên:</span> <span class="value">${item.name}</span></div>
+                <div><span class="label">Mã:</span> <span class="value"><strong>${item.code || '--'}</strong></span></div>
+                <div><span class="label">Tên:</span> <span class="value">${item.name || '--'}</span></div>
                 <div><span class="label">Nhóm:</span> <span class="value">${item.itemGroup || '--'}</span></div>
                 <div><span class="label">Quy cách/Model:</span> <span class="value">${item.model || '--'}</span></div>
                 <div><span class="label">ĐVT:</span> <span class="value">${item.unit || '--'}</span></div>
@@ -224,8 +221,8 @@ async function editItem(id) {
         }
 
         showModal('Sửa vật tư', `
-            <div class="form-group"><label>Mã</label><input id="f-item-code" value="${item.code}" required></div>
-            <div class="form-group"><label>Tên</label><input id="f-item-name" value="${item.name}" required></div>
+            <div class="form-group"><label>Mã</label><input id="f-item-code" value="${item.code || ''}" required></div>
+            <div class="form-group"><label>Tên</label><input id="f-item-name" value="${item.name || ''}" required></div>
             <div class="form-group"><label>Nhóm</label><input id="f-item-group" value="${item.itemGroup || ''}"></div>
             <div class="form-group"><label>Quy cách/Model</label><input id="f-item-model" value="${item.model || ''}"></div>
             <div class="form-group"><label>ĐVT</label><input id="f-item-unit" value="${item.unit || ''}"></div>
@@ -280,7 +277,6 @@ async function updateItem(id) {
 // ====== XÓA VẬT TƯ ======
 async function deleteItem(id) {
     try {
-        // Lấy thông tin để hiển thị
         let item = window._itemsCache ? window._itemsCache.find(i => i.id === id) : null;
         if (!item) {
             const items = await api.getItems();
@@ -308,7 +304,7 @@ async function deleteItem(id) {
 // ====== SỰ KIỆN CHO NÚT THÊM ======
 document.getElementById('btn-add-item')?.addEventListener('click', showAddItemModal);
 
-// ====== EXPORT GLOBAL ======
+// ====== EXPORT ======
 window.renderItems = renderItems;
 window.viewItem = viewItem;
 window.editItem = editItem;
@@ -317,4 +313,4 @@ window.deleteItem = deleteItem;
 window.saveItem = saveItem;
 window.showAddItemModal = showAddItemModal;
 
-console.log('✅ Items module updated to use API.');
+console.log('✅ Items module updated to use API (fixed null display).');

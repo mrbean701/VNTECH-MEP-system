@@ -15,7 +15,7 @@ public class EntityMapper {
         dto.setEmail(user.getEmail());
         dto.setName(user.getName());
         dto.setRole(user.getRole());
-        dto.setDepartmentId(user.getDepartmentId()); // ✅ Đã có trong DTO
+        dto.setDepartmentId(user.getDepartmentId());
         dto.setDepartment(user.getDepartment());
         dto.setPosition(user.getPosition());
         dto.setCreatedAt(user.getCreatedAt());

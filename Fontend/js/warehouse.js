@@ -1,5 +1,5 @@
 // ================================================================
-// WAREHOUSE - GRN & STO (SỬ DỤNG API)
+// WAREHOUSE - GRN & STO (SỬ DỤNG API) - ĐÃ SỬA LỖI NULL
 // ================================================================
 
 let currentWhTab = 'wh-list';
@@ -53,31 +53,35 @@ async function renderWarehouseListHTML() {
         const warehouses = await api.getWarehouses();
         const inventory = await api.getInventory();
         let html = `<div class="warehouse-grid">`;
-        if (!warehouses.length) html += `<p style="grid-column:1/-1;text-align:center;color:#999;">Chưa có kho nào</p>`;
-        for (const w of warehouses) {
-            const itemCount = inventory.filter(i => i.warehouseId === w.id).length;
-            const totalQty = inventory.filter(i => i.warehouseId === w.id).reduce((s, i) => s + (i.quantity || 0), 0);
-            const icon = w.type === 'CENTRAL' ? 'fa-warehouse' : 'fa-building';
-            const statusBadge = w.status === 'ACTIVE' ?
-                '<span class="badge badge-status-active"><i class="fas fa-check-circle"></i> Đang hoạt động</span>' :
-                '<span class="badge badge-status-inactive"><i class="fas fa-times-circle"></i> Ngừng</span>';
-            html += `
-                <div class="warehouse-card" onclick="viewWarehouseDetail(${w.id})">
-                    <div class="wh-status-badge">${statusBadge}</div>
-                    <div style="display:flex;align-items:center;gap:8px;">
-                        <i class="fas ${icon} wh-icon"></i><span class="wh-code">${w.code}</span>
+        if (!warehouses || warehouses.length === 0) {
+            html += `<p style="grid-column:1/-1;text-align:center;color:#999;">Chưa có kho nào</p>`;
+        } else {
+            for (const w of warehouses) {
+                const itemCount = (inventory || []).filter(i => i.warehouseId === w.id).length;
+                const totalQty = (inventory || []).filter(i => i.warehouseId === w.id).reduce((s, i) => s + (i.quantity || 0), 0);
+                const icon = w.type === 'CENTRAL' ? 'fa-warehouse' : 'fa-building';
+                const statusBadge = w.status === 'ACTIVE' ?
+                    '<span class="badge badge-status-active"><i class="fas fa-check-circle"></i> Đang hoạt động</span>' :
+                    '<span class="badge badge-status-inactive"><i class="fas fa-times-circle"></i> Ngừng</span>';
+                const projectName = w.type === 'SITE' ? await getProjectNameById(w.projectId) : '';
+                html += `
+                    <div class="warehouse-card" onclick="viewWarehouseDetail(${w.id})">
+                        <div class="wh-status-badge">${statusBadge}</div>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <i class="fas ${icon} wh-icon"></i><span class="wh-code">${w.code || '--'}</span>
+                        </div>
+                        <div class="wh-name">${w.name || '--'}</div>
+                        <div><span class="badge-wh ${w.type === 'CENTRAL' ? 'badge-central' : 'badge-site'}">${w.type === 'CENTRAL' ? 'Kho tổng' : 'Kho dự án'}</span>
+                        ${w.type === 'SITE' ? ` <span style="font-size:13px;color:#666;">(Dự án: ${projectName || 'N/A'})</span>` : ''}</div>
+                        <div class="wh-meta">
+                            <span><i class="fas fa-cubes"></i> ${itemCount} loại</span>
+                            <span><i class="fas fa-weight-hanging"></i> ${totalQty.toLocaleString()} đvt</span>
+                        </div>
+                        <div style="font-size:13px;color:#888;margin-top:4px;"><i class="fas fa-map-marker-alt"></i> ${w.address || 'Chưa có địa chỉ'}</div>
+                        <div style="font-size:13px;color:#888;margin-top:2px;"><i class="fas fa-user"></i> ${w.manager || 'Chưa có quản lý'}</div>
                     </div>
-                    <div class="wh-name">${w.name}</div>
-                    <div><span class="badge-wh ${w.type === 'CENTRAL' ? 'badge-central' : 'badge-site'}">${w.type === 'CENTRAL' ? 'Kho tổng' : 'Kho dự án'}</span>
-                    ${w.type === 'SITE' ? ` <span style="font-size:13px;color:#666;">(Dự án: ${await getProjectNameById(w.projectId)})</span>` : ''}</div>
-                    <div class="wh-meta">
-                        <span><i class="fas fa-cubes"></i> ${itemCount} loại</span>
-                        <span><i class="fas fa-weight-hanging"></i> ${totalQty.toLocaleString()} đvt</span>
-                    </div>
-                    <div style="font-size:13px;color:#888;margin-top:4px;"><i class="fas fa-map-marker-alt"></i> ${w.address || 'Chưa có địa chỉ'}</div>
-                    <div style="font-size:13px;color:#888;margin-top:2px;"><i class="fas fa-user"></i> ${w.manager || 'Chưa có quản lý'}</div>
-                </div>
-            `;
+                `;
+            }
         }
         html += `</div>`;
         return html;
@@ -114,7 +118,7 @@ async function viewWarehouseDetail(whId) {
 
         let html = `
             <div class="page-header">
-                <h2><i class="fas fa-arrow-left" style="cursor:pointer;color:#1a3c6e;" onclick="switchWarehouseTab('wh-list')"></i> ${wh.code} - ${wh.name}</h2>
+                <h2><i class="fas fa-arrow-left" style="cursor:pointer;color:#1a3c6e;" onclick="switchWarehouseTab('wh-list')"></i> ${wh.code || '--'} - ${wh.name || '--'}</h2>
                 <div>
                     <button class="btn btn-outline" onclick="switchWarehouseTab('wh-list')"><i class="fas fa-arrow-left"></i> Quay lại</button>
                     ${isAdmin ? `<button class="btn" onclick="showEditWarehouse(${wh.id})"><i class="fas fa-edit"></i> Sửa kho</button>` : ''}
@@ -125,7 +129,7 @@ async function viewWarehouseDetail(whId) {
                 <div class="wh-detail-header">
                     <i class="fas ${wh.type === 'CENTRAL' ? 'fa-warehouse' : 'fa-building'} wh-icon-large"></i>
                     <div class="wh-info">
-                        <div class="wh-title">${wh.code} - ${wh.name}</div>
+                        <div class="wh-title">${wh.code || '--'} - ${wh.name || '--'}</div>
                         <div class="wh-sub">
                             <span class="badge-wh ${wh.type === 'CENTRAL' ? 'badge-central' : 'badge-site'}">${wh.type === 'CENTRAL' ? 'Kho tổng' : 'Kho dự án'}</span>
                             ${wh.type === 'SITE' ? ` | Dự án: ${await getProjectNameById(wh.projectId)}` : ''}
@@ -140,18 +144,21 @@ async function viewWarehouseDetail(whId) {
                         <thead><tr><th>Mã</th><th>Tên vật tư</th><th>ĐVT</th><th>Số lượng</th>${isAdmin ? '<th>HĐ</th>' : ''}</tr></thead>
                         <tbody>
         `;
-        if (!inventory.length) html += `<tr><td colspan="${isAdmin ? 5 : 4}" style="text-align:center;color:#999;">Kho này chưa có vật tư</td></tr>`;
-        for (const inv of inventory) {
-            const item = items.find(i => i.id === inv.itemId);
-            if (!item) continue;
-            html += `<tr><td style="cursor:pointer;color:#1a3c6e;" onclick="closeModal(); viewItem(${item.id})">${item.code}</td>
-                     <td style="cursor:pointer;color:#1a3c6e;" onclick="closeModal(); viewItem(${item.id})">${item.name}</td>
-                     <td>${item.unit || ''}</td><td>${inv.quantity}</td>`;
-            if (isAdmin) {
-                html += `<td><button class="btn btn-warning btn-sm" onclick="editInventoryItem(${inv.id})"><i class="fas fa-edit"></i></button>
-                            <button class="btn btn-danger btn-sm" onclick="deleteInventoryItem(${inv.id})"><i class="fas fa-trash"></i></button></td>`;
+        if (!inventory || inventory.length === 0) {
+            html += `<tr><td colspan="${isAdmin ? 5 : 4}" style="text-align:center;color:#999;">Kho này chưa có vật tư</td></tr>`;
+        } else {
+            for (const inv of inventory) {
+                const item = items.find(i => i.id === inv.itemId);
+                if (!item) continue;
+                html += `<tr><td style="cursor:pointer;color:#1a3c6e;" onclick="closeModal(); viewItem(${item.id})">${item.code || '--'}</td>
+                         <td style="cursor:pointer;color:#1a3c6e;" onclick="closeModal(); viewItem(${item.id})">${item.name || '--'}</td>
+                         <td>${item.unit || ''}</td><td>${inv.quantity || 0}</td>`;
+                if (isAdmin) {
+                    html += `<td><button class="btn btn-warning btn-sm" onclick="editInventoryItem(${inv.id})"><i class="fas fa-edit"></i></button>
+                                <button class="btn btn-danger btn-sm" onclick="deleteInventoryItem(${inv.id})"><i class="fas fa-trash"></i></button></td>`;
+                }
+                html += `</tr>`;
             }
-            html += `</tr>`;
         }
         html += `</tbody></table></div></div>`;
         document.getElementById('wh-tab-content').innerHTML = html;
@@ -189,48 +196,51 @@ async function renderGRNListHTML() {
                     <thead><tr><th>Mã</th><th>PO</th><th>Dự án</th><th>Kho</th><th>NCC</th><th>Ngày nhập</th><th>Trạng thái</th><th>HĐ</th></tr></thead>
                     <tbody>
         `;
-        if (!grnList.length) html += `<tr><td colspan="8" style="text-align:center;color:#999;">Chưa có phiếu nhập kho</td></tr>`;
-        for (const g of grnList) {
-            const po = await getPOById(g.poId);
-            const projectId = po ? getProjectIdByCode(po.projectCode) : null;
-            const projectLink = projectId ? 
-                `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="closeModal(); viewProject(${projectId});">${g.projectName || ''}</span>` :
-                (g.projectName || '');
-            const poLink = po ? 
-                `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="viewPO(${po.id})">${po.code}</span>` :
-                `PO-${String(g.poId || '').padStart(3, '0')}`;
-            const whLink = `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="showWarehouseInfoModal(${g.warehouseId})">${getWarehouseCode(g.warehouseId)}</span>`;
-            const statusBadge = getStatusBadge(g.status);
+        if (!grnList || grnList.length === 0) {
+            html += `<tr><td colspan="8" style="text-align:center;color:#999;">Chưa có phiếu nhập kho</td></tr>`;
+        } else {
+            for (const g of grnList) {
+                const po = await getPOById(g.poId);
+                const projectId = po ? getProjectIdByCode(po.projectCode) : null;
+                const projectLink = projectId ? 
+                    `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="closeModal(); viewProject(${projectId});">${g.projectName || ''}</span>` :
+                    (g.projectName || '');
+                const poLink = po ? 
+                    `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="viewPO(${po.id})">${po.code}</span>` :
+                    `PO-${String(g.poId || '').padStart(3, '0')}`;
+                const whLink = `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="showWarehouseInfoModal(${g.warehouseId})">${getWarehouseCode(g.warehouseId)}</span>`;
+                const statusBadge = getStatusBadge(g.status);
 
-            let actions = `<button class="btn btn-info btn-sm" onclick="viewGRN(${g.id})"><i class="fas fa-eye"></i></button>`;
+                let actions = `<button class="btn btn-info btn-sm" onclick="viewGRN(${g.id})"><i class="fas fa-eye"></i></button>`;
 
-            if (g.status === 'DRAFT' && (isPurchasing || isAdmin)) {
-                actions += ` <button class="btn btn-warning btn-sm" onclick="receiveGRN(${g.id})">Nhận vật tư</button>`;
-                actions += ` <button class="btn btn-warning btn-sm" onclick="editGRN(${g.id})"><i class="fas fa-edit"></i></button>`;
+                if (g.status === 'DRAFT' && (isPurchasing || isAdmin)) {
+                    actions += ` <button class="btn btn-warning btn-sm" onclick="receiveGRN(${g.id})">Nhận vật tư</button>`;
+                    actions += ` <button class="btn btn-warning btn-sm" onclick="editGRN(${g.id})"><i class="fas fa-edit"></i></button>`;
+                }
+
+                if (g.status === 'RECEIVED' && (isQC || isAdmin)) {
+                    actions += ` <button class="btn btn-primary btn-sm" onclick="qcCheckGRN(${g.id})">QC kiểm tra</button>`;
+                }
+
+                if (g.status === 'QC_CHECKED' && (isPurchasing || isAdmin)) {
+                    actions += ` <button class="btn btn-success btn-sm" onclick="completeGRN(${g.id})">Hoàn thành</button>`;
+                }
+
+                if (isAdmin && g.status !== 'COMPLETED') {
+                    actions += ` <button class="btn btn-danger btn-sm" onclick="deleteGRN(${g.id})"><i class="fas fa-trash"></i></button>`;
+                }
+
+                html += `<tr>
+                    <td style="cursor:pointer; color:#1a3c6e; font-weight:500;" onclick="viewGRN(${g.id})">${g.code || '--'}</td>
+                    <td>${poLink}</td>
+                    <td>${projectLink}</td>
+                    <td>${whLink}</td>
+                    <td>${g.vendorName || ''}</td>
+                    <td>${g.receiptDate || ''}</td>
+                    <td>${statusBadge}</td>
+                    <td>${actions}</td>
+                </tr>`;
             }
-
-            if (g.status === 'RECEIVED' && (isQC || isAdmin)) {
-                actions += ` <button class="btn btn-primary btn-sm" onclick="qcCheckGRN(${g.id})">QC kiểm tra</button>`;
-            }
-
-            if (g.status === 'QC_CHECKED' && (isPurchasing || isAdmin)) {
-                actions += ` <button class="btn btn-success btn-sm" onclick="completeGRN(${g.id})">Hoàn thành</button>`;
-            }
-
-            if (isAdmin && g.status !== 'COMPLETED') {
-                actions += ` <button class="btn btn-danger btn-sm" onclick="deleteGRN(${g.id})"><i class="fas fa-trash"></i></button>`;
-            }
-
-            html += `<tr>
-                <td style="cursor:pointer; color:#1a3c6e; font-weight:500;" onclick="viewGRN(${g.id})">${g.code}</td>
-                <td>${poLink}</td>
-                <td>${projectLink}</td>
-                <td>${whLink}</td>
-                <td>${g.vendorName || ''}</td>
-                <td>${g.receiptDate || ''}</td>
-                <td>${statusBadge}</td>
-                <td>${actions}</td>
-            </tr>`;
         }
         html += `</tbody></table></div>`;
         return html;
@@ -263,16 +273,22 @@ async function viewGRN(id) {
                 return;
             }
         }
-        const items = g.items ? JSON.parse(g.items) : [];
+        let items = [];
+        try {
+            if (g.items) {
+                items = typeof g.items === 'string' ? JSON.parse(g.items) : g.items;
+            }
+        } catch (e) { items = []; }
+        
         let itemsHtml = items.map(it =>
-            `<tr><td>${getItemCode(it.itemId)}</td><td>${getItemName(it.itemId)}</td><td>${it.poQty}</td><td>${it.actualQty}</td><td>${it.diff || (it.actualQty - it.poQty)}</td><td>${it.serial || ''}</td><td>${it.condition || ''}</td></tr>`
+            `<tr><td>${getItemCode(it.itemId)}</td><td>${getItemName(it.itemId)}</td><td>${it.poQty || 0}</td><td>${it.actualQty || 0}</td><td>${it.diff || (it.actualQty - it.poQty)}</td><td>${it.serial || ''}</td><td>${it.condition || ''}</td></tr>`
         ).join('');
 
         const progressHtml = renderGRNProgress(g.status);
 
         showModal('Chi tiết phiếu nhập', `
             <div class="detail-grid">
-                <div><span class="label">Mã phiếu:</span> <span class="value">${g.code}</span></div>
+                <div><span class="label">Mã phiếu:</span> <span class="value">${g.code || '--'}</span></div>
                 <div><span class="label">PO liên quan:</span> <span class="value">${g.poId ? 'PO-'+String(g.poId).padStart(3,'0') : ''}</span></div>
                 <div><span class="label">Dự án:</span> <span class="value">${g.projectName || ''}</span></div>
                 <div><span class="label">Kho:</span> <span class="value">${getWarehouseName(g.warehouseId)}</span></div>
@@ -347,16 +363,21 @@ async function loadGRNItemsFromPO(poId) {
         const po = pos.find(p => p.id === poId);
         if (!po) return;
         const container = document.getElementById('grn-items-container');
-        const items = po.items ? JSON.parse(po.items) : [];
+        let items = [];
+        try {
+            if (po.items) {
+                items = typeof po.items === 'string' ? JSON.parse(po.items) : po.items;
+            }
+        } catch (e) { items = []; }
         let html = `<div class="form-group"><label>Danh sách vật tư</label>`;
         items.forEach(item => {
             const itemName = getItemName(item.itemId);
             const unit = getItemUnit(item.itemId);
             html += `
                 <div class="item-row" data-item-id="${item.itemId}">
-                    <span style="min-width:150px;">${itemName} (${unit})</span>
-                    <input type="number" class="grn-po-qty" value="${item.quantity}" readonly style="width:80px; background:#f0f0f0;">
-                    <input type="number" class="grn-actual-qty" value="${item.quantity}" placeholder="Thực nhận" style="width:100px;" step="0.01">
+                    <span style="min-width:150px;">${itemName || '--'} (${unit || ''})</span>
+                    <input type="number" class="grn-po-qty" value="${item.quantity || 0}" readonly style="width:80px; background:#f0f0f0;">
+                    <input type="number" class="grn-actual-qty" value="${item.quantity || 0}" placeholder="Thực nhận" style="width:100px;" step="0.01">
                     <input type="text" class="grn-serial" placeholder="Serial/Lô" style="width:150px;">
                     <select class="grn-condition"><option value="GOOD">Tốt</option><option value="DAMAGED">Hỏng</option><option value="REJECTED">Từ chối</option></select>
                 </div>
@@ -455,15 +476,20 @@ async function editGRN(id) {
             showWarning('Chỉ có thể sửa phiếu ở trạng thái DRAFT.');
             return;
         }
-        const items = grn.items ? JSON.parse(grn.items) : [];
+        let items = [];
+        try {
+            if (grn.items) {
+                items = typeof grn.items === 'string' ? JSON.parse(grn.items) : grn.items;
+            }
+        } catch (e) { items = []; }
         let itemsHtml = items.map(it => {
             const itemName = getItemName(it.itemId);
             const unit = getItemUnit(it.itemId);
             return `
                 <div class="item-row" data-item-id="${it.itemId}">
-                    <span style="min-width:150px; font-weight:500;">${itemName} (${unit})</span>
-                    <input type="number" class="grn-po-qty" value="${it.poQty}" readonly style="width:80px; background:#f0f0f0;">
-                    <input type="number" class="grn-actual-qty" value="${it.actualQty}" placeholder="Thực nhận" style="width:100px;" step="0.01">
+                    <span style="min-width:150px; font-weight:500;">${itemName || '--'} (${unit || ''})</span>
+                    <input type="number" class="grn-po-qty" value="${it.poQty || 0}" readonly style="width:80px; background:#f0f0f0;">
+                    <input type="number" class="grn-actual-qty" value="${it.actualQty || 0}" placeholder="Thực nhận" style="width:100px;" step="0.01">
                     <input type="text" class="grn-serial" value="${it.serial || ''}" placeholder="Serial/Lô" style="width:150px;">
                     <select class="grn-condition">
                         <option value="GOOD" ${it.condition === 'GOOD' ? 'selected' : ''}>Tốt</option>
@@ -475,7 +501,7 @@ async function editGRN(id) {
         }).join('');
 
         showModal('Sửa phiếu nhập kho', `
-            <div class="form-group"><label>Mã phiếu</label><input value="${grn.code}" readonly style="background:#f0f0f0;"></div>
+            <div class="form-group"><label>Mã phiếu</label><input value="${grn.code || '--'}" readonly style="background:#f0f0f0;"></div>
             <div class="form-group"><label>Ngày nhập</label><input id="f-grn-edit-date" type="date" value="${grn.receiptDate || ''}"></div>
             <div class="form-group"><label>Người giao</label><input id="f-grn-edit-receiver" value="${grn.receiver || ''}"></div>
             <div class="form-group"><label>Thủ kho nhận</label><input id="f-grn-edit-whstaff" value="${grn.warehouseStaff || ''}"></div>
@@ -519,7 +545,12 @@ async function updateGRN(id) {
             showError('Không tìm thấy phiếu!');
             return;
         }
-        const items = grn.items ? JSON.parse(grn.items) : [];
+        let items = [];
+        try {
+            if (grn.items) {
+                items = typeof grn.items === 'string' ? JSON.parse(grn.items) : grn.items;
+            }
+        } catch (e) { items = []; }
         let hasError = false;
         rows.forEach(row => {
             const itemId = parseInt(row.dataset.itemId);
@@ -578,15 +609,20 @@ async function receiveGRN(id) {
             showWarning('Chỉ có thể nhận phiếu ở trạng thái DRAFT.');
             return;
         }
-        const items = grn.items ? JSON.parse(grn.items) : [];
+        let items = [];
+        try {
+            if (grn.items) {
+                items = typeof grn.items === 'string' ? JSON.parse(grn.items) : grn.items;
+            }
+        } catch (e) { items = []; }
         let itemsHtml = items.map(it => {
             const itemName = getItemName(it.itemId);
             const unit = getItemUnit(it.itemId);
             return `
                 <div class="item-row" data-item-id="${it.itemId}">
-                    <span style="min-width:150px; font-weight:500;">${itemName} (${unit})</span>
-                    <input type="number" class="grn-po-qty" value="${it.poQty}" readonly style="width:80px; background:#f0f0f0;">
-                    <input type="number" class="grn-actual-qty" value="${it.actualQty}" placeholder="Thực nhận" style="width:100px;" step="0.01">
+                    <span style="min-width:150px; font-weight:500;">${itemName || '--'} (${unit || ''})</span>
+                    <input type="number" class="grn-po-qty" value="${it.poQty || 0}" readonly style="width:80px; background:#f0f0f0;">
+                    <input type="number" class="grn-actual-qty" value="${it.actualQty || 0}" placeholder="Thực nhận" style="width:100px;" step="0.01">
                     <input type="text" class="grn-serial" value="${it.serial || ''}" placeholder="Serial/Lô" style="width:150px;">
                     <select class="grn-condition">
                         <option value="GOOD" ${it.condition === 'GOOD' ? 'selected' : ''}>Tốt</option>
@@ -599,11 +635,11 @@ async function receiveGRN(id) {
 
         showModal('Thủ kho nhận vật tư', `
             <div style="margin-bottom:12px;">
-                <strong>Phiếu:</strong> ${grn.code} - ${grn.projectName}
+                <strong>Phiếu:</strong> ${grn.code || '--'} - ${grn.projectName || ''}
             </div>
             <div class="form-group">
                 <label>Thủ kho nhận</label>
-                <input id="f-grn-whstaff" value="${grn.warehouseStaff || getUser()?.name}" placeholder="Tên thủ kho">
+                <input id="f-grn-whstaff" value="${grn.warehouseStaff || getUser()?.name || ''}" placeholder="Tên thủ kho">
             </div>
             <div class="form-group">
                 <label>Ngày nhận</label>
@@ -642,7 +678,12 @@ async function confirmReceiveGRN(id) {
             showError('Không tìm thấy phiếu!');
             return;
         }
-        const items = grn.items ? JSON.parse(grn.items) : [];
+        let items = [];
+        try {
+            if (grn.items) {
+                items = typeof grn.items === 'string' ? JSON.parse(grn.items) : grn.items;
+            }
+        } catch (e) { items = []; }
         let hasError = false;
         const updatedItems = [];
         rows.forEach(row => {
@@ -701,11 +742,11 @@ async function qcCheckGRN(id) {
 
         showModal('QC kiểm tra chất lượng', `
             <div style="margin-bottom:12px;">
-                <strong>Phiếu:</strong> ${grn.code} - ${grn.projectName}
+                <strong>Phiếu:</strong> ${grn.code || '--'} - ${grn.projectName || ''}
             </div>
             <div class="form-group">
                 <label>QC xác nhận</label>
-                <input id="f-grn-qc" value="${grn.qcConfirm || getUser()?.name}" placeholder="Tên QC">
+                <input id="f-grn-qc" value="${grn.qcConfirm || getUser()?.name || ''}" placeholder="Tên QC">
             </div>
             <div class="form-group">
                 <label>Kết quả kiểm tra</label>
@@ -835,40 +876,43 @@ async function renderSTOListHTML() {
                     <thead><tr><th>Mã</th><th>Kho đi</th><th>Kho đến</th><th>Dự án</th><th>Ngày xuất</th><th>Trạng thái</th><th>HĐ</th></tr></thead>
                     <tbody>
         `;
-        if (!stoList.length) html += `<tr><td colspan="7" style="text-align:center;color:#999;">Chưa có phiếu chuyển kho</td></tr>`;
-        for (const s of stoList) {
-            const projectId = getProjectIdByCode(s.projectCode);
-            const projectLink = projectId ? 
-                `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="closeModal(); viewProject(${projectId});">${s.projectName || ''}</span>` :
-                (s.projectName || '');
-            const fromWhLink = `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="showWarehouseInfoModal(${s.fromWarehouseId})">${getWarehouseCode(s.fromWarehouseId)}</span>`;
-            const toWhLink = `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="showWarehouseInfoModal(${s.toWarehouseId})">${getWarehouseCode(s.toWarehouseId)}</span>`;
-            const statusBadge = getStatusBadge(s.status);
+        if (!stoList || stoList.length === 0) {
+            html += `<tr><td colspan="7" style="text-align:center;color:#999;">Chưa có phiếu chuyển kho</td></tr>`;
+        } else {
+            for (const s of stoList) {
+                const projectId = getProjectIdByCode(s.projectCode);
+                const projectLink = projectId ? 
+                    `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="closeModal(); viewProject(${projectId});">${s.projectName || ''}</span>` :
+                    (s.projectName || '');
+                const fromWhLink = `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="showWarehouseInfoModal(${s.fromWarehouseId})">${getWarehouseCode(s.fromWarehouseId)}</span>`;
+                const toWhLink = `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="showWarehouseInfoModal(${s.toWarehouseId})">${getWarehouseCode(s.toWarehouseId)}</span>`;
+                const statusBadge = getStatusBadge(s.status);
 
-            let actions = `<button class="btn btn-info btn-sm" onclick="viewSTO(${s.id})"><i class="fas fa-eye"></i></button>`;
-            if (s.status === 'DRAFT' && (isPurchasing || isAdmin)) {
-                actions += ` <button class="btn btn-warning btn-sm" onclick="editSTO(${s.id})"><i class="fas fa-edit"></i></button>`;
-                actions += ` <button class="btn btn-success btn-sm" onclick="submitSTO(${s.id})">Gửi duyệt</button>`;
-            }
-            if (s.status === 'PENDING' && (isPurchasing || isAdmin)) {
-                actions += ` <button class="btn btn-success btn-sm" onclick="approveSTO(${s.id})">Duyệt</button>`;
-            }
-            if (s.status === 'APPROVED' && (isPurchasing || isAdmin)) {
-                actions += ` <button class="btn btn-success btn-sm" onclick="completeSTO(${s.id})">Hoàn thành</button>`;
-            }
-            if (isAdmin) {
-                actions += ` <button class="btn btn-danger btn-sm" onclick="deleteSTO(${s.id})"><i class="fas fa-trash"></i></button>`;
-            }
+                let actions = `<button class="btn btn-info btn-sm" onclick="viewSTO(${s.id})"><i class="fas fa-eye"></i></button>`;
+                if (s.status === 'DRAFT' && (isPurchasing || isAdmin)) {
+                    actions += ` <button class="btn btn-warning btn-sm" onclick="editSTO(${s.id})"><i class="fas fa-edit"></i></button>`;
+                    actions += ` <button class="btn btn-success btn-sm" onclick="submitSTO(${s.id})">Gửi duyệt</button>`;
+                }
+                if (s.status === 'PENDING' && (isPurchasing || isAdmin)) {
+                    actions += ` <button class="btn btn-success btn-sm" onclick="approveSTO(${s.id})">Duyệt</button>`;
+                }
+                if (s.status === 'APPROVED' && (isPurchasing || isAdmin)) {
+                    actions += ` <button class="btn btn-success btn-sm" onclick="completeSTO(${s.id})">Hoàn thành</button>`;
+                }
+                if (isAdmin) {
+                    actions += ` <button class="btn btn-danger btn-sm" onclick="deleteSTO(${s.id})"><i class="fas fa-trash"></i></button>`;
+                }
 
-            html += `<tr>
-                <td style="cursor:pointer; color:#1a3c6e; font-weight:500;" onclick="viewSTO(${s.id})">${s.code}</td>
-                <td>${fromWhLink}</td>
-                <td>${toWhLink}</td>
-                <td>${projectLink}</td>
-                <td>${s.transferDate || ''}</td>
-                <td>${statusBadge}</td>
-                <td>${actions}</td>
-            </tr>`;
+                html += `<tr>
+                    <td style="cursor:pointer; color:#1a3c6e; font-weight:500;" onclick="viewSTO(${s.id})">${s.code || '--'}</td>
+                    <td>${fromWhLink}</td>
+                    <td>${toWhLink}</td>
+                    <td>${projectLink}</td>
+                    <td>${s.transferDate || ''}</td>
+                    <td>${statusBadge}</td>
+                    <td>${actions}</td>
+                </tr>`;
+            }
         }
         html += `</tbody></table></div>`;
         return html;
@@ -892,9 +936,14 @@ async function viewSTO(id) {
                 return;
             }
         }
-        const items = s.items ? JSON.parse(s.items) : [];
+        let items = [];
+        try {
+            if (s.items) {
+                items = typeof s.items === 'string' ? JSON.parse(s.items) : s.items;
+            }
+        } catch (e) { items = []; }
         let itemsHtml = items.map(it =>
-            `<tr><td>${getItemCode(it.itemId)}</td><td>${getItemName(it.itemId)}</td><td>${it.requestedQty}</td><td>${it.actualQty}</td></tr>`
+            `<tr><td>${getItemCode(it.itemId)}</td><td>${getItemName(it.itemId)}</td><td>${it.requestedQty || 0}</td><td>${it.actualQty || 0}</td></tr>`
         ).join('');
         const progressHtml = renderSTOProgress(s.status, s);
         const noteHtml = s.status === 'COMPLETED' 
@@ -903,7 +952,7 @@ async function viewSTO(id) {
 
         showModal('Chi tiết phiếu chuyển kho', `
             <div class="detail-grid">
-                <div><span class="label">Mã phiếu:</span> <span class="value">${s.code}</span></div>
+                <div><span class="label">Mã phiếu:</span> <span class="value">${s.code || '--'}</span></div>
                 <div><span class="label">Kho đi:</span> <span class="value">${getWarehouseName(s.fromWarehouseId)}</span></div>
                 <div><span class="label">Kho đến:</span> <span class="value">${getWarehouseName(s.toWarehouseId)}</span></div>
                 <div><span class="label">Dự án:</span> <span class="value">${s.projectName || ''}</span></div>
@@ -954,7 +1003,7 @@ function showAddSTO() {
                 <div class="form-group"><label>Ghi chú</label><textarea id="f-sto-note" rows="2"></textarea></div>
                 <div id="sto-items-container">
                     <div class="form-group"><label>Danh sách vật tư</label>
-                        ${buildItemRows([{itemId:'', quantity:''}], 'sto')}
+                        ${buildItemRowsForForm([{itemId:'', quantity:''}], 'sto')}
                     </div>
                 </div>
                 <div class="modal-actions">
@@ -964,6 +1013,21 @@ function showAddSTO() {
             `);
         }).catch(err => showError('Không thể tải dự án: ' + err.message));
     }).catch(err => showError('Không thể tải kho: ' + err.message));
+}
+
+// Hàm collectItemsFromModal (tương tự collectItemsFromForm nhưng dùng cho modal)
+function collectItemsFromModal(container) {
+    const rows = container.querySelectorAll('.item-row');
+    const items = [];
+    rows.forEach(row => {
+        const sel = row.querySelector('select');
+        const qty = row.querySelector('input[type="number"]');
+        if (!sel || !qty) return;
+        const itemId = parseInt(sel.value);
+        const quantity = parseFloat(qty.value);
+        if (itemId && !isNaN(quantity) && quantity > 0) items.push({ itemId, quantity });
+    });
+    return items;
 }
 
 async function saveSTO() {
@@ -987,7 +1051,6 @@ async function saveSTO() {
         return;
     }
     try {
-        // Kiểm tra tồn kho
         const inventory = await api.getInventoryByWarehouse(fromWH);
         let hasError = false;
         items.forEach(it => {
@@ -1041,21 +1104,26 @@ async function editSTO(id) {
             showWarning('Chỉ có thể sửa phiếu ở trạng thái DRAFT.');
             return;
         }
-        const items = sto.items ? JSON.parse(sto.items) : [];
+        let items = [];
+        try {
+            if (sto.items) {
+                items = typeof sto.items === 'string' ? JSON.parse(sto.items) : sto.items;
+            }
+        } catch (e) { items = []; }
         let itemsHtml = items.map(it => {
             const itemName = getItemName(it.itemId);
             const unit = getItemUnit(it.itemId);
             return `
                 <div class="item-row" data-item-id="${it.itemId}">
-                    <span style="min-width:150px; font-weight:500;">${itemName} (${unit})</span>
-                    <input type="number" class="sto-req-qty" value="${it.requestedQty}" readonly style="width:80px; background:#f0f0f0;">
-                    <input type="number" class="sto-actual-qty" value="${it.actualQty}" placeholder="Thực xuất" style="width:100px;" step="0.01">
+                    <span style="min-width:150px; font-weight:500;">${itemName || '--'} (${unit || ''})</span>
+                    <input type="number" class="sto-req-qty" value="${it.requestedQty || 0}" readonly style="width:80px; background:#f0f0f0;">
+                    <input type="number" class="sto-actual-qty" value="${it.actualQty || 0}" placeholder="Thực xuất" style="width:100px;" step="0.01">
                 </div>
             `;
         }).join('');
 
         showModal('Sửa phiếu chuyển kho', `
-            <div class="form-group"><label>Mã phiếu</label><input value="${sto.code}" readonly style="background:#f0f0f0;"></div>
+            <div class="form-group"><label>Mã phiếu</label><input value="${sto.code || '--'}" readonly style="background:#f0f0f0;"></div>
             <div class="form-group"><label>Ngày xuất</label><input id="f-sto-edit-date" type="date" value="${sto.transferDate || ''}"></div>
             <div class="form-group"><label>Người lập phiếu</label><input id="f-sto-edit-requester" value="${sto.requestedBy || ''}"></div>
             <div class="form-group"><label>Thủ kho xuất</label><input id="f-sto-edit-whstaff" value="${sto.warehouseStaff || ''}"></div>
@@ -1096,7 +1164,12 @@ async function updateSTO(id) {
             showError('Không tìm thấy phiếu!');
             return;
         }
-        const items = sto.items ? JSON.parse(sto.items) : [];
+        let items = [];
+        try {
+            if (sto.items) {
+                items = typeof sto.items === 'string' ? JSON.parse(sto.items) : sto.items;
+            }
+        } catch (e) { items = []; }
         const fromWhId = sto.fromWarehouseId;
         const inventory = await api.getInventoryByWarehouse(fromWhId);
         const rows = document.querySelectorAll('#sto-edit-items-container .item-row');
@@ -1267,8 +1340,8 @@ async function showEditWarehouse(whId) {
         const projectOpts = projects.map(p =>
             `<option value="${p.id}" ${p.id === wh.projectId ? 'selected' : ''}>${p.code} - ${p.name}</option>`).join('');
         showModal('Sửa kho', `
-            <div class="form-group"><label>Mã kho</label><input id="f-wh-code" value="${wh.code}"></div>
-            <div class="form-group"><label>Tên kho</label><input id="f-wh-name" value="${wh.name}"></div>
+            <div class="form-group"><label>Mã kho</label><input id="f-wh-code" value="${wh.code || ''}"></div>
+            <div class="form-group"><label>Tên kho</label><input id="f-wh-name" value="${wh.name || ''}"></div>
             <div class="form-group"><label>Loại kho</label>
                 <select id="f-wh-type" onchange="toggleProjectField()">
                     <option value="CENTRAL" ${wh.type === 'CENTRAL' ? 'selected' : ''}>Kho tổng</option>
@@ -1371,7 +1444,7 @@ async function editInventoryItem(invId) {
             <div class="form-group"><label>Vật tư</label>
                 <select id="f-inv-item">${itemOpts}</select>
             </div>
-            <div class="form-group"><label>Số lượng</label><input id="f-inv-qty" type="number" step="0.01" value="${inv.quantity}"></div>
+            <div class="form-group"><label>Số lượng</label><input id="f-inv-qty" type="number" step="0.01" value="${inv.quantity || 0}"></div>
             <div class="modal-actions">
                 <button class="btn" onclick="updateInventoryItem(${invId})">Cập nhật</button>
                 <button class="btn btn-danger" onclick="closeModal()">Hủy</button>
@@ -1422,6 +1495,15 @@ async function deleteInventoryItem(invId) {
     }
 }
 
+// ====== IN PHIẾU ======
+window.printGRN = function(id) {
+    showInfo('Chức năng in GRN đang được phát triển.');
+};
+
+window.printSTO = function(id) {
+    showInfo('Chức năng in STO đang được phát triển.');
+};
+
 // ================================================================
 // EXPORT CÁC HÀM RA WINDOW
 // ================================================================
@@ -1465,4 +1547,4 @@ window.renderSTOProgress = renderSTOProgress;
 window.printGRN = printGRN;
 window.printSTO = printSTO;
 
-console.log('✅ Warehouse module updated to use API.');
+console.log('✅ Warehouse module updated to use API (fixed null display).');

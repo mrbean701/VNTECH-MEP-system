@@ -2,8 +2,12 @@
 // MIN STOCK ALERT - Cảnh báo tồn kho tối thiểu
 // ================================================================
 
-function renderMinStockPage() {
+async function renderMinStockPage() {
     console.log('🔄 renderMinStockPage được gọi');
+
+    // Đảm bảo dữ liệu mẫu luôn có nếu localStorage trống
+    if (typeof initData === 'function') initData();
+
     let page = document.getElementById('page-min-stock');
     if (!page) {
         const content = document.querySelector('.content');
@@ -24,6 +28,12 @@ function renderMinStockPage() {
     }
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     page.classList.add('active');
+
+    // Nạp dữ liệu từ API (nếu backend chạy) hoặc localStorage (fallback)
+    try { await api.getWarehouses(); } catch(e) {}
+    try { await api.getInventory(); } catch(e) {}
+    try { await api.getItems(); } catch(e) {}
+
     renderMinStockList();
 }
 
@@ -118,9 +128,40 @@ function renderMinStockList() {
     `;
     container.innerHTML = html;
 
-    // Gắn sự kiện cho filter
     document.getElementById('min-stock-wh-filter')?.addEventListener('change', renderMinStockList);
     document.getElementById('min-stock-status-filter')?.addEventListener('change', renderMinStockList);
+}
+
+// ====== LẤY DỮ LIỆU THEO TRẠNG THÁI ======
+function getItemsByMinStockStatus(warehouseId, status) {
+    const inventory = getInventory();
+    const items = getItems();
+    const minStock = getMinStock();
+
+    let result = [];
+    inventory.filter(inv => inv.warehouse_id === warehouseId || inv.warehouseId === warehouseId).forEach(inv => {
+        const item = items.find(i => i.id === inv.item_id);
+        if (!item) return;
+        const min = minStock.find(m => m.warehouseId === warehouseId && m.itemId === inv.item_id);
+        const minQty = min ? min.minQuantity : 0;
+        const currentQty = inv.quantity || 0;
+        let itemStatus = 'safe';
+        if (currentQty < minQty) itemStatus = 'under';
+        else if (currentQty < minQty * 1.2) itemStatus = 'warning';
+
+        if (status === 'all' || status === itemStatus) {
+            result.push({
+                id: item.id,
+                code: item.code,
+                name: item.name,
+                unit: item.unit,
+                currentQty,
+                minQty,
+                status: itemStatus
+            });
+        }
+    });
+    return result;
 }
 
 // ====== LƯU NGƯỠNG ======
@@ -141,9 +182,9 @@ function saveMinStockItem(warehouseId, itemId) {
     } else {
         minStock.push({ warehouseId, itemId, minQuantity: value });
     }
-    saveMinStock(minStock);
+    saveData('min_stock', minStock);
     renderMinStockList();
-    const item = findItemById(itemId);
+    const item = getItems().find(i => i.id === itemId);
     showSuccess(`Đã cập nhật ngưỡng cho ${item ? item.name : itemId} tại kho ${getWarehouseCode(warehouseId)}`);
 }
 
@@ -185,11 +226,8 @@ function addMinStockMenu() {
         if (typeof closeSidebarOnMobile === 'function') closeSidebarOnMobile();
     });
     const inventoryItem = document.querySelector('#menu > li[data-page="inventory"]');
-    if (inventoryItem) {
-        inventoryItem.parentNode.insertBefore(li, inventoryItem.nextSibling);
-    } else {
-        menu.appendChild(li);
-    }
+    if (inventoryItem) inventoryItem.parentNode.insertBefore(li, inventoryItem.nextSibling);
+    else menu.appendChild(li);
     console.log('✅ Menu Cảnh báo tồn đã được thêm.');
 }
 
@@ -204,5 +242,6 @@ window.renderMinStockPage = renderMinStockPage;
 window.renderMinStockList = renderMinStockList;
 window.saveMinStockItem = saveMinStockItem;
 window.exportMinStock = exportMinStock;
+window.getItemsByMinStockStatus = getItemsByMinStockStatus;
 
 console.log('✅ Min Stock module loaded successfully.');

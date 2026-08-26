@@ -1,5 +1,5 @@
 // ================================================================
-// PROJECTS - Quản lý dự án (sử dụng API)
+// PROJECTS - Quản lý dự án (sử dụng API) - ĐÃ SỬA LỖI NULL
 // ================================================================
 
 // Biến lưu trạng thái cho modal chi tiết dự án
@@ -14,9 +14,9 @@ async function renderProjects() {
     try {
         const projects = await api.getProjects();
         const filter = document.getElementById('project-filter')?.value?.toLowerCase() || '';
-        const filtered = projects.filter(p => 
-            p.code.toLowerCase().includes(filter) || 
-            p.name.toLowerCase().includes(filter)
+        const filtered = projects.filter(p =>
+            (p.code || '').toLowerCase().includes(filter) ||
+            (p.name || '').toLowerCase().includes(filter)
         );
         const user = getUser();
         const canEdit = ['ADMIN', 'PLANNING', 'PROJECT', 'CEO'].includes(user?.role || '');
@@ -42,7 +42,6 @@ async function renderProjects() {
             html += `<tr><td colspan="7" style="text-align:center; color:#999;">Không có dữ liệu</td></tr>`;
         }
 
-        // Lấy danh sách kho để hiển thị
         const warehouses = await api.getWarehouses();
 
         for (const p of filtered) {
@@ -78,8 +77,8 @@ async function renderProjects() {
 
             html += `
                 <tr>
-                    <td style="cursor:pointer; color:#1a3c6e; font-weight:500;" onclick="viewProject(${p.id})">${p.code}</td>
-                    <td style="cursor:pointer; color:#1a3c6e;" onclick="viewProject(${p.id})">${p.name}</td>
+                    <td style="cursor:pointer; color:#1a3c6e; font-weight:500;" onclick="viewProject(${p.id})">${p.code || '--'}</td>
+                    <td style="cursor:pointer; color:#1a3c6e;" onclick="viewProject(${p.id})">${p.name || '--'}</td>
                     <td>${p.client || ''}</td>
                     <td>${p.commander || ''}</td>
                     <td>${statusBadge}</td>
@@ -142,7 +141,6 @@ async function updateProject(id) {
     }
 
     try {
-        // Kiểm tra nếu chuyển từ ACTIVE sang INACTIVE
         const currentProject = await api.getProjectById(id);
         if (currentProject.status === 'ACTIVE' && newStatus === 'INACTIVE') {
             if (!confirm(`Dự án "${name}" đang chuyển sang trạng thái NGỪNG HOẠT ĐỘNG.\n\nBạn có muốn đóng kho dự án này không?\n(Kho sẽ chuyển sang trạng thái NGỪNG HOẠT ĐỘNG)`)) {
@@ -195,8 +193,8 @@ async function editProject(id) {
         }
 
         showModal('Sửa dự án', `
-            <div class="form-group"><label>Mã dự án</label><input id="f-project-code" value="${project.code}" required></div>
-            <div class="form-group"><label>Tên dự án</label><input id="f-project-name" value="${project.name}" required></div>
+            <div class="form-group"><label>Mã dự án</label><input id="f-project-code" value="${project.code || ''}" required></div>
+            <div class="form-group"><label>Tên dự án</label><input id="f-project-name" value="${project.name || ''}" required></div>
             <div class="form-group"><label>Chủ đầu tư</label><input id="f-project-client" value="${project.client || ''}"></div>
             <div class="form-group"><label>PM/Chỉ huy</label><input id="f-project-commander" value="${project.commander || ''}"></div>
             <div class="form-group"><label>Ngày bắt đầu</label><input id="f-project-start" type="date" value="${project.startDate || ''}"></div>
@@ -277,8 +275,8 @@ async function renderProjectModal(project) {
                         <tbody>
                             ${projectPRs.map(pr => `
                                 <tr>
-                                    <td style="cursor:pointer; color:#1a3c6e; font-weight:500;" onclick="viewPR(${pr.id})">${pr.code}</td>
-                                    <td>${pr.vendorName || pr.vendorCode || ''}</td>
+                                    <td style="cursor:pointer; color:#1a3c6e; font-weight:500;" onclick="viewPR(${pr.id})">${pr.code || '--'}</td>
+                                    <td>${pr.vendorName || pr.vendorCode || '--'}</td>
                                     <td>${getStatusBadge(pr.status)}</td>
                                     <td>${pr.approvalStep || 1}/3</td>
                                     <td>
@@ -306,8 +304,8 @@ async function renderProjectModal(project) {
                         <tbody>
                             ${projectPOs.map(po => `
                                 <tr>
-                                    <td style="cursor:pointer; color:#1a3c6e; font-weight:500;" onclick="viewPO(${po.id})">${po.code}</td>
-                                    <td>${po.vendorName || po.vendorCode || ''}</td>
+                                    <td style="cursor:pointer; color:#1a3c6e; font-weight:500;" onclick="viewPO(${po.id})">${po.code || '--'}</td>
+                                    <td>${po.vendorName || po.vendorCode || '--'}</td>
                                     <td>${getStatusBadge(po.status)}</td>
                                     <td>${po.approvalStep || 1}/3</td>
                                     <td>
@@ -340,7 +338,7 @@ async function renderProjectModal(project) {
                         <div>
                             <div style="font-size:16px; font-weight:600; color:#1a3c6e;">
                                 <span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="showWarehouseInfoModal(${wh.id})">
-                                    ${wh.code} - ${wh.name}
+                                    ${wh.code || '--'} - ${wh.name || '--'}
                                 </span>
                             </div>
                             <div style="margin-top:4px;">
@@ -382,8 +380,8 @@ async function renderProjectModal(project) {
 
                 <div id="tab-info">
                     <div class="detail-grid">
-                        <div><span class="label">Mã dự án:</span> <span class="value">${project.code}</span></div>
-                        <div><span class="label">Tên dự án:</span> <span class="value">${project.name}</span></div>
+                        <div><span class="label">Mã dự án:</span> <span class="value">${project.code || '--'}</span></div>
+                        <div><span class="label">Tên dự án:</span> <span class="value">${project.name || '--'}</span></div>
                         <div><span class="label">Chủ đầu tư:</span> <span class="value">${project.client || ''}</span></div>
                         <div><span class="label">PM/Chỉ huy:</span> <span class="value">${project.commander || ''}</span></div>
                         <div><span class="label">Ngày bắt đầu:</span> <span class="value">${project.startDate || ''}</span></div>
@@ -450,7 +448,7 @@ async function showChangeWhStatusModal(projectId) {
         showModal('Đổi trạng thái kho', `
             <div style="margin-bottom:12px;">
                 <div style="margin-bottom:12px;">
-                    <strong>Kho:</strong> ${wh.name} (${wh.code})
+                    <strong>Kho:</strong> ${wh.name || wh.code || '--'} (${wh.code || '--'})
                 </div>
                 <div style="margin-bottom:12px;">
                     <strong>Trạng thái hiện tại:</strong> ${currentStatus}
@@ -560,14 +558,14 @@ function renderPRDetailInline(pr, project) {
                 <i class="fas fa-arrow-left"></i> Quay lại danh sách
             </button>
             <div class="detail-grid">
-                <div><span class="label">Mã PR:</span> <span class="value">${pr.code}</span></div>
+                <div><span class="label">Mã PR:</span> <span class="value">${pr.code || '--'}</span></div>
                 <div><span class="label">Ngày tạo:</span> <span class="value">${pr.createdAt || ''}</span></div>
                 <div><span class="label">Dự án:</span> <span class="value">${project ? project.name : pr.projectName || ''}</span></div>
-                <div><span class="label">Nhà cung cấp:</span> <span class="value">${pr.vendorName || pr.vendorCode || ''}</span></div>
+                <div><span class="label">Nhà cung cấp:</span> <span class="value">${pr.vendorName || pr.vendorCode || '--'}</span></div>
                 <div><span class="label">Trạng thái:</span> <span class="value">${getStatusBadge(pr.status)}</span></div>
                 <div><span class="label">Bước duyệt:</span> <span class="value">${pr.approvalStep || 1}/3</span></div>
                 <div style="grid-column:1/-1;"><span class="label">Tiến độ duyệt:</span><br>${approvalHtml}</div>
-                <div style="grid-column:1/-1;"><span class="label">Danh sách vật tư:</span><br><span class="value">${itemsStr}</span></div>
+                <div style="grid-column:1/-1;"><span class="label">Danh sách vật tư:</span><br><span class="value">${itemsStr || '--'}</span></div>
                 <div style="grid-column:1/-1;"><span class="label">Ghi chú:</span> <span class="value">${pr.note || ''}</span></div>
             </div>
             ${pr.status === 'PENDING' ? `
@@ -594,14 +592,14 @@ function renderPODetailInline(po, project) {
                 <i class="fas fa-arrow-left"></i> Quay lại danh sách
             </button>
             <div class="detail-grid">
-                <div><span class="label">Mã PO:</span> <span class="value">${po.code}</span></div>
+                <div><span class="label">Mã PO:</span> <span class="value">${po.code || '--'}</span></div>
                 <div><span class="label">Ngày tạo:</span> <span class="value">${po.createdAt || ''}</span></div>
                 <div><span class="label">Dự án:</span> <span class="value">${project ? project.name : po.projectName || ''}</span></div>
-                <div><span class="label">Nhà cung cấp:</span> <span class="value">${po.vendorName || po.vendorCode || ''}</span></div>
+                <div><span class="label">Nhà cung cấp:</span> <span class="value">${po.vendorName || po.vendorCode || '--'}</span></div>
                 <div><span class="label">Trạng thái:</span> <span class="value">${getStatusBadge(po.status)}</span></div>
                 <div><span class="label">Bước duyệt:</span> <span class="value">${po.approvalStep || 1}/3</span></div>
                 <div style="grid-column:1/-1;"><span class="label">Tiến độ duyệt:</span><br>${approvalHtml}</div>
-                <div style="grid-column:1/-1;"><span class="label">Danh sách vật tư:</span><br><span class="value">${itemsStr}</span></div>
+                <div style="grid-column:1/-1;"><span class="label">Danh sách vật tư:</span><br><span class="value">${itemsStr || '--'}</span></div>
                 <div style="grid-column:1/-1;"><span class="label">Ghi chú:</span> <span class="value">${po.note || ''}</span></div>
             </div>
             ${po.status === 'PENDING' ? `
@@ -671,4 +669,4 @@ window.backToProjectList = backToProjectList;
 window.showChangeWhStatusModal = showChangeWhStatusModal;
 window.confirmChangeWhStatus = confirmChangeWhStatus;
 
-console.log('✅ Projects module updated to use API.');
+console.log('✅ Projects module updated to use API (fixed null display).');
