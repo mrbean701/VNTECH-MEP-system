@@ -320,7 +320,87 @@ document.addEventListener('DOMContentLoaded', function() {
     console.log('✅ Sidebar fix applied (toggle hidden when open).');
 });
 </script>
+<script type="module">
+    import { getProjects, createProject, updateProject, deleteProject } from './js/services/projectService.js';
 
+    // Hàm tải danh sách
+    window.loadProjects = async function() {
+        try {
+            const response = await getProjects();
+            // Giả sử response có dạng { success: true, data: [...] }
+            const projects = response.data || response; // tùy cấu trúc
+            renderTable(projects);
+        } catch (error) {
+            alert('Không thể tải dữ liệu: ' + error.message);
+        }
+    };
+
+    // Hàm render bảng (giữ nguyên logic hiển thị)
+    function renderTable(projects) {
+        const tbody = document.querySelector('#projects-table tbody');
+        if (!tbody) return;
+        tbody.innerHTML = '';
+        projects.forEach(p => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${p.id}</td>
+                <td>${p.projectCode}</td>
+                <td>${p.projectName}</td>
+                <td>
+                    <button onclick="editProject(${p.id})">Sửa</button>
+                    <button onclick="deleteProjectHandler(${p.id})">Xóa</button>
+                </td>
+            `;
+            tbody.appendChild(row);
+        });
+    }
+
+    // Hàm thêm mới
+    window.addProject = async function() {
+        const name = document.getElementById('projectName').value;
+        const code = document.getElementById('projectCode').value;
+        if (!name || !code) {
+            alert('Vui lòng nhập đầy đủ');
+            return;
+        }
+        try {
+            await createProject({ projectName: name, projectCode: code });
+            alert('Thêm thành công');
+            await window.loadProjects();
+        } catch (error) {
+            alert('Lỗi: ' + error.message);
+        }
+    };
+
+    // Hàm sửa (tương tự)
+    window.editProject = async function(id) {
+        const newName = prompt('Nhập tên mới:');
+        if (newName) {
+            try {
+                await updateProject(id, { projectName: newName });
+                alert('Cập nhật thành công');
+                await window.loadProjects();
+            } catch (error) {
+                alert('Lỗi: ' + error.message);
+            }
+        }
+    };
+
+    // Hàm xóa
+    window.deleteProjectHandler = async function(id) {
+        if (!confirm('Bạn có chắc muốn xóa?')) return;
+        try {
+            await deleteProject(id);
+            alert('Xóa thành công');
+            await window.loadProjects();
+        } catch (error) {
+            alert('Lỗi: ' + error.message);
+        }
+    };
+
+    // Tải dữ liệu khi trang load
+    document.addEventListener('DOMContentLoaded', window.loadProjects);
+</script>
 <!-- ====== JAVASCRIPT FILES ====== -->
 <script src="js/api.js"></script>
 <script src="js/utils.js"></script>

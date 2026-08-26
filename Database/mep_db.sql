@@ -763,6 +763,130 @@ INSERT INTO user_permissions (user_id, permission_key, enabled) VALUES
 (10, 'mr.edit', TRUE),
 (13, 'admin.view', TRUE);
 
+-- =============================================
+-- 1. BỔ SUNG TRƯỜNG AUDIT CHO CÁC BẢNG HIỆN CÓ
+-- =============================================
+
+-- =============================================
+-- KIỂM TRA VÀ BỔ SUNG TRƯỜNG AUDIT CHO CÁC BẢNG
+-- =============================================
+
+-- Sử dụng stored procedure để kiểm tra và thêm cột nếu chưa tồn tại
+DELIMITER $$
+
+DROP PROCEDURE IF EXISTS AddColumnIfNotExists $$
+CREATE PROCEDURE AddColumnIfNotExists(
+    IN tableName VARCHAR(100),
+    IN columnName VARCHAR(100),
+    IN columnDefinition VARCHAR(200)
+)
+BEGIN
+    IF NOT EXISTS (
+        SELECT * FROM information_schema.COLUMNS 
+        WHERE TABLE_SCHEMA = DATABASE() 
+          AND TABLE_NAME = tableName 
+          AND COLUMN_NAME = columnName
+    ) THEN
+        SET @sql = CONCAT('ALTER TABLE ', tableName, ' ADD COLUMN ', columnName, ' ', columnDefinition);
+        PREPARE stmt FROM @sql;
+        EXECUTE stmt;
+        DEALLOCATE PREPARE stmt;
+    END IF;
+END $$
+
+DELIMITER ;
+
+-- Thêm các cột audit cho từng bảng (chỉ thêm nếu chưa có)
+CALL AddColumnIfNotExists('projects', 'created_by', 'INT NULL');
+CALL AddColumnIfNotExists('projects', 'updated_by', 'INT NULL');
+CALL AddColumnIfNotExists('projects', 'created_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP');
+CALL AddColumnIfNotExists('projects', 'updated_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
+
+CALL AddColumnIfNotExists('vendors', 'created_by', 'INT NULL');
+CALL AddColumnIfNotExists('vendors', 'updated_by', 'INT NULL');
+CALL AddColumnIfNotExists('vendors', 'created_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP');
+CALL AddColumnIfNotExists('vendors', 'updated_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
+
+CALL AddColumnIfNotExists('items', 'created_by', 'INT NULL');
+CALL AddColumnIfNotExists('items', 'updated_by', 'INT NULL');
+CALL AddColumnIfNotExists('items', 'created_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP');
+CALL AddColumnIfNotExists('items', 'updated_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
+
+CALL AddColumnIfNotExists('warehouses', 'created_by', 'INT NULL');
+CALL AddColumnIfNotExists('warehouses', 'updated_by', 'INT NULL');
+CALL AddColumnIfNotExists('warehouses', 'created_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP');
+CALL AddColumnIfNotExists('warehouses', 'updated_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
+
+CALL AddColumnIfNotExists('material_requests', 'created_by', 'INT NULL');
+CALL AddColumnIfNotExists('material_requests', 'updated_by', 'INT NULL');
+CALL AddColumnIfNotExists('material_requests', 'created_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP');
+CALL AddColumnIfNotExists('material_requests', 'updated_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
+
+CALL AddColumnIfNotExists('purchase_requests', 'created_by', 'INT NULL');
+CALL AddColumnIfNotExists('purchase_requests', 'updated_by', 'INT NULL');
+CALL AddColumnIfNotExists('purchase_requests', 'created_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP');
+CALL AddColumnIfNotExists('purchase_requests', 'updated_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
+
+CALL AddColumnIfNotExists('purchase_orders', 'created_by', 'INT NULL');
+CALL AddColumnIfNotExists('purchase_orders', 'updated_by', 'INT NULL');
+CALL AddColumnIfNotExists('purchase_orders', 'created_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP');
+CALL AddColumnIfNotExists('purchase_orders', 'updated_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
+
+CALL AddColumnIfNotExists('goods_receipts', 'created_by', 'INT NULL');
+CALL AddColumnIfNotExists('goods_receipts', 'updated_by', 'INT NULL');
+CALL AddColumnIfNotExists('goods_receipts', 'created_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP');
+CALL AddColumnIfNotExists('goods_receipts', 'updated_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
+
+CALL AddColumnIfNotExists('stock_transfers', 'created_by', 'INT NULL');
+CALL AddColumnIfNotExists('stock_transfers', 'updated_by', 'INT NULL');
+CALL AddColumnIfNotExists('stock_transfers', 'created_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP');
+CALL AddColumnIfNotExists('stock_transfers', 'updated_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
+
+CALL AddColumnIfNotExists('users', 'created_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP');
+CALL AddColumnIfNotExists('users', 'updated_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
+
+-- Xóa procedure sau khi sử dụng (tùy chọn)
+DROP PROCEDURE IF EXISTS AddColumnIfNotExists;
+
+-- =============================================
+-- 2. TẠO BẢNG ACTIVITY_LOGS (NẾU CHƯA TỒN TẠI)
+-- =============================================
+
+CREATE TABLE IF NOT EXISTS activity_logs (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NULL,
+    username VARCHAR(100) NULL,
+    action VARCHAR(50) NOT NULL,
+    entity_type VARCHAR(50) NOT NULL,
+    entity_id BIGINT NULL,
+    old_values JSON NULL,
+    new_values JSON NULL,
+    ip_address VARCHAR(45) NULL,
+    user_agent TEXT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =============================================
+-- 3. TẠO INDEX (BỎ QUA NẾU ĐÃ TỒN TẠI)
+-- =============================================
+
+
+-- Index cho các bảng chính (sử dụng cú pháp kiểm tra tồn tại nếu MySQL hỗ trợ)
+-- Nếu không, có thể chạy riêng từng lệnh và bỏ qua lỗi.
+-- Dưới đây là các lệnh thêm index (sẽ báo lỗi nếu đã có, bạn có thể bỏ qua)
+CREATE INDEX idx_projects_code ON projects(project_code);
+CREATE INDEX idx_vendors_name ON vendors(vendor_name);
+CREATE INDEX idx_items_name ON items(item_name);
+CREATE INDEX idx_items_project ON items(project_id);
+CREATE INDEX idx_mr_project ON material_requests(project_id);
+CREATE INDEX idx_mr_status ON material_requests(status);
+CREATE INDEX idx_pr_project ON purchase_requests(project_id);
+CREATE INDEX idx_pr_status ON purchase_requests(status);
+CREATE INDEX idx_po_project ON purchase_orders(project_id);
+CREATE INDEX idx_po_status ON purchase_orders(status);
+CREATE INDEX idx_grn_po ON goods_receipts(purchase_order_id);
+CREATE INDEX idx_sto_from ON stock_transfers(from_warehouse_id);
+CREATE INDEX idx_sto_to ON stock_transfers(to_warehouse_id);
 -- ================================================================
 -- KẾT THÚC
 -- ================================================================
