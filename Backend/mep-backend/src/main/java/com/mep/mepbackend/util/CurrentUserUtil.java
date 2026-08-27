@@ -1,21 +1,20 @@
 package com.mep.mepbackend.util;
 
+import com.mep.mepbackend.entity.Permission;
 import com.mep.mepbackend.entity.User;
+import com.mep.mepbackend.entity.UserPermission;
 import com.mep.mepbackend.exception.UnauthorizedException;
-import com.mep.mepbackend.repository.UserRepository;
-import com.mep.mepbackend.repository.UserPermissionRepository;
 import com.mep.mepbackend.repository.PermissionRepository;
+import com.mep.mepbackend.repository.UserPermissionRepository;
+import com.mep.mepbackend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Component;
 
-import java.util.List;
+import java.util.Optional;
 
-/**
- * Tiện ích lấy thông tin user hiện tại và kiểm tra quyền.
- */
 @Component
 @RequiredArgsConstructor
 public class CurrentUserUtil {
@@ -24,9 +23,6 @@ public class CurrentUserUtil {
     private final UserPermissionRepository userPermissionRepository;
     private final PermissionRepository permissionRepository;
 
-    /**
-     * Lấy thông tin user hiện tại từ SecurityContext.
-     */
     public User getCurrentUser() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth == null || !auth.isAuthenticated() || "anonymousUser".equals(auth.getPrincipal())) {
@@ -35,7 +31,6 @@ public class CurrentUserUtil {
 
         Object principal = auth.getPrincipal();
         String email;
-
         if (principal instanceof UserDetails) {
             email = ((UserDetails) principal).getUsername();
         } else if (principal instanceof String) {
@@ -48,9 +43,6 @@ public class CurrentUserUtil {
                 .orElseThrow(() -> new UnauthorizedException("Không tìm thấy user với email: " + email));
     }
 
-    /**
-     * Kiểm tra user hiện tại có role được chỉ định không.
-     */
     public boolean hasRole(String role) {
         try {
             User user = getCurrentUser();
@@ -60,9 +52,6 @@ public class CurrentUserUtil {
         }
     }
 
-    /**
-     * Kiểm tra user hiện tại có thuộc department được chỉ định không.
-     */
     public boolean isInDepartment(Long departmentId) {
         if (departmentId == null) return true;
         try {
@@ -73,9 +62,6 @@ public class CurrentUserUtil {
         }
     }
 
-    /**
-     * Kiểm tra user hiện tại có role và department phù hợp không.
-     */
     public boolean canApprove(String requiredRole, Long requiredDepartmentId) {
         if (requiredRole == null) return true;
         try {
@@ -90,41 +76,32 @@ public class CurrentUserUtil {
         }
     }
 
-    /**
-     * ✅ KIỂM TRA QUYỀN USER (ƯU TIÊN HƠN ROLE)
-     *
-     * Logic:
-     * 1. Nếu user được gán permission trong bảng user_permissions:
-     *    - enabled = true → có quyền (trả về true)
-     *    - enabled = false → KHÔNG có quyền (trả về false) - ghi đè role
-     * 2. Nếu user KHÔNG được gán trong user_permissions:
-     *    - Kiểm tra role trong bảng permissions
-     *    - Nếu role có permission và enabled = true → true
-     *    - Ngược lại → false
-     * 3. ADMIN luôn có tất cả quyền (có thể bỏ qua nếu muốn quản lý chặt)
-     */
     public boolean hasPermission(String permissionKey) {
         try {
             User user = getCurrentUser();
 
-            // ADMIN luôn có toàn quyền
+            // Admin luôn có toàn quyền
             if ("ADMIN".equals(user.getRole())) {
                 return true;
             }
 
-            // Bước 1: Kiểm tra user_permissions (ưu tiên cao nhất)
-            var userPermOpt = userPermissionRepository.findByUserIdAndPermissionKey(user.getId(), permissionKey);
+            // Bước 1: User permission (ghi đè)
+            Optional<UserPermission> userPermOpt =
+                    userPermissionRepository.findByUserIdAndPermissionKey(user.getId(), permissionKey);
             if (userPermOpt.isPresent()) {
-                return userPermOpt.get().getEnabled(); // true → có quyền, false → bị từ chối
+                return userPermOpt.get().getEnabled();
             }
 
-            // Bước 2: Fallback sang role_permissions
-            var rolePermOpt = permissionRepository.findByRoleAndPermissionKey(user.getRole(), permissionKey);
-            if (rolePermOpt.isPresent()) {
-                return rolePermOpt.get().getEnabled();
+            // Bước 2: Department permission (nếu có)
+            if (user.getDepartmentId() != null) {
+                Optional<Permission> deptPermOpt =
+                        permissionRepository.findByDepartmentIdAndPermissionKey(user.getDepartmentId(), permissionKey);
+                if (deptPermOpt.isPresent()) {
+                    return deptPermOpt.get().getEnabled();
+                }
             }
 
-            // Bước 3: Không có quyền nào được cấp
+            // Bước 3: Không có quyền
             return false;
 
         } catch (Exception e) {
@@ -132,9 +109,6 @@ public class CurrentUserUtil {
         }
     }
 
-    /**
-     * Kiểm tra user có bất kỳ quyền nào trong danh sách không.
-     */
     public boolean hasAnyPermission(String... permissionKeys) {
         for (String key : permissionKeys) {
             if (hasPermission(key)) return true;
@@ -142,9 +116,6 @@ public class CurrentUserUtil {
         return false;
     }
 
-    /**
-     * Kiểm tra user có tất cả quyền trong danh sách không.
-     */
     public boolean hasAllPermissions(String... permissionKeys) {
         for (String key : permissionKeys) {
             if (!hasPermission(key)) return false;

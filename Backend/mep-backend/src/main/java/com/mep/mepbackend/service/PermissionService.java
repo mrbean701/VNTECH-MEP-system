@@ -10,12 +10,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Optional;
 
-/**
- * Service quản lý phân quyền:
- * - Role-based permissions (bảng permissions)
- * - User-based permissions (bảng user_permissions) - ưu tiên hơn role
- */
 @Service
 @RequiredArgsConstructor
 public class PermissionService {
@@ -23,73 +19,58 @@ public class PermissionService {
     private final PermissionRepository permissionRepository;
     private final UserPermissionRepository userPermissionRepository;
 
-    // ===== ROLE PERMISSIONS =====
+    // ===== DEPARTMENT PERMISSIONS =====
 
     public List<Permission> getAll() {
         return permissionRepository.findAll();
     }
 
-    public List<Permission> getByRole(String role) {
-        return permissionRepository.findByRole(role);
+    public List<Permission> getByDepartmentId(Long departmentId) {
+        return permissionRepository.findByDepartmentId(departmentId);
     }
 
-    public Permission getByRoleAndPermission(String role, String permissionKey) {
-        return permissionRepository.findByRoleAndPermissionKey(role, permissionKey)
+    public Permission getByDepartmentAndPermission(Long departmentId, String permissionKey) {
+        return permissionRepository.findByDepartmentIdAndPermissionKey(departmentId, permissionKey)
                 .orElseThrow(() -> new ResourceNotFoundException("Permission not found"));
     }
 
     @Transactional
-    public Permission create(Permission permission) {
-        if (permissionRepository.existsByRoleAndPermissionKey(
-                permission.getRole(), permission.getPermissionKey())) {
-            throw new RuntimeException("Permission đã tồn tại cho role này");
+    public Permission assignDepartmentPermission(Long departmentId, String permissionKey, Boolean enabled) {
+        Optional<Permission> existing = permissionRepository.findByDepartmentIdAndPermissionKey(departmentId, permissionKey);
+        if (existing.isPresent()) {
+            Permission p = existing.get();
+            p.setEnabled(enabled);
+            return permissionRepository.save(p);
+        } else {
+            Permission p = new Permission();
+            p.setRole("DEPARTMENT");
+            p.setDepartmentId(departmentId);
+            p.setPermissionKey(permissionKey);
+            p.setEnabled(enabled);
+            return permissionRepository.save(p);
         }
-        return permissionRepository.save(permission);
     }
 
     @Transactional
-    public Permission update(Long id, Permission details) {
-        Permission perm = permissionRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Permission not found"));
-        perm.setEnabled(details.getEnabled());
-        return permissionRepository.save(perm);
+    public void removeDepartmentPermission(Long departmentId, String permissionKey) {
+        permissionRepository.deleteByDepartmentIdAndPermissionKey(departmentId, permissionKey);
     }
 
-    @Transactional
-    public void delete(Long id) {
-        Permission perm = permissionRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Permission not found"));
-        permissionRepository.delete(perm);
-    }
-
-    @Transactional
-    public void deleteByRoleAndPermission(String role, String permissionKey) {
-        permissionRepository.deleteByRoleAndPermissionKey(role, permissionKey);
-    }
-
-    // ===== USER PERMISSIONS (ưu tiên hơn role) =====
+    // ===== USER PERMISSIONS =====
 
     public List<UserPermission> getUserPermissions(Long userId) {
         return userPermissionRepository.findByUserId(userId);
     }
 
-    /**
-     * Kiểm tra user có quyền cụ thể không (ưu tiên user permission).
-     * Nếu user được gán permission (bất kể true/false) → trả về giá trị đó.
-     * Nếu user không được gán → trả về null (để service quyết định fallback sang role).
-     */
     public Boolean hasUserPermission(Long userId, String permissionKey) {
         return userPermissionRepository.findByUserIdAndPermissionKey(userId, permissionKey)
                 .map(UserPermission::getEnabled)
                 .orElse(null);
     }
 
-    /**
-     * Gán hoặc cập nhật quyền cho user.
-     */
     @Transactional
     public UserPermission assignUserPermission(Long userId, String permissionKey, Boolean enabled) {
-        var existing = userPermissionRepository.findByUserIdAndPermissionKey(userId, permissionKey);
+        Optional<UserPermission> existing = userPermissionRepository.findByUserIdAndPermissionKey(userId, permissionKey);
         if (existing.isPresent()) {
             UserPermission up = existing.get();
             up.setEnabled(enabled);

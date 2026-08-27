@@ -1,66 +1,58 @@
-# 🏗️ MEP Purchasing & Warehouse Management System
+🏗️ MEP Purchasing & Warehouse Management System
+Phiên bản 2.0.24
 
-Phần mềm quản lý quy trình mua hàng, kho vận và cấp phát vật tư cho các công ty MEP (Cơ điện).  
-**Tự động hóa – Minh bạch – Kiểm soát chi phí & tiến độ dự án**
+Phần mềm quản lý quy trình mua hàng, kho vận và cấp phát vật tư cho các công ty MEP (Cơ điện).
+Tự động hóa – Minh bạch – Kiểm soát chi phí & tiến độ dự án
 
----
-
-## 📌 Giới thiệu
-
+📌 Giới thiệu
 Hệ thống giúp số hóa và tự động hóa toàn bộ quy trình từ yêu cầu vật tư tại công trường → phê duyệt → mua hàng → nhập kho → chuyển kho → cấp phát vật tư → hoàn trả, đảm bảo minh bạch, kiểm soát chi phí và tiến độ dự án.
 
-**Điểm nổi bật mới:**
-- 🔄 **Workflow động** – Quản trị viên có thể tạo, chỉnh sửa, kích hoạt nhiều mẫu quy trình duyệt cho từng module (MR, PR, PO, GRN, STO, Issue, MaterialReturn) mà không cần sửa code.
-- 👤 **Phân quyền 2 cấp linh hoạt** – Vừa phân quyền theo role, vừa phân quyền theo từng user (ưu tiên user). Quản lý trực quan qua giao diện Admin.
-- 📊 **Dashboard thông minh** – Tổng hợp dữ liệu theo thời gian thực, hỗ trợ ra quyết định nhanh chóng.
+Điểm nổi bật (phiên bản 2.0.24):
 
----
+🔄 Workflow động & đa mẫu – Quản trị viên có thể tạo, chỉnh sửa, sao chép, kích hoạt nhiều mẫu quy trình duyệt cho từng module (MR, PR, PO, GRN, STO, Issue, MaterialReturn) mà không cần sửa code. Mỗi bước workflow có thể gán trạng thái (status) tùy chỉnh.
 
-## 🚀 Công nghệ sử dụng
+👥 Phân quyền phòng ban + user – Bỏ phân quyền theo role cứng, thay bằng phân quyền theo phòng ban (module-action: VD: mr.view, pr.create, ...). User có thể được gán quyền riêng (ưu tiên hơn phòng ban).
 
-| Thành phần | Công nghệ |
-|------------|-----------|
-| 🖥️ Frontend | HTML, CSS, JavaScript (thuần) |
-| ☕ Backend | Spring Boot (Java) với JWT, Spring Security, JPA/Hibernate |
-| 🗄️ Database | MySQL |
-| 📊 Biểu đồ | Chart.js |
-| 📤 Xuất Excel | SheetJS (XLSX) |
-| 🎨 Icon | Font Awesome 6 |
-| 📄 API Documentation | Swagger/OpenAPI 3 |
-| 🔐 Bảo mật | JWT + BCrypt |
-| 📝 Audit Log | Spring AOP |
-| 🧩 Kiến trúc | Monolithic (RESTful API) |
+🎨 Giao diện Admin tối ưu – Tách thành các module nhỏ, dễ bảo trì. Thêm tìm kiếm user, copy quyền phòng ban, số đếm module tự động cập nhật.
 
----
+🔐 Bảo mật & khởi tạo – Tự động tạo tài khoản admin mặc định khi chạy lần đầu (thông qua DataInitializer). Không còn dữ liệu mẫu cứng, mọi dữ liệu đến từ backend hoặc do người dùng tạo.
 
-## 📦 Các module chính
+📊 Quản lý trạng thái linh hoạt – Admin có thể tự định nghĩa trạng thái cho từng loại đối tượng và gán vào workflow.
 
-| Module | Mô tả |
-|--------|-------|
-| 📊 **Dashboard** | Thống kê tổng quan: dự án, NCC, vật tư, kho, MR, PR, PO, GRN, STO, Cấp phát, Hoàn trả, Cảnh báo tồn kho, Đơn hàng tự động. Hiển thị biểu đồ và widget tương tác. |
-| 📋 **Dự án (Projects)** | CRUD dự án, xem chi tiết với 4 tab: Thông tin, PR, PO, Kho. Tự động tạo kho khi tạo dự án mới. |
-| 🏢 **Nhà cung cấp (Vendors)** | CRUD nhà cung cấp, xem chi tiết, kiểm tra ràng buộc khi xóa. |
-| 📦 **Vật tư (Items)** | CRUD vật tư, tự động thêm vào inventory khi tạo. Xem chi tiết tồn kho theo từng kho. |
-| 📄 **MR (Material Request)** | Tạo yêu cầu vật tư, duyệt theo workflow động (mặc định 1 bước bởi Site Commander). |
-| 📑 **PR (Purchase Request)** | Tạo từ MR hoặc thủ công. Duyệt theo workflow động (mặc định 3 bước: Planning → Project → CEO). |
-| 🛒 **PO (Purchase Order)** | Tạo từ PR hoặc thủ công. Duyệt theo workflow động (mặc định 3 bước: Planning → Project → CEO). |
-| 🏚️ **Kho (Warehouse)** | Quản lý danh sách kho, tồn kho. Xem chi tiết kho, vật tư, dự án liên quan. |
-| 📥 **GRN (Nhập kho)** | Tạo phiếu nhập từ PO đã duyệt. Quy trình 4 bước: DRAFT → RECEIVED → QC_CHECKED → COMPLETED. |
-| 📤 **STO (Chuyển kho)** | Tạo phiếu chuyển kho. Quy trình 3 bước: Lập phiếu → Duyệt → Xuất kho. |
-| 📤 **Cấp phát (Issue)** | Quản lý cấp phát vật tư cho đội thi công. Quy trình 4 bước: Tạo phiếu → Duyệt → Cấp phát → Xác nhận. |
-| 🔄 **Hoàn trả (Material Return)** | Quản lý hoàn trả vật tư từ công trường về kho. Quy trình 3 bước: Tạo phiếu → Thủ kho nhận → Xác nhận. |
-| 📊 **Cảnh báo tồn kho (Min Stock)** | Cấu hình ngưỡng tồn kho tối thiểu theo từng kho. Lọc theo trạng thái. Widget trên Dashboard. |
-| 🤖 **Đặt hàng tự động (Auto Reorder)** | Bật/tắt, cấu hình hệ số nhân, nhà cung cấp. Tự động tạo PR khi vật tư dưới ngưỡng. Quản lý quy tắc nâng cao. |
-| 👑 **Admin (Quản trị hệ thống)** | **5 tab:** Người dùng, Phòng ban, Workflow (đa mẫu), Phân quyền role, Phân quyền user. Quản lý toàn diện hệ thống. |
-| 📤 **Xuất Excel** | Hỗ trợ xuất tất cả danh sách dữ liệu. |
-| 🔐 **Phân quyền 2 cấp** | Role-based + User-based (ưu tiên user). |
-| 📝 **Audit Log** | Ghi lại toàn bộ hoạt động thay đổi dữ liệu (CREATE, UPDATE, DELETE) kèm IP, UserAgent. |
-
----
-
-## 🔄 Luồng nghiệp vụ chính (với workflow động)
-
-```text
+🚀 Công nghệ sử dụng
+Thành phần	Công nghệ
+🖥️ Frontend	HTML, CSS, JavaScript (thuần)
+☕ Backend	Spring Boot 3.2.5 (Java 17) với JWT, Spring Security, JPA/Hibernate
+🗄️ Database	MySQL 8.0+
+📊 Biểu đồ	Chart.js
+📤 Xuất Excel	SheetJS (XLSX)
+🎨 Icon	Font Awesome 6
+📄 API Documentation	Swagger/OpenAPI 3
+🔐 Bảo mật	JWT + BCrypt
+📝 Audit Log	Spring AOP
+🧩 Kiến trúc	Monolithic (RESTful API)
+📦 Các module chính
+Module	Mô tả
+📊 Dashboard	Thống kê tổng quan: dự án, NCC, vật tư, kho, MR, PR, PO, GRN, STO, Cấp phát, Hoàn trả, Cảnh báo tồn kho, Đơn hàng tự động. Hiển thị biểu đồ và widget tương tác.
+📋 Dự án (Projects)	CRUD dự án, xem chi tiết với 4 tab: Thông tin, PR, PO, Kho. Tự động tạo kho khi tạo dự án mới.
+🏢 Nhà cung cấp (Vendors)	CRUD nhà cung cấp, xem chi tiết, kiểm tra ràng buộc khi xóa.
+📦 Vật tư (Items)	CRUD vật tư, tự động thêm vào inventory khi tạo. Xem chi tiết tồn kho theo từng kho.
+📄 MR (Material Request)	Tạo yêu cầu vật tư, duyệt theo workflow động (mặc định 1 bước bởi Site Commander).
+📑 PR (Purchase Request)	Tạo từ MR hoặc thủ công. Duyệt theo workflow động (mặc định 3 bước: Planning → Project → CEO).
+🛒 PO (Purchase Order)	Tạo từ PR hoặc thủ công. Duyệt theo workflow động (mặc định 3 bước: Planning → Project → CEO).
+🏚️ Kho (Warehouse)	Quản lý danh sách kho, tồn kho. Xem chi tiết kho, vật tư, dự án liên quan.
+📥 GRN (Nhập kho)	Tạo phiếu nhập từ PO đã duyệt. Quy trình 4 bước: DRAFT → RECEIVED → QC_CHECKED → COMPLETED.
+📤 STO (Chuyển kho)	Tạo phiếu chuyển kho. Quy trình 3 bước: Lập phiếu → Duyệt → Xuất kho.
+📤 Cấp phát (Issue)	Quản lý cấp phát vật tư cho đội thi công. Quy trình 4 bước: Tạo phiếu → Duyệt → Cấp phát → Xác nhận.
+🔄 Hoàn trả (Material Return)	Quản lý hoàn trả vật tư từ công trường về kho. Quy trình 3 bước: Tạo phiếu → Thủ kho nhận → Xác nhận.
+📊 Cảnh báo tồn kho (Min Stock)	Cấu hình ngưỡng tồn kho tối thiểu theo từng kho. Lọc theo trạng thái. Widget trên Dashboard.
+🤖 Đặt hàng tự động (Auto Reorder)	Bật/tắt, cấu hình hệ số nhân, nhà cung cấp. Tự động tạo PR khi vật tư dưới ngưỡng. Quản lý quy tắc nâng cao.
+👑 Admin (Quản trị hệ thống)	6 tab: Người dùng, Phòng ban, Workflow (đa mẫu), Trạng thái, Phân quyền phòng ban, Phân quyền user. Quản lý toàn diện hệ thống.
+📤 Xuất Excel	Hỗ trợ xuất tất cả danh sách dữ liệu.
+🔐 Phân quyền 2 cấp	Phòng ban + User (ưu tiên user).
+📝 Audit Log	Ghi lại toàn bộ hoạt động thay đổi dữ liệu (CREATE, UPDATE, DELETE) kèm IP, UserAgent.
+🔄 Luồng nghiệp vụ chính (với workflow động)
+text
 [Site Staff] → MR → [Workflow MR] → PR → [Workflow PR] → PO → [Workflow PO] → GRN → STO → Issue → Material Return
 Workflow động cho phép:
 
@@ -72,23 +64,23 @@ Thay đổi role được phép duyệt ở mỗi bước.
 
 Thay đổi phòng ban được phép duyệt (nếu cần).
 
+Gán trạng thái (status) tùy chỉnh cho từng bước.
+
 Tạo nhiều mẫu workflow khác nhau và lựa chọn áp dụng.
 
 👥 Tài khoản mẫu
+Mặc định (tự động tạo khi chạy lần đầu):
+
 Email	Mật khẩu	Vai trò	Phòng ban	Quyền hạn chính
 admin@mep.com	password	👑 Admin	Ban Giám đốc	Toàn quyền, quản trị hệ thống
-ceo@mep.com	password	🏢 CEO	Ban Giám đốc	Duyệt PR/PO step cuối
-planning@mep.com	password	📋 PLANNING	Phòng Kế hoạch	Duyệt PR/PO step 1
-project@mep.com	password	📐 PROJECT	Phòng Dự án	Duyệt PR/PO step 2
-purchasing@mep.com	password	🛒 PURCHASING	Phòng Mua hàng	Tạo PR, PO, GRN, STO
-commander@mep.com	password	🎖️ SITE_COMMANDER	Ban Chỉ huy công trường	Duyệt MR, cấp phát, hoàn trả
-qc@mep.com	password	🔬 QC	Phòng QC	Kiểm tra chất lượng GRN
+(Các tài khoản khác cần được tạo thủ công qua giao diện Admin → Người dùng)
+
 🛠️ Hướng dẫn cài đặt
 1. Cài đặt Database
 sql
 -- Chạy file mep_db.sql trong MySQL
 mysql -u root -p < mep_db.sql
-Lưu ý: File mep_db.sql đã được cập nhật để hỗ trợ workflow đa mẫu với các cột is_active, is_system, name, description.
+Lưu ý: File mep_db.sql đã được cập nhật để hỗ trợ workflow đa mẫu, phân quyền phòng ban và bảng statuses.
 
 2. Cấu hình Backend (Spring Boot)
 Tạo file src/main/resources/application.properties:
@@ -119,6 +111,8 @@ bash
 ./mvnw spring-boot:run
 # hoặc
 mvn spring-boot:run
+Lưu ý: Khi chạy lần đầu, DataInitializer sẽ tự động tạo tài khoản admin với mật khẩu password. Nếu đã có user, nó sẽ bỏ qua.
+
 4. Chạy Frontend
 Mở thư mục frontend trong VS Code và dùng Live Server (hoặc http-server) để chạy index.html.
 
@@ -133,27 +127,35 @@ FRONTEND/
 ├── css/
 │   └── style.css
 └── js/
-    ├── api.js          # Gọi REST API + fallback localStorage
-    ├── auth.js         # Session + phân quyền (ưu tiên user)
-    ├── admin.js        # Quản trị: user, department, workflow, permissions
-    ├── app.js          # Điều hướng menu
-    ├── data.js         # LocalStorage helpers
-    ├── utils.js        # Hàm tiện ích
-    ├── dashboard.js    # Dashboard
-    ├── projects.js     # Dự án
-    ├── vendors.js      # Nhà cung cấp
-    ├── items.js        # Vật tư
-    ├── mr.js           # Material Request
-    ├── pr.js           # Purchase Request
-    ├── po.js           # Purchase Order
-    ├── warehouse.js    # Kho + GRN + STO
-    ├── issue.js        # Cấp phát
-    ├── material-return.js # Hoàn trả
-    ├── min-stock.js    # Cảnh báo tồn kho
-    ├── auto-reorder.js # Đặt hàng tự động
-    ├── export.js       # Xuất Excel
-    ├── toast.js        # Thông báo
-    └── loading.js      # Loading overlay
+    ├── admin/
+    │   ├── admin-core.js              # Quản lý tab, render chính
+    │   ├── admin-helpers.js           # Hàm dùng chung
+    │   ├── admin-users.js             # Quản lý người dùng
+    │   ├── admin-departments.js       # Quản lý phòng ban
+    │   ├── admin-statuses.js          # Quản lý trạng thái (statuses)
+    │   ├── admin-workflows.js         # Quản lý workflow (đa mẫu, step-status)
+    │   ├── admin-department-permissions.js  # Phân quyền phòng ban (module-action)
+    │   └── admin-user-permissions.js  # Phân quyền user (ghi đè phòng ban)
+    ├── api.js                         # Gọi REST API + fallback localStorage
+    ├── auth.js                        # Session + phân quyền (ưu tiên user)
+    ├── data.js                        # LocalStorage helpers (không tạo mẫu)
+    ├── utils.js                       # Hàm tiện ích
+    ├── app.js                         # Điều hướng menu
+    ├── dashboard.js                   # Dashboard
+    ├── projects.js                    # Dự án
+    ├── vendors.js                     # Nhà cung cấp
+    ├── items.js                       # Vật tư
+    ├── mr.js                          # Material Request
+    ├── pr.js                          # Purchase Request
+    ├── po.js                          # Purchase Order
+    ├── warehouse.js                   # Kho + GRN + STO
+    ├── issue.js                       # Cấp phát
+    ├── material-return.js             # Hoàn trả
+    ├── min-stock.js                   # Cảnh báo tồn kho
+    ├── auto-reorder.js                # Đặt hàng tự động
+    ├── export.js                      # Xuất Excel
+    ├── toast.js                       # Thông báo
+    └── loading.js                     # Loading overlay
 Backend (Spring Boot)
 text
 BACKEND/
@@ -168,18 +170,18 @@ BACKEND/
     ├── service/        # Business Logic
     └── util/           # DataInitializer, CurrentUserUtil, EntityMapper
 🎯 Tính năng mới chi tiết
-1. Workflow Động & Đa Mẫu
+1. Workflow động & đa mẫu
 Quản lý qua Admin → Tab Workflow:
 
-Hiển thị danh sách các mẫu workflow theo từng module.
+Danh sách các mẫu workflow theo từng module (MR, PR, PO, ...).
 
 Mỗi mẫu có trạng thái: Đang áp dụng / Không áp dụng, loại: Hệ thống / Tùy chỉnh.
 
 Hành động: Kích hoạt, Sửa, Sao chép, Xóa (chỉ mẫu tùy chỉnh và không active).
 
-Tạo mới workflow với JSON steps linh hoạt.
+Khi tạo/sửa workflow, có thể gán trạng thái (status) cho từng bước thông qua dropdown.
 
-Tạo mặc định cho tất cả module.
+Xem chi tiết workflow với tiến trình mô phỏng (dạng vòng tròn nối nhau), cho phép chọn bước hiện tại.
 
 Cấu trúc steps (JSON):
 
@@ -187,42 +189,78 @@ json
 [
   {"step": 1, "role": "PLANNING", "label": "Kế hoạch duyệt", "departmentId": 2},
   {"step": 2, "role": "PROJECT", "label": "Dự án duyệt", "departmentId": 3},
-  {"step": 3, "role": "CEO", "label": "Tổng Giám đốc duyệt", "departmentId": 1}
+  {"step": 3, "role": "CEO", "label": "CEO duyệt", "departmentId": 1}
 ]
-2. Phân quyền User (Ưu tiên hơn Role)
+2. Phân quyền phòng ban (module-action)
+Quản lý qua Admin → Tab "Phân quyền phòng ban":
+
+Hiển thị bảng với các cột là phòng ban, các hàng là module-action (VD: mr.view, pr.create, inventory.edit, ...).
+
+Mỗi ô là checkbox, giúp bật/tắt quyền nhanh chóng.
+
+Click vào tên module để toggle tất cả quyền của module đó cho tất cả phòng ban.
+
+Lưu thay đổi, cập nhật vào database (bảng permissions).
+
+3. Phân quyền user (ghi đè phòng ban)
 Quản lý qua Admin → Tab "Phân quyền user":
 
-Chọn user, tick/bỏ tick từng quyền cụ thể.
+Tìm kiếm user theo tên hoặc email.
 
-Quyền user được lưu trong bảng user_permissions.
+Chọn user → hiển thị danh sách các quyền mà phòng ban của user đã có.
 
-Khi kiểm tra quyền: User Permission → Role Permission → Fallback.
+User có thể được ghi đè quyền: tick/bỏ tick bất kỳ quyền nào trong danh sách (ưu tiên hơn phòng ban).
 
-Các permission keys:
+Nút "Copy quyền phòng ban" – tự động tick tất cả quyền của phòng ban vào user (sao chép toàn bộ).
 
-module.view, module.create, module.edit, module.delete
+Số đếm module cập nhật tự động khi tick checkbox.
 
-module.approve, module.submit, module.reject
+Nút Lưu và Reset để lưu hoặc xóa toàn bộ quyền của user.
 
-module.receive, module.qc, module.complete, module.confirm
+4. Quản lý trạng thái (Status) động
+Quản lý qua Admin → Tab "Trạng thái":
 
-🔧 API Endpoints mới
-Workflow
+CRUD trạng thái theo từng entity type (MR, PR, PO, GRN, STO, Issue, MaterialReturn).
+
+Mỗi trạng thái có: tên, mã code (duy nhất), màu sắc, đánh dấu mặc định, đánh dấu kết thúc, thứ tự.
+
+Được sử dụng để gán vào từng bước workflow (thông qua bảng workflow_step_status).
+
+5. Admin UI tách module
+admin-core.js: Quản lý tab, render chính, refresh dữ liệu.
+
+admin-helpers.js: Hàm dùng chung (roles, permission keys, module-actions, labels).
+
+admin-users.js: CRUD người dùng.
+
+admin-departments.js: CRUD phòng ban, quản lý thành viên.
+
+admin-statuses.js: CRUD trạng thái.
+
+admin-workflows.js: Quản lý workflow (đa mẫu, step-status mapping, chi tiết).
+
+admin-department-permissions.js: Phân quyền phòng ban (module-action).
+
+admin-user-permissions.js: Phân quyền user (ghi đè phòng ban).
+
+🔧 API Endpoints mới (so với phiên bản cũ)
+Workflow & Step-Status
 Method	Endpoint	Mô tả
-GET	/api/workflows	Lấy tất cả workflow
-GET	/api/workflows/module/{module}	Lấy workflow theo module
-GET	/api/workflows/module/{module}/active	Lấy workflow đang active
-PUT	/api/workflows/module/{module}/activate/{id}	Kích hoạt workflow
-POST	/api/workflows/duplicate/{id}	Sao chép workflow
-POST	/api/workflows	Tạo workflow mới
-PUT	/api/workflows/{id}	Cập nhật workflow
-DELETE	/api/workflows/{id}	Xóa workflow
-User Permission
+GET	/api/workflows/module/{module}/steps-with-status	Lấy danh sách bước kèm status code
+GET	/api/workflows/module/{module}/step/{step}/status	Lấy status code của bước
+POST	/api/workflows/with-statuses	Tạo workflow + step-status mappings
+PUT	/api/workflows/{id}/with-statuses	Cập nhật workflow + mappings
+Department Permissions
 Method	Endpoint	Mô tả
-GET	/api/permissions/user/{userId}	Lấy quyền của user
-POST	/api/permissions/user/{userId}/assign?permissionKey=xxx&enabled=true/false	Gán quyền cho user
-DELETE	/api/permissions/user/{userId}/remove?permissionKey=xxx	Xóa quyền của user
-DELETE	/api/permissions/user/{userId}/remove-all	Xóa toàn bộ quyền của user
+GET	/api/permissions/department/{departmentId}	Lấy quyền của phòng ban
+POST	/api/permissions/department/{departmentId}/assign	Gán quyền cho phòng ban
+DELETE	/api/permissions/department/{departmentId}/remove	Xóa quyền của phòng ban
+Statuses
+Method	Endpoint	Mô tả
+GET	/api/statuses/entity/{entityType}	Lấy danh sách status theo entity type
+POST	/api/statuses	Tạo mới status
+PUT	/api/statuses/{id}	Cập nhật status
+DELETE	/api/statuses/{id}	Xóa status
 
 
 
@@ -261,6 +299,16 @@ Ngày	Phiên bản	Nội dung
 🐛 Sửa nhiều lỗi nhỏ, cải thiện UX/UI.
 26/08/2025	2.0.22	📝 Cập nhật README: bổ sung hướng dẫn đẩy code lên GitHub, đánh giá tổng quan dự án.
 📦 Cập nhật danh sách module, tài khoản mẫu, và cấu trúc thư mục.
+
+26/08/2025	2.0.23	🚀 Nâng cấp workflow động + đa mẫu; phân quyền user ưu tiên role.
+27/08/2025	2.0.24	🔐 Cập nhật lớn:
+- Bỏ phân quyền role, chuyển sang phân quyền phòng ban (module-action).
+- Thêm bảng statuses và workflow_step_status; workflow có thể gán status.
+- Tách Admin UI thành 8 module, thêm tìm kiếm, copy quyền, số đếm tự động.
+- Xóa fallback cứng trong auth.js, chỉ dùng dữ liệu từ DB.
+- Xóa dữ liệu mẫu cứng, DataInitializer chỉ tạo admin mặc định.
+- Cập nhật database với cấu trúc mới.
+
 📊 Đánh giá tổng quan dự án
 ✅ Điểm mạnh
 Kiến trúc module hóa tốt – Các chức năng được tách riêng thành từng file JS rõ ràng (mr.js, pr.js, po.js, warehouse.js, …), dễ bảo trì và mở rộng.

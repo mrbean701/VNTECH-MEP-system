@@ -15,9 +15,6 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Service quản lý Purchase Request (PR) - Sử dụng workflow động
- */
 @Service
 @RequiredArgsConstructor
 public class PRService {
@@ -26,9 +23,11 @@ public class PRService {
     private final MRRepository mrRepository;
     private final ObjectMapper objectMapper;
     private final WorkflowService workflowService;
+    private final StatusService statusService;
     private final CurrentUserUtil currentUserUtil;
 
-    // ===== GETTERS =====
+    // ===== GETTERS ===== (giữ nguyên)
+
     public List<PR> getAll() {
         return prRepository.findAll();
     }
@@ -60,6 +59,7 @@ public class PRService {
     }
 
     // ===== CREATE =====
+
     @Transactional
     public PR create(PR pr) {
         if (!currentUserUtil.hasPermission("pr.create")) {
@@ -73,8 +73,11 @@ public class PRService {
             while (prRepository.existsByCode("PR-" + String.format("%03d", i))) i++;
             nextCode = "PR-" + String.format("%03d", i);
         }
+
+        // Set status mặc định từ cấu hình
+        String defaultStatus = statusService.getDefaultStatus("pr").getCode();
         pr.setCode(nextCode);
-        pr.setStatus("DRAFT");
+        pr.setStatus(defaultStatus);
         pr.setApprovalStep(1);
         pr.setCreatedAt(LocalDate.now());
         return prRepository.save(pr);
@@ -85,7 +88,6 @@ public class PRService {
         if (!currentUserUtil.hasPermission("pr.create")) {
             throw new RuntimeException("Bạn không có quyền tạo PR từ MR");
         }
-
         var mr = mrRepository.findById(mrId)
                 .orElseThrow(() -> new ResourceNotFoundException("MR not found with id: " + mrId));
         if (!"APPROVED".equals(mr.getStatus())) {
@@ -99,14 +101,13 @@ public class PRService {
     }
 
     // ===== UPDATE =====
+
     @Transactional
     public PR update(Long id, PR details) {
         PR pr = getById(id);
-
         if (!currentUserUtil.hasPermission("pr.edit")) {
             throw new RuntimeException("Bạn không có quyền sửa PR");
         }
-
         if (!"DRAFT".equals(pr.getStatus()) && !"PENDING".equals(pr.getStatus())) {
             throw new RuntimeException("Chỉ có thể sửa PR ở trạng thái DRAFT hoặc PENDING");
         }
@@ -121,14 +122,13 @@ public class PRService {
     }
 
     // ===== SUBMIT =====
+
     @Transactional
     public void submit(Long id) {
         PR pr = getById(id);
-
         if (!currentUserUtil.hasPermission("pr.submit")) {
             throw new RuntimeException("Bạn không có quyền gửi duyệt PR");
         }
-
         if (!"DRAFT".equals(pr.getStatus())) {
             throw new RuntimeException("Chỉ có thể gửi duyệt PR ở trạng thái DRAFT");
         }
@@ -138,7 +138,8 @@ public class PRService {
         prRepository.save(pr);
     }
 
-    // ===== APPROVE (SỬ DỤNG WORKFLOW ĐỘNG - 3 BƯỚC) =====
+    // ===== APPROVE =====
+
     @Transactional
     public void approve(Long id) {
         PR pr = getById(id);
@@ -146,8 +147,8 @@ public class PRService {
             throw new RuntimeException("PR không ở trạng thái chờ duyệt");
         }
 
-        // Lấy steps từ workflow đang active của module "pr"
-        List<Map<String, Object>> steps = workflowService.getStepsByModule("pr");
+        // Lấy steps kèm status từ workflow đang active của module "pr"
+        List<Map<String, Object>> steps = workflowService.getStepsWithStatusByModule("pr");
         int currentStep = pr.getApprovalStep() != null ? pr.getApprovalStep() : 1;
 
         Map<String, Object> step = steps.stream()
@@ -160,7 +161,6 @@ public class PRService {
 
         User currentUser = currentUserUtil.getCurrentUser();
 
-        // Kiểm tra role và department theo workflow
         if (!currentUser.getRole().equals(requiredRole)) {
             throw new RuntimeException("Bạn không có quyền duyệt bước này (yêu cầu role: " + requiredRole + ")");
         }
@@ -169,50 +169,54 @@ public class PRService {
             throw new RuntimeException("Bạn không thuộc phòng ban được chỉ định để duyệt");
         }
 
-        // Kiểm tra user permission (ghi đè role nếu có)
         if (!currentUserUtil.hasPermission("pr.approve")) {
             throw new RuntimeException("Bạn không có quyền duyệt PR (user permission)");
         }
+
+        // Lấy status code từ step
+        String statusCode = (String) step.get("statusCode");
 
         if (currentStep == steps.size()) {
             pr.setStatus("APPROVED");
         } else {
             pr.setApprovalStep(currentStep + 1);
-            pr.setStatus("PENDING");
+            if (statusCode != null && !statusCode.isEmpty()) {
+                pr.setStatus(statusCode);
+            } else {
+                pr.setStatus("PENDING");
+            }
         }
         pr.setUpdatedAt(LocalDate.now());
         prRepository.save(pr);
     }
 
     // ===== REJECT =====
+
     @Transactional
     public void reject(Long id) {
         PR pr = getById(id);
         if (!"PENDING".equals(pr.getStatus())) {
             throw new RuntimeException("PR không ở trạng thái chờ duyệt");
         }
-
         if (!currentUserUtil.hasPermission("pr.reject")) {
             throw new RuntimeException("Bạn không có quyền từ chối PR");
         }
-
         pr.setStatus("REJECTED");
         pr.setUpdatedAt(LocalDate.now());
         prRepository.save(pr);
     }
 
     // ===== DELETE =====
+
     @Transactional
     public void delete(Long id) {
         PR pr = getById(id);
         if (!"DRAFT".equals(pr.getStatus())) {
             throw new RuntimeException("Chỉ có thể xóa PR ở trạng thái DRAFT");
         }
-
         if (!currentUserUtil.hasPermission("pr.delete")) {
             throw new RuntimeException("Bạn không có quyền xóa PR");
         }
-
         prRepository.delete(pr);
     }
 }

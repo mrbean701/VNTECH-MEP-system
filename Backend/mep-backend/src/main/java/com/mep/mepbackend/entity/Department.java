@@ -10,21 +10,28 @@ import java.time.LocalDate;
 @Entity
 @Table(name = "departments")
 @Data
-@NoArgsConstructor  // ✅ Thêm dòng này
-@AllArgsConstructor // ✅ Thêm nếu cần
+@NoArgsConstructor
+@AllArgsConstructor
 public class Department {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(unique = true, nullable = false)
+    @Column(unique = true, nullable = false, length = 50)
     private String code;
-    private String name;
-    private Long managerId;
-    private String managerName;
-    private LocalDate createdAt;
-    private LocalDate updatedAt;
 
-    public Department(Object o, String bgd, String banGiámĐốc, long l, String admin, LocalDate now, Object o1) {
-    }
+    @Column(nullable = false, length = 100)
+    private String name;
+
+    @Column(name = "manager_id")
+    private Long managerId;
+
+    @Column(name = "manager_name", length = 100)
+    private String managerName;
+
+    @Column(name = "created_at")
+    private LocalDate createdAt;
+
+    @Column(name = "updated_at")
+    private LocalDate updatedAt;
 }

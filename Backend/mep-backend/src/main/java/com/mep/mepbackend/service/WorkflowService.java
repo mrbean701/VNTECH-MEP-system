@@ -3,8 +3,10 @@ package com.mep.mepbackend.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mep.mepbackend.entity.Workflow;
+import com.mep.mepbackend.entity.WorkflowStepStatus;
 import com.mep.mepbackend.exception.ResourceNotFoundException;
 import com.mep.mepbackend.repository.WorkflowRepository;
+import com.mep.mepbackend.repository.WorkflowStepStatusRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -12,85 +14,92 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.stream.Collectors;
 
-/**
- * Service quản lý workflow động - Hỗ trợ đa mẫu (templates).
- */
 @Service
 @RequiredArgsConstructor
 public class WorkflowService {
 
     private final WorkflowRepository workflowRepository;
+    private final WorkflowStepStatusRepository stepStatusRepository;
     private final ObjectMapper objectMapper;
 
     // ===== GETTERS =====
 
-    /**
-     * Lấy tất cả workflow (tất cả module, tất cả mẫu).
-     */
     public List<Workflow> getAll() {
         return workflowRepository.findAll();
     }
 
-    /**
-     * Lấy workflow theo ID.
-     */
     public Workflow getById(Long id) {
         return workflowRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Workflow not found with id: " + id));
     }
 
-    /**
-     * Lấy tất cả workflow của một module.
-     */
     public List<Workflow> getByModule(String module) {
         return workflowRepository.findByModule(module);
     }
 
-    /**
-     * Lấy workflow đang active của một module.
-     * Mỗi module chỉ có DUY NHẤT 1 workflow active.
-     */
     public Workflow getActiveWorkflow(String module) {
         return workflowRepository.findByModuleAndIsActiveTrue(module)
                 .orElseThrow(() -> new ResourceNotFoundException(
-                        "Không tìm thấy workflow active cho module: " + module
-                ));
+                        "Không tìm thấy workflow active cho module: " + module));
     }
 
-    /**
-     * Lấy steps của workflow đang active (dùng trong các service nghiệp vụ).
-     */
     public List<Map<String, Object>> getStepsByModule(String module) {
         Workflow wf = getActiveWorkflow(module);
-        try {
-            return objectMapper.readValue(wf.getSteps(), new TypeReference<List<Map<String, Object>>>() {});
-        } catch (Exception e) {
-            throw new RuntimeException("Lỗi parse steps của workflow: " + e.getMessage());
-        }
+        return parseSteps(wf.getSteps());
     }
 
     /**
-     * Kiểm tra xem module đã có workflow active chưa.
+     * Lấy danh sách steps kèm theo status code cho từng bước
      */
+    public List<Map<String, Object>> getStepsWithStatusByModule(String module) {
+        Workflow wf = getActiveWorkflow(module);
+        List<Map<String, Object>> steps = parseSteps(wf.getSteps());
+        List<WorkflowStepStatus> mappings = stepStatusRepository.findByWorkflowId(wf.getId());
+
+        // Tạo map step -> statusCode
+        Map<Integer, String> statusMap = mappings.stream()
+                .collect(Collectors.toMap(WorkflowStepStatus::getStep, WorkflowStepStatus::getStatusCode));
+
+        // Gắn statusCode vào từng step
+        for (Map<String, Object> step : steps) {
+            Integer stepNumber = (Integer) step.get("step");
+            String statusCode = statusMap.get(stepNumber);
+            step.put("statusCode", statusCode != null ? statusCode : "");
+        }
+
+        return steps;
+    }
+
+    /**
+     * Lấy status code cho một step cụ thể trong workflow của module
+     */
+    public String getStatusForStep(String module, Integer step) {
+        Workflow wf = getActiveWorkflow(module);
+        return stepStatusRepository.findByWorkflowIdAndStep(wf.getId(), step)
+                .map(WorkflowStepStatus::getStatusCode)
+                .orElse(null);
+    }
+
+    public List<WorkflowStepStatus> getStepStatuses(Long workflowId) {
+        return stepStatusRepository.findByWorkflowId(workflowId);
+    }
+
     public boolean hasActiveWorkflow(String module) {
         return workflowRepository.existsByModuleAndIsActiveTrue(module);
     }
 
     // ===== CREATE =====
 
-    /**
-     * Tạo mới một workflow template.
-     * Mặc định isActive = false, isSystem = false.
-     * Nếu module chưa có workflow nào, tự động active template này.
-     */
     @Transactional
     public Workflow create(Workflow workflow) {
-        // Kiểm tra trùng tên trong cùng module
         if (workflowRepository.existsByModuleAndName(workflow.getModule(), workflow.getName())) {
             throw new RuntimeException("Đã tồn tại workflow với tên '" + workflow.getName() + "' trong module " + workflow.getModule());
         }
 
+        workflow.setStatus("DRAFT");
         workflow.setIsActive(false);
         workflow.setIsSystem(false);
         workflow.setCreatedAt(LocalDate.now());
@@ -106,31 +115,64 @@ public class WorkflowService {
         return saved;
     }
 
+    /**
+     * Tạo workflow và lưu luôn step-status mappings
+     */
+    @Transactional
+    public Workflow createWithStatuses(Workflow workflow, List<WorkflowStepStatus> stepStatuses) {
+        Workflow saved = create(workflow);
+
+        // Lưu mappings
+        if (stepStatuses != null && !stepStatuses.isEmpty()) {
+            for (WorkflowStepStatus mapping : stepStatuses) {
+                mapping.setWorkflowId(saved.getId());
+                stepStatusRepository.save(mapping);
+            }
+        }
+
+        return saved;
+    }
+
     // ===== UPDATE =====
 
-    /**
-     * Cập nhật workflow (chỉ sửa name, description, steps).
-     * KHÔNG cho sửa isActive và isSystem ở đây.
-     */
     @Transactional
     public Workflow update(Long id, Workflow details) {
         Workflow wf = getById(id);
         wf.setName(details.getName());
         wf.setDescription(details.getDescription());
         wf.setSteps(details.getSteps());
+        if (details.getStatus() != null && !details.getStatus().isEmpty()) {
+            wf.setStatus(details.getStatus());
+            wf.setIsActive("ACTIVE".equals(details.getStatus()));
+        }
         wf.setUpdatedAt(LocalDate.now());
         return workflowRepository.save(wf);
     }
 
-    // ===== ACTIVATE =====
-
     /**
-     * Kích hoạt một workflow của module.
-     * Tất cả workflow khác trong cùng module sẽ bị deactivate.
+     * Cập nhật workflow và step-status mappings
      */
     @Transactional
+    public Workflow updateWithStatuses(Long id, Workflow details, List<WorkflowStepStatus> stepStatuses) {
+        Workflow saved = update(id, details);
+
+        // Xóa mappings cũ và lưu mới
+        stepStatusRepository.deleteByWorkflowId(saved.getId());
+
+        if (stepStatuses != null && !stepStatuses.isEmpty()) {
+            for (WorkflowStepStatus mapping : stepStatuses) {
+                mapping.setWorkflowId(saved.getId());
+                stepStatusRepository.save(mapping);
+            }
+        }
+
+        return saved;
+    }
+
+    // ===== ACTIVATE =====
+
+    @Transactional
     public void activateWorkflow(String module, Long id) {
-        // Lấy workflow cần active
         Workflow toActivate = getById(id);
         if (!toActivate.getModule().equals(module)) {
             throw new RuntimeException("Workflow không thuộc module " + module);
@@ -139,8 +181,9 @@ public class WorkflowService {
         // Deactivate tất cả workflow khác trong module
         List<Workflow> allInModule = workflowRepository.findByModule(module);
         for (Workflow wf : allInModule) {
-            if (!wf.getId().equals(id) && wf.getIsActive()) {
+            if (!wf.getId().equals(id)) {
                 wf.setIsActive(false);
+                wf.setStatus("INACTIVE");
                 wf.setUpdatedAt(LocalDate.now());
                 workflowRepository.save(wf);
             }
@@ -148,17 +191,13 @@ public class WorkflowService {
 
         // Activate workflow được chọn
         toActivate.setIsActive(true);
+        toActivate.setStatus("ACTIVE");
         toActivate.setUpdatedAt(LocalDate.now());
         workflowRepository.save(toActivate);
     }
 
     // ===== DUPLICATE =====
 
-    /**
-     * Sao chép một workflow hiện có thành template mới.
-     * Template mới có isActive = false, isSystem = false.
-     * Thêm hậu tố " (Copy)" vào tên.
-     */
     @Transactional
     public Workflow duplicate(Long id) {
         Workflow original = getById(id);
@@ -169,26 +208,34 @@ public class WorkflowService {
         copy.setDescription(original.getDescription());
         copy.setSteps(original.getSteps());
         copy.setIsActive(false);
+        copy.setStatus("DRAFT");
         copy.setIsSystem(false);
         copy.setCreatedAt(LocalDate.now());
         copy.setUpdatedAt(LocalDate.now());
 
-        // Nếu tên đã tồn tại, thêm số thứ tự
         String baseName = copy.getName();
         int counter = 1;
         while (workflowRepository.existsByModuleAndName(copy.getModule(), copy.getName())) {
             copy.setName(baseName + " " + (counter++));
         }
 
-        return workflowRepository.save(copy);
+        Workflow saved = workflowRepository.save(copy);
+
+        // Copy mappings
+        List<WorkflowStepStatus> mappings = stepStatusRepository.findByWorkflowId(original.getId());
+        for (WorkflowStepStatus mapping : mappings) {
+            WorkflowStepStatus newMapping = new WorkflowStepStatus();
+            newMapping.setWorkflowId(saved.getId());
+            newMapping.setStep(mapping.getStep());
+            newMapping.setStatusCode(mapping.getStatusCode());
+            stepStatusRepository.save(newMapping);
+        }
+
+        return saved;
     }
 
     // ===== DELETE =====
 
-    /**
-     * Xóa workflow.
-     * Chỉ cho xóa nếu: KHÔNG phải mẫu hệ thống (isSystem = false) và KHÔNG đang active (isActive = false).
-     */
     @Transactional
     public void delete(Long id) {
         Workflow wf = getById(id);
@@ -198,14 +245,31 @@ public class WorkflowService {
         if (wf.getIsActive()) {
             throw new RuntimeException("Không thể xóa workflow đang được áp dụng. Hãy chọn workflow khác làm active trước.");
         }
+        // Xóa mappings trước
+        stepStatusRepository.deleteByWorkflowId(id);
         workflowRepository.delete(wf);
     }
 
-    /**
-     * Xóa tất cả workflow của một module (dùng trong reset/test).
-     */
     @Transactional
     public void deleteByModule(String module) {
+        List<Workflow> workflows = workflowRepository.findByModule(module);
+        for (Workflow wf : workflows) {
+            stepStatusRepository.deleteByWorkflowId(wf.getId());
+        }
         workflowRepository.deleteByModule(module);
+    }
+
+    // ===== HELPER =====
+
+    private List<Map<String, Object>> parseSteps(String stepsJson) {
+        try {
+            return objectMapper.readValue(stepsJson, new TypeReference<List<Map<String, Object>>>() {});
+        } catch (Exception e) {
+            throw new RuntimeException("Lỗi parse steps của workflow: " + e.getMessage());
+        }
+    }
+
+    public Optional<Workflow> getByModuleAndStatus(String module, String status) {
+        return workflowRepository.findByModuleAndStatus(module, status);
     }
 }

@@ -22,78 +22,103 @@ function clearUser() {
 }
 
 // ================================================================
-// PERMISSION HELPERS (ƯU TIÊN USER PERMISSION)
+// PERMISSION HELPERS (KHÔNG FALLBACK CỨNG)
 // ================================================================
 
 /**
- * Lấy role permissions từ localStorage
- */
-function getRolePermissions() {
-    try {
-        const perms = getData('permissions');
-        return perms && typeof perms === 'object' ? perms : {};
-    } catch (e) {
-        return {};
-    }
-}
-
-/**
- * Lấy user permissions từ localStorage (đã được cache khi login)
+ * Lấy user permissions từ localStorage
  * Cấu trúc: { userId: { permissionKey: true/false } }
  */
 function getUserPermissionsCache() {
     try {
-        const userPerms = getData('user_permissions');
-        return userPerms && typeof userPerms === 'object' ? userPerms : {};
+        const data = getData('user_permissions');
+        return data && typeof data === 'object' ? data : {};
     } catch (e) {
         return {};
     }
 }
 
 /**
- * Kiểm tra quyền – Ưu tiên: UserPermission > RolePermission > Fallback
+ * Lấy department permissions từ localStorage (_adminPermissions)
+ * Cấu trúc: [ { departmentId, permissionKey, enabled } ] hoặc object
+ */
+function getAdminPermissions() {
+    try {
+        const data = getData('permissions');
+        return data && typeof data === 'object' ? data : {};
+    } catch (e) {
+        return {};
+    }
+}
+
+/**
+ * Xây dựng map quyền của department từ dữ liệu _adminPermissions
+ * Trả về object: { permissionKey: true/false }
+ */
+function getDepartmentPermissionMap(deptId) {
+    if (!deptId) return {};
+
+    const perms = getAdminPermissions();
+    const result = {};
+
+    // Nếu perms là mảng (từ API mới)
+    if (Array.isArray(perms)) {
+        perms.forEach(p => {
+            if (p.departmentId === deptId && p.enabled) {
+                result[p.permissionKey] = true;
+            }
+        });
+        return result;
+    }
+
+    // Nếu perms là object (từ localStorage cũ)
+    Object.keys(perms).forEach(role => {
+        const roleData = perms[role];
+        if (typeof roleData === 'object') {
+            Object.keys(roleData).forEach(key => {
+                // Nếu key là departmentId
+                if (!isNaN(key) && parseInt(key) === deptId) {
+                    const deptPerms = roleData[key];
+                    if (typeof deptPerms === 'object') {
+                        Object.keys(deptPerms).forEach(pk => {
+                            if (deptPerms[pk]) {
+                                result[pk] = true;
+                            }
+                        });
+                    }
+                }
+            });
+        }
+    });
+
+    return result;
+}
+
+/**
+ * Kiểm tra quyền – KHÔNG CÓ FALLBACK CỨNG
+ * Ưu tiên: UserPermission (ghi đè) > DepartmentPermission
  */
 function hasPermission(permissionKey) {
     const user = getUser();
     if (!user) return false;
+
     // Admin luôn có toàn quyền
     if (user.role === 'ADMIN') return true;
 
-    // 1. Kiểm tra user permission (ghi đè role)
-    try {
-        const userPerms = getUserPermissionsCache();
-        const userPermObj = userPerms[user.id] || {};
-        if (userPermObj[permissionKey] === true) return true;
-        if (userPermObj[permissionKey] === false) return false; // bị từ chối rõ ràng
-    } catch (e) {}
+    // Bước 1: User permission (ghi đè)
+    const userPerms = getUserPermissionsCache();
+    const userPermObj = userPerms[user.id] || {};
+    if (userPermObj[permissionKey] === true) return true;
+    if (userPermObj[permissionKey] === false) return false;
 
-    // 2. Kiểm tra role permission
-    try {
-        const rolePerms = getRolePermissions();
-        const roleObj = rolePerms[user.role] || {};
-        if (roleObj[permissionKey] === true) return true;
-        if (roleObj[permissionKey] === false) return false;
-        if (roleObj['*'] === true) return true; // wildcard
-    } catch (e) {}
+    // Bước 2: Department permission (nếu có)
+    if (user.departmentId) {
+        const deptPermMap = getDepartmentPermissionMap(user.departmentId);
+        if (deptPermMap[permissionKey] === true) return true;
+        if (deptPermMap[permissionKey] === false) return false;
+    }
 
-    // 3. Fallback cứng (chỉ khi chưa có dữ liệu từ API)
-    const roleFallback = {
-        'ADMIN': '*',
-        'CEO': ['dashboard.view', 'pr.approve', 'po.approve'],
-        'PLANNING': ['dashboard.view', 'pr.approve', 'po.approve', 'mr.view', 'pr.view', 'po.view'],
-        'PROJECT': ['dashboard.view', 'pr.approve', 'po.approve', 'mr.view', 'pr.view', 'po.view'],
-        'PURCHASING': ['dashboard.view', 'pr.create', 'pr.edit', 'po.create', 'po.edit',
-                       'grn.create', 'grn.receive', 'sto.create', 'mr.view', 'pr.view', 'po.view',
-                       'inventory.view', 'issue.view', 'materialreturn.view'],
-        'SITE_COMMANDER': ['dashboard.view', 'mr.create', 'mr.approve', 'issue.create',
-                           'issue.approve', 'materialreturn.create', 'mr.view', 'issue.view',
-                           'materialreturn.view'],
-        'QC': ['dashboard.view', 'grn.qc', 'grn.view']
-    };
-    const allowed = roleFallback[user.role] || [];
-    if (allowed === '*') return true;
-    if (Array.isArray(allowed) && allowed.includes(permissionKey)) return true;
-
+    // Bước 3: Không có quyền
     return false;
 }
 
@@ -108,14 +133,14 @@ function hasAllPermissions(permissionKeys) {
 }
 
 // ================================================================
-// LOGIN – TỰ ĐỘNG LƯU PERMISSIONS VÀO CACHE
+// LOGIN – GỌI API VÀ LƯU PERMISSIONS
 // ================================================================
 
 document.addEventListener('DOMContentLoaded', function() {
     const loginForm = document.getElementById('login-form');
     if (!loginForm) return;
 
-    // Xóa listener cũ (tránh trùng lặp)
+    // Xóa listener cũ (clone để tránh trùng lặp)
     const newLoginForm = loginForm.cloneNode(true);
     loginForm.parentNode.replaceChild(newLoginForm, loginForm);
 
@@ -144,19 +169,34 @@ document.addEventListener('DOMContentLoaded', function() {
             });
             errorEl.textContent = '';
 
-            // Lấy role permissions và user permissions
+            // Lấy permissions từ API và lưu vào localStorage
             try {
                 const perms = await api.getPermissions();
                 if (perms && typeof perms === 'object') {
                     saveData('permissions', perms);
                 }
-                // Lấy user permissions riêng
+                // Lấy user permissions riêng (nếu API có)
                 if (response.user && response.user.id) {
-                    await api.getUserPermissions(response.user.id);
+                    const userPerms = await api.getUserPermissions(response.user.id);
+                    if (userPerms && typeof userPerms === 'object') {
+                        const allUserPerms = getData('user_permissions') || {};
+                        // Chuyển đổi thành map { permissionKey: enabled }
+                        const map = {};
+                        if (Array.isArray(userPerms)) {
+                            userPerms.forEach(p => {
+                                map[p.permissionKey] = p.enabled;
+                            });
+                        } else {
+                            Object.assign(map, userPerms);
+                        }
+                        allUserPerms[response.user.id] = map;
+                        saveData('user_permissions', allUserPerms);
+                    }
                 }
             } catch (permError) {
                 console.warn('Không thể lấy permissions:', permError);
             }
+
             showApp();
         } catch (error) {
             errorEl.textContent = error.message || 'Sai email hoặc mật khẩu';
@@ -179,7 +219,7 @@ function showApp() {
     document.getElementById('user-name').textContent = user.name || 'User';
     document.getElementById('user-role').textContent = user.role || '--';
 
-    // Ẩn/hiện menu dựa trên permission
+    // Ẩn/hiện menu dựa trên quyền (không fallback)
     const menuMap = {
         'mr': 'mr.view',
         'pr': 'pr.view',
@@ -208,7 +248,7 @@ function showApp() {
     const btnCreateVendor = document.getElementById('btn-create-vendor');
     if (btnCreateVendor) btnCreateVendor.style.display = hasPermission('vendors.create') ? 'inline-block' : 'none';
 
-    // Render all
+    // Render all (nếu có)
     if (typeof renderAll === 'function') {
         try { renderAll(); } catch(e) { console.error('renderAll error:', e); }
     }
@@ -243,6 +283,7 @@ window.hasPermission = hasPermission;
 window.hasAnyPermission = hasAnyPermission;
 window.hasAllPermissions = hasAllPermissions;
 window.getUserPermissionsCache = getUserPermissionsCache;
-window.getRolePermissions = getRolePermissions;
+window.getDepartmentPermissionMap = getDepartmentPermissionMap;
+window.getAdminPermissions = getAdminPermissions;
 
-console.log('✅ Auth module updated: user permission priority, workflow support');
+console.log('✅ Auth module loaded – no hardcoded fallback, only DB permissions');

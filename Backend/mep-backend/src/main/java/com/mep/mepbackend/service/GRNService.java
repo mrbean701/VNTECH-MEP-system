@@ -19,9 +19,6 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Service quản lý Goods Receipt Note (GRN) - Sử dụng workflow động
- */
 @Service
 @RequiredArgsConstructor
 public class GRNService {
@@ -31,9 +28,11 @@ public class GRNService {
     private final InventoryRepository inventoryRepository;
     private final ObjectMapper objectMapper;
     private final WorkflowService workflowService;
+    private final StatusService statusService;
     private final CurrentUserUtil currentUserUtil;
 
     // ===== GETTERS =====
+
     public List<GRN> getAll() {
         return grnRepository.findAll();
     }
@@ -61,6 +60,7 @@ public class GRNService {
     }
 
     // ===== CREATE =====
+
     @Transactional
     public GRN create(GRN grn) {
         if (!currentUserUtil.hasPermission("grn.create")) {
@@ -80,21 +80,22 @@ public class GRNService {
             while (grnRepository.existsByCode("GRN-" + String.format("%03d", i))) i++;
             nextCode = "GRN-" + String.format("%03d", i);
         }
+
+        String defaultStatus = statusService.getDefaultStatus("grn").getCode();
         grn.setCode(nextCode);
-        grn.setStatus("DRAFT");
+        grn.setStatus(defaultStatus);
         grn.setCreatedAt(LocalDate.now());
         return grnRepository.save(grn);
     }
 
     // ===== UPDATE =====
+
     @Transactional
     public GRN update(Long id, GRN details) {
         GRN grn = getById(id);
-
         if (!currentUserUtil.hasPermission("grn.edit")) {
             throw new RuntimeException("Bạn không có quyền sửa GRN");
         }
-
         if (!"DRAFT".equals(grn.getStatus())) {
             throw new RuntimeException("Chỉ có thể sửa GRN ở trạng thái DRAFT");
         }
@@ -110,75 +111,42 @@ public class GRNService {
         return grnRepository.save(grn);
     }
 
-    // ===== RECEIVE (Thủ kho nhận - Bước 2) =====
+    // ===== RECEIVE =====
+
     @Transactional
     public void receive(Long id, String warehouseStaff, LocalDate receiptDate) {
         GRN grn = getById(id);
-
         if (!currentUserUtil.hasPermission("grn.receive")) {
             throw new RuntimeException("Bạn không có quyền nhận GRN");
         }
-
         if (!"DRAFT".equals(grn.getStatus())) {
             throw new RuntimeException("Chỉ có thể nhận GRN ở trạng thái DRAFT");
         }
 
-        // Kiểm tra workflow bước 2 (thủ kho nhận)
-        List<Map<String, Object>> steps = workflowService.getStepsByModule("grn");
-        Map<String, Object> step = steps.stream().filter(s -> (int) s.get("step") == 2).findFirst().orElse(null);
-        if (step != null) {
-            String requiredRole = (String) step.get("role");
-            Integer requiredDeptId = step.get("departmentId") != null ? (Integer) step.get("departmentId") : null;
-            User currentUser = currentUserUtil.getCurrentUser();
-
-            // Nếu role yêu cầu là WAREHOUSE (không có trong hệ thống), bỏ qua kiểm tra
-            if (!"WAREHOUSE".equals(requiredRole)) {
-                if (!currentUser.getRole().equals(requiredRole)) {
-                    throw new RuntimeException("Bạn không có quyền nhận (yêu cầu role: " + requiredRole + ")");
-                }
-                if (requiredDeptId != null && (currentUser.getDepartmentId() == null ||
-                        !currentUser.getDepartmentId().equals(Long.valueOf(requiredDeptId)))) {
-                    throw new RuntimeException("Bạn không thuộc phòng ban được chỉ định để nhận");
-                }
-            }
-        }
+        // Lấy status cho bước 2 từ workflow
+        String statusCode = workflowService.getStatusForStep("grn", 2);
 
         grn.setWarehouseStaff(warehouseStaff);
         grn.setReceiptDate(receiptDate);
-        grn.setStatus("RECEIVED");
+        grn.setStatus(statusCode != null ? statusCode : "RECEIVED");
         grn.setUpdatedAt(LocalDate.now());
         grnRepository.save(grn);
     }
 
-    // ===== QC CHECK (Bước 3) =====
+    // ===== QC CHECK =====
+
     @Transactional
     public void qcCheck(Long id, String qcName, String result, String note) {
         GRN grn = getById(id);
-
         if (!currentUserUtil.hasPermission("grn.qc")) {
             throw new RuntimeException("Bạn không có quyền QC GRN");
         }
-
         if (!"RECEIVED".equals(grn.getStatus())) {
             throw new RuntimeException("GRN chưa được nhận hoặc đã qua bước QC");
         }
 
-        // Kiểm tra workflow bước 3 (QC)
-        List<Map<String, Object>> steps = workflowService.getStepsByModule("grn");
-        Map<String, Object> step = steps.stream().filter(s -> (int) s.get("step") == 3).findFirst().orElse(null);
-        if (step != null) {
-            String requiredRole = (String) step.get("role");
-            Integer requiredDeptId = step.get("departmentId") != null ? (Integer) step.get("departmentId") : null;
-            User currentUser = currentUserUtil.getCurrentUser();
-
-            if (!currentUser.getRole().equals(requiredRole)) {
-                throw new RuntimeException("Bạn không có quyền QC (yêu cầu role: " + requiredRole + ")");
-            }
-            if (requiredDeptId != null && (currentUser.getDepartmentId() == null ||
-                    !currentUser.getDepartmentId().equals(Long.valueOf(requiredDeptId)))) {
-                throw new RuntimeException("Bạn không thuộc phòng ban QC được chỉ định");
-            }
-        }
+        // Lấy status cho bước 3 từ workflow
+        String statusCode = workflowService.getStatusForStep("grn", 3);
 
         if ("FAIL".equals(result)) {
             grn.setStatus("REJECTED");
@@ -186,7 +154,7 @@ public class GRNService {
                     "QC: " + qcName + " - KHÔNG ĐẠT - " + note);
         } else {
             grn.setQcConfirm(qcName);
-            grn.setStatus("QC_CHECKED");
+            grn.setStatus(statusCode != null ? statusCode : "QC_CHECKED");
             grn.setNote((grn.getNote() != null ? grn.getNote() + " | " : "") +
                     "QC: " + qcName + " - " + result + " - " + note);
         }
@@ -194,18 +162,20 @@ public class GRNService {
         grnRepository.save(grn);
     }
 
-    // ===== COMPLETE (Bước 4) =====
+    // ===== COMPLETE =====
+
     @Transactional
     public void complete(Long id) {
         GRN grn = getById(id);
-
         if (!currentUserUtil.hasPermission("grn.complete")) {
             throw new RuntimeException("Bạn không có quyền hoàn thành GRN");
         }
-
         if (!"QC_CHECKED".equals(grn.getStatus())) {
             throw new RuntimeException("GRN chưa được QC kiểm tra");
         }
+
+        // Lấy status cho bước cuối từ workflow
+        String statusCode = workflowService.getStatusForStep("grn", 4);
 
         // Cập nhật tồn kho
         try {
@@ -237,20 +207,19 @@ public class GRNService {
             throw new RuntimeException("Lỗi cập nhật tồn kho: " + e.getMessage());
         }
 
-        grn.setStatus("COMPLETED");
+        grn.setStatus(statusCode != null ? statusCode : "COMPLETED");
         grn.setUpdatedAt(LocalDate.now());
         grnRepository.save(grn);
     }
 
     // ===== DELETE =====
+
     @Transactional
     public void delete(Long id) {
         GRN grn = getById(id);
-
         if (!currentUserUtil.hasPermission("grn.delete")) {
             throw new RuntimeException("Bạn không có quyền xóa GRN");
         }
-
         if (!"DRAFT".equals(grn.getStatus()) && !"RECEIVED".equals(grn.getStatus())) {
             throw new RuntimeException("Chỉ có thể xóa GRN ở trạng thái DRAFT hoặc RECEIVED");
         }

@@ -2,7 +2,7 @@ package com.mep.mepbackend.controller;
 
 import com.mep.mepbackend.entity.Permission;
 import com.mep.mepbackend.entity.UserPermission;
-import com.mep.mepbackend.service.PermissionService;
+import com.mep.mepbackend.service.PermissionService; // sửa import đúng
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
@@ -16,61 +16,69 @@ public class PermissionController {
 
     private final PermissionService permissionService;
 
+    // ===== DEPARTMENT PERMISSIONS =====
+
     @GetMapping
     public List<Permission> getAll() {
         return permissionService.getAll();
     }
 
-    @GetMapping("/role/{role}")
-    public List<Permission> getByRole(@PathVariable String role) {
-        return permissionService.getByRole(role);
+    @GetMapping("/department/{departmentId}")
+    public List<Permission> getByDepartment(@PathVariable Long departmentId) {
+        return permissionService.getByDepartmentId(departmentId);
     }
 
-    @GetMapping("/role/{role}/key/{permissionKey}")
-    public Permission getByRoleAndPermission(@PathVariable String role, @PathVariable String permissionKey) {
-        return permissionService.getByRoleAndPermission(role, permissionKey);
+    @GetMapping("/department/{departmentId}/permission/{permissionKey}")
+    public Permission getByDepartmentAndPermission(
+            @PathVariable Long departmentId,
+            @PathVariable String permissionKey) {
+        return permissionService.getByDepartmentAndPermission(departmentId, permissionKey);
     }
 
-    @PostMapping
+    /**
+     * Gán (hoặc cập nhật) quyền cho phòng ban
+     * Query params: permissionKey, enabled (true/false)
+     */
+    @PostMapping("/department/{departmentId}/assign")
     @ResponseStatus(HttpStatus.CREATED)
-    public Permission create(@RequestBody Permission permission) {
-        return permissionService.create(permission);
+    public Permission assignDepartmentPermission(
+            @PathVariable Long departmentId,
+            @RequestParam String permissionKey,
+            @RequestParam(defaultValue = "true") Boolean enabled) {
+        return permissionService.assignDepartmentPermission(departmentId, permissionKey, enabled);
     }
 
-    @PutMapping("/{id}")
-    public Permission update(@PathVariable Long id, @RequestBody Permission permission) {
-        return permissionService.update(id, permission);
-    }
-
-    @DeleteMapping("/role/{role}/key/{permissionKey}")
+    /**
+     * Xóa quyền của phòng ban
+     */
+    @DeleteMapping("/department/{departmentId}/remove")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void deleteByRoleAndPermission(@PathVariable String role, @PathVariable String permissionKey) {
-        permissionService.deleteByRoleAndPermission(role, permissionKey);
+    public void removeDepartmentPermission(
+            @PathVariable Long departmentId,
+            @RequestParam String permissionKey) {
+        permissionService.removeDepartmentPermission(departmentId, permissionKey);
     }
 
-    @DeleteMapping("/{id}")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void delete(@PathVariable Long id) {
-        permissionService.delete(id);
-    }
+    // ===== USER PERMISSIONS =====
 
-    // User Permission endpoints
     @GetMapping("/user/{userId}")
     public List<UserPermission> getUserPermissions(@PathVariable Long userId) {
         return permissionService.getUserPermissions(userId);
     }
 
     @PostMapping("/user/{userId}/assign")
-    public UserPermission assignUserPermission(@PathVariable Long userId,
-                                               @RequestParam String permissionKey,
-                                               @RequestParam(defaultValue = "true") Boolean enabled) {
+    public UserPermission assignUserPermission(
+            @PathVariable Long userId,
+            @RequestParam String permissionKey,
+            @RequestParam(defaultValue = "true") Boolean enabled) {
         return permissionService.assignUserPermission(userId, permissionKey, enabled);
     }
 
     @DeleteMapping("/user/{userId}/remove")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void removeUserPermission(@PathVariable Long userId,
-                                     @RequestParam String permissionKey) {
+    public void removeUserPermission(
+            @PathVariable Long userId,
+            @RequestParam String permissionKey) {
         permissionService.removeUserPermission(userId, permissionKey);
     }
 

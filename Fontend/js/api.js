@@ -16,7 +16,9 @@ async function apiRequest(endpoint, method = 'GET', body = null) {
     if (token) headers['Authorization'] = `Bearer ${token}`;
     const options = { method, headers };
     if (body) options.body = JSON.stringify(body);
+    
     const response = await fetch(url, options);
+    
     if (!response.ok) {
         let errorMessage = `HTTP error! status: ${response.status}`;
         try {
@@ -25,7 +27,17 @@ async function apiRequest(endpoint, method = 'GET', body = null) {
         } catch(e) {}
         throw new Error(errorMessage);
     }
-    return response.json();
+    
+    // Nếu status 204 No Content hoặc không có body, trả về null
+    if (response.status === 204 || response.headers.get('content-length') === '0') {
+        return null;
+    }
+    
+    const contentType = response.headers.get('content-type');
+    if (contentType && contentType.includes('application/json')) {
+        return response.json();
+    }
+    return response.text();
 }
 
 function extractArray(data) {
@@ -235,7 +247,9 @@ async function getDepartments() {
 async function getPermissions() {
     try {
         const data = await apiRequest('/permissions');
+        console.log('getPermissions raw data:', data);
         const arr = extractArray(data);
+        console.log('getPermissions extracted array:', arr);
         if (arr && arr.length > 0) {
             saveData('permissions', arr);
             return arr;
@@ -244,7 +258,7 @@ async function getPermissions() {
     return getData('permissions') || {};
 }
 
-// ====== WORKFLOW API (MỚI – HỖ TRỢ ĐA MẪU) ======
+// ====== WORKFLOW API ======
 async function getWorkflows() {
     try {
         const data = await apiRequest('/workflows');
@@ -297,13 +311,69 @@ async function deleteWorkflow(id) {
     return apiRequest(`/workflows/${id}`, 'DELETE');
 }
 
-// ====== USER PERMISSIONS (MỚI) ======
+// ====== WORKFLOW STEP-STATUS MAPPING (MỚI) ======
+async function getStepsWithStatus(module) {
+    return apiRequest(`/workflows/module/${module}/steps-with-status`);
+}
+
+async function getStatusForStep(module, step) {
+    return apiRequest(`/workflows/module/${module}/step/${step}/status`);
+}
+
+async function getWorkflowStepStatuses(workflowId) {
+    return apiRequest(`/workflows/${workflowId}/step-statuses`);
+}
+
+async function createWorkflowWithStatuses(payload) {
+    return apiRequest('/workflows/with-statuses', 'POST', payload);
+}
+
+async function updateWorkflowWithStatuses(id, payload) {
+    return apiRequest(`/workflows/${id}/with-statuses`, 'PUT', payload);
+}
+
+// ====== STATUS API (MỚI) ======
+async function getStatuses(entityType) {
+    if (entityType) {
+        return apiRequest(`/statuses/entity/${entityType}`);
+    }
+    return apiRequest('/statuses');
+}
+
+async function getDefaultStatus(entityType) {
+    return apiRequest(`/statuses/entity/${entityType}/default`);
+}
+
+async function getFinalStatuses(entityType) {
+    return apiRequest(`/statuses/entity/${entityType}/final`);
+}
+
+async function getStatusByEntityAndCode(entityType, code) {
+    return apiRequest(`/statuses/entity/${entityType}/code/${code}`);
+}
+
+async function createStatus(data) {
+    return apiRequest('/statuses', 'POST', data);
+}
+
+async function updateStatus(id, data) {
+    return apiRequest(`/statuses/${id}`, 'PUT', data);
+}
+
+async function deleteStatus(id) {
+    return apiRequest(`/statuses/${id}`, 'DELETE');
+}
+
+async function deleteStatusesByEntityType(entityType) {
+    return apiRequest(`/statuses/entity/${entityType}`, 'DELETE');
+}
+
+// ====== USER PERMISSIONS ======
 async function getUserPermissions(userId) {
     try {
         const data = await apiRequest(`/permissions/user/${userId}`);
         const arr = extractArray(data);
         if (arr && arr.length > 0) {
-            // Lưu vào localStorage dạng { userId: { permissionKey: enabled } }
             const map = {};
             arr.forEach(p => { map[p.permissionKey] = p.enabled; });
             const allUserPerms = getData('user_permissions') || {};
@@ -318,14 +388,12 @@ async function getUserPermissions(userId) {
 
 async function assignUserPermission(userId, permissionKey, enabled = true) {
     const result = await apiRequest(`/permissions/user/${userId}/assign?permissionKey=${permissionKey}&enabled=${enabled}`, 'POST');
-    // Cập nhật lại cache
     await getUserPermissions(userId);
     return result;
 }
 
 async function removeUserPermission(userId, permissionKey) {
     await apiRequest(`/permissions/user/${userId}/remove?permissionKey=${permissionKey}`, 'DELETE');
-    // Cập nhật lại cache
     await getUserPermissions(userId);
 }
 
@@ -418,6 +486,60 @@ async function createDepartment(dept) { return apiRequest('/departments', 'POST'
 async function updateDepartment(id, dept) { return apiRequest(`/departments/${id}`, 'PUT', dept); }
 async function deleteDepartment(id) { return apiRequest(`/departments/${id}`, 'DELETE'); }
 
+// ====== ROLE PERMISSIONS (theo department) ======
+
+/**
+ * Lấy danh sách permission của một role trong một department
+ */
+async function getRoleDepartmentPermissions(role, departmentId) {
+    return apiRequest(`/permissions/role/${role}/department/${departmentId}`);
+}
+
+/**
+ * Gán (hoặc cập nhật) permission cho role trong department
+ */
+async function assignRolePermission(role, departmentId, permissionKey, enabled = true) {
+    return apiRequest(`/permissions/role/${role}/department/${departmentId}/assign?permissionKey=${permissionKey}&enabled=${enabled}`, 'POST');
+}
+
+/**
+ * Xóa permission của role trong department
+ */
+async function removeRolePermission(role, departmentId, permissionKey) {
+    return apiRequest(`/permissions/role/${role}/department/${departmentId}/permission/${permissionKey}`, 'DELETE');
+}
+
+/**
+ * Lấy tất cả permission của một department
+ */
+async function getDepartmentPermissions(departmentId) {
+    return apiRequest(`/permissions/department/${departmentId}`);
+}
+
+// ================================================================
+// DEPARTMENT PERMISSIONS (module-action)
+// ================================================================
+
+/**
+ * Lấy tất cả quyền của một phòng ban
+ */
+async function getDepartmentPermissions(departmentId) {
+    return apiRequest(`/permissions/department/${departmentId}`);
+}
+
+/**
+ * Gán quyền cho phòng ban (không cần role)
+ */
+async function assignDepartmentPermission(departmentId, permissionKey, enabled = true) {
+    return apiRequest(`/permissions/department/${departmentId}/assign?permissionKey=${permissionKey}&enabled=${enabled}`, 'POST');
+}
+
+/**
+ * Xóa quyền của phòng ban
+ */
+async function removeDepartmentPermission(departmentId, permissionKey) {
+    return apiRequest(`/permissions/department/${departmentId}/remove?permissionKey=${permissionKey}`, 'DELETE');
+}
 // ====== EXPORT RA WINDOW ======
 window.api = {
     // Auth
@@ -426,11 +548,17 @@ window.api = {
     getProjects, getVendors, getItems, getMRs, getPRs, getPOs,
     getWarehouses, getInventory, getGRNs, getSTOs, getIssues, getMaterialReturns,
     getMinStock, getUsers, getDepartments, getPermissions,
-    // Workflow (mới)
+    // Workflow
     getWorkflows, getWorkflowsByModule, getActiveWorkflow,
     createWorkflow, updateWorkflow, activateWorkflow,
     duplicateWorkflow, deleteWorkflow,
-    // User Permissions (mới)
+    // Workflow Step-Status (mới)
+    getStepsWithStatus, getStatusForStep, getWorkflowStepStatuses,
+    createWorkflowWithStatuses, updateWorkflowWithStatuses,
+    // Status (mới)
+    getStatuses, getDefaultStatus, getFinalStatuses, getStatusByEntityAndCode,
+    createStatus, updateStatus, deleteStatus, deleteStatusesByEntityType,
+    // User Permissions
     getUserPermissions, assignUserPermission, removeUserPermission,
     // CRUD
     createProject, updateProject, deleteProject,
@@ -447,7 +575,13 @@ window.api = {
     saveMinStock, deleteMinStock,
     updateAutoReorderConfig, checkAutoReorder,
     createUser, updateUser, deleteUser,
-    createDepartment, updateDepartment, deleteDepartment
+    createDepartment, updateDepartment, deleteDepartment,
+    getRoleDepartmentPermissions,
+    assignRolePermission,
+    removeRolePermission,
+    getDepartmentPermissions,
+    assignDepartmentPermission,
+    removeDepartmentPermission,
 };
 
-console.log('✅ API layer updated with workflow + user permission endpoints');
+console.log('✅ API layer updated with Status and Workflow-Step-Status endpoints');

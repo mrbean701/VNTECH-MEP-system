@@ -18,9 +18,6 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Service quản lý Material Issue (Cấp phát) - Sử dụng workflow động
- */
 @Service
 @RequiredArgsConstructor
 public class IssueService {
@@ -30,9 +27,11 @@ public class IssueService {
     private final WarehouseRepository warehouseRepository;
     private final ObjectMapper objectMapper;
     private final WorkflowService workflowService;
+    private final StatusService statusService;
     private final CurrentUserUtil currentUserUtil;
 
     // ===== GETTERS =====
+
     public List<Issue> getAll() {
         return issueRepository.findAll();
     }
@@ -51,6 +50,7 @@ public class IssueService {
     }
 
     // ===== CREATE =====
+
     @Transactional
     public Issue create(Issue issue) {
         if (!currentUserUtil.hasPermission("issue.create")) {
@@ -64,21 +64,22 @@ public class IssueService {
             while (issueRepository.existsByCode("ISS-" + String.format("%03d", i))) i++;
             nextCode = "ISS-" + String.format("%03d", i);
         }
+
+        String defaultStatus = statusService.getDefaultStatus("issue").getCode();
         issue.setCode(nextCode);
-        issue.setStatus("DRAFT");
+        issue.setStatus(defaultStatus);
         issue.setCreatedAt(LocalDate.now());
         return issueRepository.save(issue);
     }
 
     // ===== UPDATE =====
+
     @Transactional
     public Issue update(Long id, Issue details) {
         Issue issue = getById(id);
-
         if (!currentUserUtil.hasPermission("issue.edit")) {
             throw new RuntimeException("Bạn không có quyền sửa phiếu cấp phát");
         }
-
         if (!"DRAFT".equals(issue.getStatus())) {
             throw new RuntimeException("Chỉ có thể sửa phiếu ở trạng thái DRAFT");
         }
@@ -95,14 +96,13 @@ public class IssueService {
     }
 
     // ===== SUBMIT =====
+
     @Transactional
     public void submit(Long id) {
         Issue issue = getById(id);
-
         if (!currentUserUtil.hasPermission("issue.submit")) {
             throw new RuntimeException("Bạn không có quyền gửi duyệt phiếu cấp phát");
         }
-
         if (!"DRAFT".equals(issue.getStatus())) {
             throw new RuntimeException("Chỉ có thể gửi duyệt phiếu ở trạng thái DRAFT");
         }
@@ -111,51 +111,34 @@ public class IssueService {
         issueRepository.save(issue);
     }
 
-    // ===== APPROVE (Bước 2 - Commander duyệt) =====
+    // ===== APPROVE =====
+
     @Transactional
     public void approve(Long id) {
         Issue issue = getById(id);
-
         if (!currentUserUtil.hasPermission("issue.approve")) {
             throw new RuntimeException("Bạn không có quyền duyệt phiếu cấp phát");
         }
-
         if (!"PENDING".equals(issue.getStatus())) {
             throw new RuntimeException("Phiếu không ở trạng thái chờ duyệt");
         }
 
-        // Lấy steps từ workflow đang active của module "issue"
-        List<Map<String, Object>> steps = workflowService.getStepsByModule("issue");
-        Map<String, Object> step = steps.stream().filter(s -> (int) s.get("step") == 2).findFirst().orElse(null);
-        if (step != null) {
-            String requiredRole = (String) step.get("role");
-            Integer requiredDeptId = step.get("departmentId") != null ? (Integer) step.get("departmentId") : null;
-            User currentUser = currentUserUtil.getCurrentUser();
+        String statusCode = workflowService.getStatusForStep("issue", 2);
 
-            if (!currentUser.getRole().equals(requiredRole)) {
-                throw new RuntimeException("Bạn không có quyền duyệt (yêu cầu role: " + requiredRole + ")");
-            }
-            if (requiredDeptId != null && (currentUser.getDepartmentId() == null ||
-                    !currentUser.getDepartmentId().equals(Long.valueOf(requiredDeptId)))) {
-                throw new RuntimeException("Bạn không thuộc phòng ban được chỉ định để duyệt");
-            }
-        }
-
-        issue.setStatus("APPROVED");
+        issue.setStatus(statusCode != null ? statusCode : "APPROVED");
         issue.setApprovedBy(currentUserUtil.getCurrentUser().getName());
         issue.setUpdatedAt(LocalDate.now());
         issueRepository.save(issue);
     }
 
     // ===== REJECT =====
+
     @Transactional
     public void reject(Long id) {
         Issue issue = getById(id);
-
         if (!currentUserUtil.hasPermission("issue.reject")) {
             throw new RuntimeException("Bạn không có quyền từ chối phiếu cấp phát");
         }
-
         if (!"PENDING".equals(issue.getStatus())) {
             throw new RuntimeException("Phiếu không ở trạng thái chờ duyệt");
         }
@@ -164,15 +147,14 @@ public class IssueService {
         issueRepository.save(issue);
     }
 
-    // ===== COMPLETE (Bước 3 - Thủ kho cấp phát) =====
+    // ===== COMPLETE =====
+
     @Transactional
     public void complete(Long id, Long warehouseId, String itemsUpdateJson) {
         Issue issue = getById(id);
-
         if (!currentUserUtil.hasPermission("issue.complete")) {
             throw new RuntimeException("Bạn không có quyền thực hiện cấp phát");
         }
-
         if (!"APPROVED".equals(issue.getStatus())) {
             throw new RuntimeException("Phiếu chưa được duyệt");
         }
@@ -180,32 +162,16 @@ public class IssueService {
         warehouseRepository.findById(warehouseId)
                 .orElseThrow(() -> new ResourceNotFoundException("Warehouse not found"));
 
-        // Lấy steps từ workflow (bước 3 - cấp phát)
-        List<Map<String, Object>> steps = workflowService.getStepsByModule("issue");
-        Map<String, Object> step = steps.stream().filter(s -> (int) s.get("step") == 3).findFirst().orElse(null);
-        if (step != null) {
-            String requiredRole = (String) step.get("role");
-            Integer requiredDeptId = step.get("departmentId") != null ? (Integer) step.get("departmentId") : null;
-            User currentUser = currentUserUtil.getCurrentUser();
-
-            if (!currentUser.getRole().equals(requiredRole)) {
-                throw new RuntimeException("Bạn không có quyền cấp phát (yêu cầu role: " + requiredRole + ")");
-            }
-            if (requiredDeptId != null && (currentUser.getDepartmentId() == null ||
-                    !currentUser.getDepartmentId().equals(Long.valueOf(requiredDeptId)))) {
-                throw new RuntimeException("Bạn không thuộc phòng ban được chỉ định để cấp phát");
-            }
-        }
+        String statusCode = workflowService.getStatusForStep("issue", 3);
 
         try {
             ArrayNode itemsArray = (ArrayNode) objectMapper.readTree(itemsUpdateJson);
             issue.setItems(itemsUpdateJson);
             issue.setWarehouseId(warehouseId);
-            issue.setStatus("COMPLETED");
+            issue.setStatus(statusCode != null ? statusCode : "COMPLETED");
             issue.setCompletedBy(currentUserUtil.getCurrentUser().getName());
             issue.setUpdatedAt(LocalDate.now());
 
-            // Trừ tồn kho
             for (var item : itemsArray) {
                 Long itemId = item.get("itemId").asLong();
                 BigDecimal actualQty = new BigDecimal(item.get("actualQty").asText());
@@ -224,37 +190,21 @@ public class IssueService {
         }
     }
 
-    // ===== CONFIRM (Bước 4 - Commander xác nhận) =====
+    // ===== CONFIRM =====
+
     @Transactional
     public void confirm(Long id) {
         Issue issue = getById(id);
-
         if (!currentUserUtil.hasPermission("issue.confirm")) {
             throw new RuntimeException("Bạn không có quyền xác nhận phiếu cấp phát");
         }
-
         if (!"COMPLETED".equals(issue.getStatus())) {
             throw new RuntimeException("Phiếu chưa được hoàn thành");
         }
 
-        // Lấy steps từ workflow (bước 4 - xác nhận)
-        List<Map<String, Object>> steps = workflowService.getStepsByModule("issue");
-        Map<String, Object> step = steps.stream().filter(s -> (int) s.get("step") == 4).findFirst().orElse(null);
-        if (step != null) {
-            String requiredRole = (String) step.get("role");
-            Integer requiredDeptId = step.get("departmentId") != null ? (Integer) step.get("departmentId") : null;
-            User currentUser = currentUserUtil.getCurrentUser();
+        String statusCode = workflowService.getStatusForStep("issue", 4);
 
-            if (!currentUser.getRole().equals(requiredRole)) {
-                throw new RuntimeException("Bạn không có quyền xác nhận (yêu cầu role: " + requiredRole + ")");
-            }
-            if (requiredDeptId != null && (currentUser.getDepartmentId() == null ||
-                    !currentUser.getDepartmentId().equals(Long.valueOf(requiredDeptId)))) {
-                throw new RuntimeException("Bạn không thuộc phòng ban được chỉ định để xác nhận");
-            }
-        }
-
-        issue.setStatus("CONFIRMED");
+        issue.setStatus(statusCode != null ? statusCode : "CONFIRMED");
         issue.setConfirmedBy(currentUserUtil.getCurrentUser().getName());
         issue.setCompletionDate(LocalDate.now());
         issue.setUpdatedAt(LocalDate.now());
@@ -262,14 +212,13 @@ public class IssueService {
     }
 
     // ===== DELETE =====
+
     @Transactional
     public void delete(Long id) {
         Issue issue = getById(id);
-
         if (!currentUserUtil.hasPermission("issue.delete")) {
             throw new RuntimeException("Bạn không có quyền xóa phiếu cấp phát");
         }
-
         if (!"DRAFT".equals(issue.getStatus())) {
             throw new RuntimeException("Chỉ có thể xóa phiếu ở trạng thái DRAFT");
         }

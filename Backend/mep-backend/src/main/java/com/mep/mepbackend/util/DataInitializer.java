@@ -18,106 +18,136 @@ public class DataInitializer implements CommandLineRunner {
 
     private final UserRepository userRepository;
     private final DepartmentRepository departmentRepository;
-    private final ProjectRepository projectRepository;
-    private final WarehouseRepository warehouseRepository;
-    private final ItemRepository itemRepository;
-    private final VendorRepository vendorRepository;
     private final WorkflowRepository workflowRepository;
+    private final StatusRepository statusRepository;
     private final PermissionRepository permissionRepository;
     private final PasswordEncoder passwordEncoder;
     private final ObjectMapper objectMapper;
 
     @Override
     public void run(String... args) throws Exception {
-        // Chỉ chạy nếu chưa có dữ liệu
+        // Kiểm tra nếu đã có user thì không tạo lại dữ liệu
         if (userRepository.count() > 0) {
             System.out.println("✅ Dữ liệu đã tồn tại. Bỏ qua khởi tạo.");
             return;
         }
 
-        System.out.println("🔄 Bắt đầu khởi tạo dữ liệu mẫu...");
+        System.out.println("🔄 Bắt đầu khởi tạo dữ liệu mặc định...");
 
-        // ====== 1. Departments ======
-        List<Department> departments = Arrays.asList(
-                new Department(null, "BGD", "Ban Giám đốc", 1L, "Admin", LocalDate.now(), null),
-                new Department(null, "KH", "Phòng Kế hoạch", 3L, "Planning", LocalDate.now(), null),
-                new Department(null, "DA", "Phòng Dự án", 4L, "Project", LocalDate.now(), null),
-                new Department(null, "MH", "Phòng Mua hàng", 5L, "Purchasing", LocalDate.now(), null),
-                new Department(null, "CT", "Ban Chỉ huy công trường", 6L, "Commander", LocalDate.now(), null),
-                new Department(null, "QC", "Phòng QC", 7L, "QC", LocalDate.now(), null)
+        // ====== 1. Tạo phòng ban ======
+        Department deptBGD = new Department(null, "BGD", "Ban Giám đốc", 1L, "Admin", LocalDate.now(), null);
+        departmentRepository.save(deptBGD);
+
+        // ====== 2. Tạo user admin ======
+        User admin = new User(
+                null,
+                "admin@mep.com",
+                passwordEncoder.encode("password"),
+                "Admin",
+                "ADMIN",
+                deptBGD.getId(),
+                "Ban Giám đốc",
+                "Quản trị hệ thống",
+                LocalDate.now(),
+                null
         );
-        departmentRepository.saveAll(departments);
+        userRepository.save(admin);
 
-        // ====== 2. Users ======
-        List<User> users = Arrays.asList(
-                new User(null, "admin@mep.com", passwordEncoder.encode("password"), "Admin", "ADMIN", 1L, "Ban Giám đốc", "Quản trị hệ thống", LocalDate.now(), null),
-                new User(null, "ceo@mep.com", passwordEncoder.encode("password"), "CEO", "CEO", 1L, "Ban Giám đốc", "Tổng Giám đốc", LocalDate.now(), null),
-                new User(null, "planning@mep.com", passwordEncoder.encode("password"), "Planning", "PLANNING", 2L, "Phòng Kế hoạch", "Trưởng phòng KH", LocalDate.now(), null),
-                new User(null, "project@mep.com", passwordEncoder.encode("password"), "Project Manager", "PROJECT", 3L, "Phòng Dự án", "Quản lý dự án", LocalDate.now(), null),
-                new User(null, "purchasing@mep.com", passwordEncoder.encode("password"), "Purchasing", "PURCHASING", 4L, "Phòng Mua hàng", "Nhân viên mua hàng", LocalDate.now(), null),
-                new User(null, "commander@mep.com", passwordEncoder.encode("password"), "Site Commander", "SITE_COMMANDER", 5L, "Ban Chỉ huy công trường", "Chỉ huy trưởng", LocalDate.now(), null),
-                new User(null, "qc@mep.com", passwordEncoder.encode("password"), "QC", "QC", 6L, "Phòng QC", "QC", LocalDate.now(), null)
+        // ====== 3. Tạo Statuses ======
+        insertStatuses();
+
+        // ====== 4. Tạo Workflows ======
+        insertWorkflows();
+
+        // ====== 5. Tạo Permission cơ bản ======
+        Permission adminPerm = new Permission("ADMIN", null, "admin.view", true);
+        permissionRepository.save(adminPerm);
+
+        System.out.println("✅ Khởi tạo dữ liệu mặc định thành công!");
+        System.out.println("👤 Tài khoản admin: admin@mep.com / password");
+    }
+
+    private void insertStatuses() throws Exception {
+        List<Status> statuses = Arrays.asList(
+                // MR
+                new Status("mr", "Nháp", "DRAFT", "Trạng thái nháp", true, false, 0, "#6b7280"),
+                new Status("mr", "Chờ duyệt", "PENDING", "Đã gửi duyệt", false, false, 1, "#f59e0b"),
+                new Status("mr", "Đã duyệt", "APPROVED", "Đã được duyệt", false, false, 2, "#22c55e"),
+                new Status("mr", "Từ chối", "REJECTED", "Bị từ chối", false, true, 3, "#ef4444"),
+
+                // PR
+                new Status("pr", "Nháp", "DRAFT", "Nháp", true, false, 0, "#6b7280"),
+                new Status("pr", "Chờ duyệt KH", "PENDING_PLANNING", "Chờ KH duyệt", false, false, 1, "#f59e0b"),
+                new Status("pr", "KH đã duyệt", "PLANNING_APPROVED", "KH đã duyệt", false, false, 2, "#3b82f6"),
+                new Status("pr", "Chờ duyệt DA", "PENDING_PROJECT", "Chờ DA duyệt", false, false, 3, "#f59e0b"),
+                new Status("pr", "DA đã duyệt", "PROJECT_APPROVED", "DA đã duyệt", false, false, 4, "#3b82f6"),
+                new Status("pr", "Chờ duyệt CEO", "PENDING_CEO", "Chờ CEO duyệt", false, false, 5, "#f59e0b"),
+                new Status("pr", "Đã duyệt", "APPROVED", "Đã duyệt", false, false, 6, "#22c55e"),
+                new Status("pr", "Từ chối", "REJECTED", "Từ chối", false, true, 7, "#ef4444"),
+
+                // PO
+                new Status("po", "Nháp", "DRAFT", "Nháp", true, false, 0, "#6b7280"),
+                new Status("po", "Chờ duyệt KH", "PENDING_PLANNING", "Chờ KH duyệt", false, false, 1, "#f59e0b"),
+                new Status("po", "KH đã duyệt", "PLANNING_APPROVED", "KH đã duyệt", false, false, 2, "#3b82f6"),
+                new Status("po", "Chờ duyệt DA", "PENDING_PROJECT", "Chờ DA duyệt", false, false, 3, "#f59e0b"),
+                new Status("po", "DA đã duyệt", "PROJECT_APPROVED", "DA đã duyệt", false, false, 4, "#3b82f6"),
+                new Status("po", "Chờ duyệt CEO", "PENDING_CEO", "Chờ CEO duyệt", false, false, 5, "#f59e0b"),
+                new Status("po", "Đã duyệt", "APPROVED", "Đã duyệt", false, false, 6, "#22c55e"),
+                new Status("po", "Từ chối", "REJECTED", "Từ chối", false, true, 7, "#ef4444"),
+
+                // GRN
+                new Status("grn", "Nháp", "DRAFT", "Nháp", true, false, 0, "#6b7280"),
+                new Status("grn", "Đã nhận", "RECEIVED", "Đã nhận", false, false, 1, "#3b82f6"),
+                new Status("grn", "QC kiểm tra", "QC_CHECKED", "QC đã kiểm tra", false, false, 2, "#8b5cf6"),
+                new Status("grn", "Hoàn thành", "COMPLETED", "Hoàn thành", false, true, 3, "#22c55e"),
+                new Status("grn", "Từ chối", "REJECTED", "Từ chối", false, true, 4, "#ef4444"),
+
+                // STO
+                new Status("sto", "Nháp", "DRAFT", "Nháp", true, false, 0, "#6b7280"),
+                new Status("sto", "Chờ duyệt", "PENDING", "Chờ duyệt", false, false, 1, "#f59e0b"),
+                new Status("sto", "Đã duyệt", "APPROVED", "Đã duyệt", false, false, 2, "#3b82f6"),
+                new Status("sto", "Hoàn thành", "COMPLETED", "Hoàn thành", false, true, 3, "#22c55e"),
+
+                // Issue
+                new Status("issue", "Nháp", "DRAFT", "Nháp", true, false, 0, "#6b7280"),
+                new Status("issue", "Chờ duyệt", "PENDING", "Chờ duyệt", false, false, 1, "#f59e0b"),
+                new Status("issue", "Đã duyệt", "APPROVED", "Đã duyệt", false, false, 2, "#3b82f6"),
+                new Status("issue", "Đã cấp phát", "COMPLETED", "Đã cấp phát", false, false, 3, "#8b5cf6"),
+                new Status("issue", "Đã xác nhận", "CONFIRMED", "Đã xác nhận", false, true, 4, "#22c55e"),
+                new Status("issue", "Từ chối", "REJECTED", "Từ chối", false, true, 5, "#ef4444"),
+
+                // Material Return
+                new Status("materialreturn", "Nháp", "DRAFT", "Nháp", true, false, 0, "#6b7280"),
+                new Status("materialreturn", "Chờ duyệt", "PENDING", "Chờ duyệt", false, false, 1, "#f59e0b"),
+                new Status("materialreturn", "Đã nhận", "APPROVED", "Thủ kho đã nhận", false, false, 2, "#3b82f6"),
+                new Status("materialreturn", "Đã xác nhận", "CONFIRMED", "Đã xác nhận", false, true, 3, "#22c55e"),
+                new Status("materialreturn", "Từ chối", "REJECTED", "Từ chối", false, true, 4, "#ef4444")
         );
-        userRepository.saveAll(users);
 
-        // ====== 3. Projects ======
-        List<Project> projects = Arrays.asList(
-                new Project(null, "DA001", "Dự án KCN Long Hậu", "Cty TNHH Long Hậu", "Nguyễn Văn A", LocalDate.now(), null, "ACTIVE", null, LocalDate.now(), null),
-                new Project(null, "DA002", "Dự án Nhà máy nhựa Đại Đồng", "Cty Cổ phần Đại Đồng", "Trần Văn B", LocalDate.now(), null, "ACTIVE", null, LocalDate.now(), null)
-        );
-        projectRepository.saveAll(projects);
+        statusRepository.saveAll(statuses);
+    }
 
-        // ====== 4. Warehouses ======
-        List<Warehouse> warehouses = Arrays.asList(
-                new Warehouse(null, "KHO_TONG", "Kho Tổng", "CENTRAL", null, "Lê Thị C", "KCN Long Hậu", "ACTIVE", null, LocalDate.now(), null),
-                new Warehouse(null, "KHO_DA001", "Kho dự án DA001", "SITE", 1L, "Phạm Văn D", "Công trường DA001", "ACTIVE", null, LocalDate.now(), null),
-                new Warehouse(null, "KHO_DA002", "Kho dự án DA002", "SITE", 2L, "Hoàng Văn E", "Công trường DA002", "ACTIVE", null, LocalDate.now(), null)
-        );
-        warehouseRepository.saveAll(warehouses);
-
-        // ====== 5. Items ======
-        List<Item> items = Arrays.asList(
-                new Item(null, "VT001", "Ống thép DN21", "Thép", "DN21", "cây", java.math.BigDecimal.valueOf(500000), "ACTIVE", null, LocalDate.now(), null),
-                new Item(null, "VT002", "Dây điện CVV 2x1.5", "Điện", "CVV 2x1.5", "mét", java.math.BigDecimal.valueOf(20000), "ACTIVE", null, LocalDate.now(), null),
-                new Item(null, "VT003", "Đèn LED 18W", "Điện", "LED 18W", "cái", java.math.BigDecimal.valueOf(150000), "ACTIVE", null, LocalDate.now(), null)
-        );
-        itemRepository.saveAll(items);
-
-        // ====== 6. Vendors ======
-        List<Vendor> vendors = Arrays.asList(
-                new Vendor(null, "NCC001", "Cty Vật tư Mạnh Cường", "Thép", "Mr. Mạnh", "0901234567", "manh@example.com", "30 ngày", null, LocalDate.now(), null),
-                new Vendor(null, "NCC002", "Cty Điện Trường Thịnh", "Điện", "Ms. Thịnh", "0912345678", "thinh@example.com", "45 ngày", null, LocalDate.now(), null)
-        );
-        vendorRepository.saveAll(vendors);
-
-        // ====== 7. Workflows - ĐA DẠNG MẪU ======
-
-        // MR: 1 mẫu (chỉ có 1 bước)
-        String mrSteps1 = objectMapper.writeValueAsString(Arrays.asList(
+    private void insertWorkflows() throws Exception {
+        // MR
+        String mrSteps = objectMapper.writeValueAsString(Arrays.asList(
                 new WorkflowStepDTO(1, "SITE_COMMANDER", "Chỉ huy trưởng duyệt", 5L)
         ));
 
-        // PR: 2 mẫu
-        String prSteps1 = objectMapper.writeValueAsString(Arrays.asList(
+        // PR
+        String prSteps = objectMapper.writeValueAsString(Arrays.asList(
                 new WorkflowStepDTO(1, "PLANNING", "Kế hoạch duyệt", 2L),
                 new WorkflowStepDTO(2, "PROJECT", "Dự án duyệt", 3L),
                 new WorkflowStepDTO(3, "CEO", "Tổng Giám đốc duyệt", 1L)
         ));
-        String prSteps2 = objectMapper.writeValueAsString(Arrays.asList(
-                new WorkflowStepDTO(1, "CEO", "CEO duyệt nhanh", 1L)
-        ));
 
-        // PO: 2 mẫu
-        String poSteps1 = objectMapper.writeValueAsString(Arrays.asList(
+        // PO
+        String poSteps = objectMapper.writeValueAsString(Arrays.asList(
                 new WorkflowStepDTO(1, "PLANNING", "Kế hoạch duyệt", 2L),
                 new WorkflowStepDTO(2, "PROJECT", "Dự án duyệt", 3L),
                 new WorkflowStepDTO(3, "CEO", "Tổng Giám đốc duyệt", 1L)
         ));
-        String poSteps2 = objectMapper.writeValueAsString(Arrays.asList(
-                new WorkflowStepDTO(1, "CEO", "CEO duyệt nhanh", 1L)
-        ));
 
-        // GRN: 1 mẫu
+        // GRN
         String grnSteps = objectMapper.writeValueAsString(Arrays.asList(
                 new WorkflowStepDTO(1, "PURCHASING", "Lập phiếu", 4L),
                 new WorkflowStepDTO(2, "WAREHOUSE", "Thủ kho nhận", null),
@@ -125,14 +155,14 @@ public class DataInitializer implements CommandLineRunner {
                 new WorkflowStepDTO(4, "PURCHASING", "Hoàn thành", 4L)
         ));
 
-        // STO: 1 mẫu
+        // STO
         String stoSteps = objectMapper.writeValueAsString(Arrays.asList(
                 new WorkflowStepDTO(1, "PURCHASING", "Lập phiếu", 4L),
                 new WorkflowStepDTO(2, "PURCHASING", "Duyệt", 4L),
                 new WorkflowStepDTO(3, "PURCHASING", "Xuất kho", 4L)
         ));
 
-        // Issue: 1 mẫu
+        // Issue
         String issueSteps = objectMapper.writeValueAsString(Arrays.asList(
                 new WorkflowStepDTO(1, "SITE_COMMANDER", "Tạo phiếu", 5L),
                 new WorkflowStepDTO(2, "SITE_COMMANDER", "Duyệt", 5L),
@@ -140,76 +170,27 @@ public class DataInitializer implements CommandLineRunner {
                 new WorkflowStepDTO(4, "SITE_COMMANDER", "Xác nhận", 5L)
         ));
 
-        // MaterialReturn: 1 mẫu
+        // Material Return
         String returnSteps = objectMapper.writeValueAsString(Arrays.asList(
                 new WorkflowStepDTO(1, "SITE_COMMANDER", "Tạo phiếu", 5L),
                 new WorkflowStepDTO(2, "PURCHASING", "Thủ kho nhận", 4L),
                 new WorkflowStepDTO(3, "SITE_COMMANDER", "Xác nhận", 5L)
         ));
 
-        // Lưu các workflow với isSystem = true, isActive = true cho mẫu đầu tiên
         List<Workflow> workflows = Arrays.asList(
-                // MR - 1 mẫu
-                new Workflow("mr", "MR - 1 bước chỉ huy trưởng", null, mrSteps1, true, true),
-
-                // PR - 2 mẫu (mẫu 1 active, mẫu 2 inactive)
-                new Workflow("pr", "PR - 3 bước mặc định", "Planning → Project → CEO", prSteps1, true, true),
-                new Workflow("pr", "PR - 1 bước CEO duyệt nhanh", "Chỉ CEO duyệt 1 bước", prSteps2, true, false),
-
-                // PO - 2 mẫu
-                new Workflow("po", "PO - 3 bước mặc định", "Planning → Project → CEO", poSteps1, true, true),
-                new Workflow("po", "PO - 1 bước CEO duyệt nhanh", "Chỉ CEO duyệt 1 bước", poSteps2, true, false),
-
-                // GRN
-                new Workflow("grn", "GRN - 4 bước đầy đủ", null, grnSteps, true, true),
-
-                // STO
-                new Workflow("sto", "STO - 3 bước", null, stoSteps, true, true),
-
-                // Issue
-                new Workflow("issue", "Issue - 4 bước đầy đủ", null, issueSteps, true, true),
-
-                // Material Return
-                new Workflow("materialreturn", "Material Return - 3 bước", null, returnSteps, true, true)
+                new Workflow("mr", "MR - Mặc định", "Quy trình duyệt MR", mrSteps, true, true, "ACTIVE"),
+                new Workflow("pr", "PR - 3 bước mặc định", "Planning → Project → CEO", prSteps, true, true, "ACTIVE"),
+                new Workflow("po", "PO - 3 bước mặc định", "Planning → Project → CEO", poSteps, true, true, "ACTIVE"),
+                new Workflow("grn", "GRN - 4 bước mặc định", "Lập phiếu → Nhận → QC → Hoàn thành", grnSteps, true, true, "ACTIVE"),
+                new Workflow("sto", "STO - 3 bước mặc định", "Lập phiếu → Duyệt → Xuất kho", stoSteps, true, true, "ACTIVE"),
+                new Workflow("issue", "Issue - 4 bước mặc định", "Tạo phiếu → Duyệt → Cấp phát → Xác nhận", issueSteps, true, true, "ACTIVE"),
+                new Workflow("materialreturn", "Material Return - 3 bước mặc định", "Tạo phiếu → Nhận → Xác nhận", returnSteps, true, true, "ACTIVE")
         );
+
         workflowRepository.saveAll(workflows);
-
-        // ====== 8. Permissions ======
-        List<Permission> permissions = Arrays.asList(
-                // CEO
-                new Permission(null, "CEO", "dashboard.view", true),
-                new Permission(null, "CEO", "pr.approve", true),
-                new Permission(null, "CEO", "po.approve", true),
-                // PLANNING
-                new Permission(null, "PLANNING", "pr.approve", true),
-                new Permission(null, "PLANNING", "po.approve", true),
-                // PROJECT
-                new Permission(null, "PROJECT", "pr.approve", true),
-                new Permission(null, "PROJECT", "po.approve", true),
-                // PURCHASING
-                new Permission(null, "PURCHASING", "pr.create", true),
-                new Permission(null, "PURCHASING", "pr.edit", true),
-                new Permission(null, "PURCHASING", "po.create", true),
-                new Permission(null, "PURCHASING", "po.edit", true),
-                new Permission(null, "PURCHASING", "grn.create", true),
-                new Permission(null, "PURCHASING", "grn.receive", true),
-                new Permission(null, "PURCHASING", "sto.create", true),
-                // SITE_COMMANDER
-                new Permission(null, "SITE_COMMANDER", "mr.create", true),
-                new Permission(null, "SITE_COMMANDER", "mr.approve", true),
-                new Permission(null, "SITE_COMMANDER", "issue.create", true),
-                new Permission(null, "SITE_COMMANDER", "issue.approve", true),
-                new Permission(null, "SITE_COMMANDER", "materialreturn.create", true),
-                // QC
-                new Permission(null, "QC", "grn.qc", true)
-        );
-        permissionRepository.saveAll(permissions);
-
-        System.out.println("✅ Khởi tạo dữ liệu mẫu thành công!");
-        System.out.println("📊 Workflows: " + workflowRepository.count() + " mẫu đã được tạo.");
     }
 
-    // Inner class để hỗ trợ tạo workflow steps
+    // Inner class hỗ trợ tạo workflow steps
     static class WorkflowStepDTO {
         public Integer step;
         public String role;

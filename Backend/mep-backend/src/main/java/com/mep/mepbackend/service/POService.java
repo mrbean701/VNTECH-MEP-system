@@ -15,9 +15,6 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Service quản lý Purchase Order (PO) - Sử dụng workflow động
- */
 @Service
 @RequiredArgsConstructor
 public class POService {
@@ -26,9 +23,11 @@ public class POService {
     private final PRRepository prRepository;
     private final ObjectMapper objectMapper;
     private final WorkflowService workflowService;
+    private final StatusService statusService;
     private final CurrentUserUtil currentUserUtil;
 
     // ===== GETTERS =====
+
     public List<PO> getAll() {
         return poRepository.findAll();
     }
@@ -60,6 +59,7 @@ public class POService {
     }
 
     // ===== CREATE =====
+
     @Transactional
     public PO create(PO po) {
         if (!currentUserUtil.hasPermission("po.create")) {
@@ -73,8 +73,10 @@ public class POService {
             while (poRepository.existsByCode("PO-" + String.format("%03d", i))) i++;
             nextCode = "PO-" + String.format("%03d", i);
         }
+
+        String defaultStatus = statusService.getDefaultStatus("po").getCode();
         po.setCode(nextCode);
-        po.setStatus("DRAFT");
+        po.setStatus(defaultStatus);
         po.setApprovalStep(1);
         po.setCreatedAt(LocalDate.now());
         return poRepository.save(po);
@@ -85,7 +87,6 @@ public class POService {
         if (!currentUserUtil.hasPermission("po.create")) {
             throw new RuntimeException("Bạn không có quyền tạo PO từ PR");
         }
-
         var pr = prRepository.findById(prId)
                 .orElseThrow(() -> new ResourceNotFoundException("PR not found with id: " + prId));
         if (!"APPROVED".equals(pr.getStatus())) {
@@ -101,14 +102,13 @@ public class POService {
     }
 
     // ===== UPDATE =====
+
     @Transactional
     public PO update(Long id, PO details) {
         PO po = getById(id);
-
         if (!currentUserUtil.hasPermission("po.edit")) {
             throw new RuntimeException("Bạn không có quyền sửa PO");
         }
-
         if (!"DRAFT".equals(po.getStatus()) && !"PENDING".equals(po.getStatus())) {
             throw new RuntimeException("Chỉ có thể sửa PO ở trạng thái DRAFT hoặc PENDING");
         }
@@ -123,14 +123,13 @@ public class POService {
     }
 
     // ===== SUBMIT =====
+
     @Transactional
     public void submit(Long id) {
         PO po = getById(id);
-
         if (!currentUserUtil.hasPermission("po.submit")) {
             throw new RuntimeException("Bạn không có quyền gửi duyệt PO");
         }
-
         if (!"DRAFT".equals(po.getStatus())) {
             throw new RuntimeException("Chỉ có thể gửi duyệt PO ở trạng thái DRAFT");
         }
@@ -140,7 +139,8 @@ public class POService {
         poRepository.save(po);
     }
 
-    // ===== APPROVE (SỬ DỤNG WORKFLOW ĐỘNG - 3 BƯỚC) =====
+    // ===== APPROVE =====
+
     @Transactional
     public void approve(Long id) {
         PO po = getById(id);
@@ -148,8 +148,7 @@ public class POService {
             throw new RuntimeException("PO không ở trạng thái chờ duyệt");
         }
 
-        // Lấy steps từ workflow đang active của module "po"
-        List<Map<String, Object>> steps = workflowService.getStepsByModule("po");
+        List<Map<String, Object>> steps = workflowService.getStepsWithStatusByModule("po");
         int currentStep = po.getApprovalStep() != null ? po.getApprovalStep() : 1;
 
         Map<String, Object> step = steps.stream()
@@ -162,7 +161,6 @@ public class POService {
 
         User currentUser = currentUserUtil.getCurrentUser();
 
-        // Kiểm tra role và department theo workflow
         if (!currentUser.getRole().equals(requiredRole)) {
             throw new RuntimeException("Bạn không có quyền duyệt bước này (yêu cầu role: " + requiredRole + ")");
         }
@@ -171,50 +169,53 @@ public class POService {
             throw new RuntimeException("Bạn không thuộc phòng ban được chỉ định để duyệt");
         }
 
-        // Kiểm tra user permission (ghi đè role nếu có)
         if (!currentUserUtil.hasPermission("po.approve")) {
             throw new RuntimeException("Bạn không có quyền duyệt PO (user permission)");
         }
+
+        String statusCode = (String) step.get("statusCode");
 
         if (currentStep == steps.size()) {
             po.setStatus("APPROVED");
         } else {
             po.setApprovalStep(currentStep + 1);
-            po.setStatus("PENDING");
+            if (statusCode != null && !statusCode.isEmpty()) {
+                po.setStatus(statusCode);
+            } else {
+                po.setStatus("PENDING");
+            }
         }
         po.setUpdatedAt(LocalDate.now());
         poRepository.save(po);
     }
 
     // ===== REJECT =====
+
     @Transactional
     public void reject(Long id) {
         PO po = getById(id);
         if (!"PENDING".equals(po.getStatus())) {
             throw new RuntimeException("PO không ở trạng thái chờ duyệt");
         }
-
         if (!currentUserUtil.hasPermission("po.reject")) {
             throw new RuntimeException("Bạn không có quyền từ chối PO");
         }
-
         po.setStatus("REJECTED");
         po.setUpdatedAt(LocalDate.now());
         poRepository.save(po);
     }
 
     // ===== DELETE =====
+
     @Transactional
     public void delete(Long id) {
         PO po = getById(id);
         if (!"DRAFT".equals(po.getStatus())) {
             throw new RuntimeException("Chỉ có thể xóa PO ở trạng thái DRAFT");
         }
-
         if (!currentUserUtil.hasPermission("po.delete")) {
             throw new RuntimeException("Bạn không có quyền xóa PO");
         }
-
         poRepository.delete(po);
     }
 }

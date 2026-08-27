@@ -14,9 +14,6 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Service quản lý Material Request (MR) - Sử dụng workflow động
- */
 @Service
 @RequiredArgsConstructor
 public class MRService {
@@ -24,9 +21,11 @@ public class MRService {
     private final MRRepository mrRepository;
     private final ObjectMapper objectMapper;
     private final WorkflowService workflowService;
+    private final StatusService statusService;
     private final CurrentUserUtil currentUserUtil;
 
-    // ===== GETTERS =====
+    // ===== GETTERS ===== (giữ nguyên)
+
     public List<MR> getAll() {
         return mrRepository.findAll();
     }
@@ -54,9 +53,9 @@ public class MRService {
     }
 
     // ===== CREATE =====
+
     @Transactional
     public MR create(MR mr) {
-        // Kiểm tra quyền tạo MR
         if (!currentUserUtil.hasPermission("mr.create")) {
             throw new RuntimeException("Bạn không có quyền tạo MR");
         }
@@ -68,23 +67,24 @@ public class MRService {
             while (mrRepository.existsByCode("MR-" + String.format("%03d", i))) i++;
             nextCode = "MR-" + String.format("%03d", i);
         }
+
+        // Set status mặc định từ cấu hình
+        String defaultStatus = statusService.getDefaultStatus("mr").getCode();
         mr.setCode(nextCode);
-        mr.setStatus("DRAFT");
+        mr.setStatus(defaultStatus);  // Thay vì "DRAFT" cứng
         mr.setApprovalStep(1);
         mr.setCreatedAt(LocalDate.now());
         return mrRepository.save(mr);
     }
 
-    // ===== UPDATE =====
+    // ===== UPDATE ===== (giữ nguyên)
+
     @Transactional
     public MR update(Long id, MR details) {
         MR mr = getById(id);
-
-        // Kiểm tra quyền sửa
         if (!currentUserUtil.hasPermission("mr.edit")) {
             throw new RuntimeException("Bạn không có quyền sửa MR");
         }
-
         if (!"DRAFT".equals(mr.getStatus()) && !"PENDING".equals(mr.getStatus())) {
             throw new RuntimeException("Chỉ có thể sửa MR ở trạng thái DRAFT hoặc PENDING");
         }
@@ -100,14 +100,13 @@ public class MRService {
     }
 
     // ===== SUBMIT =====
+
     @Transactional
     public void submit(Long id) {
         MR mr = getById(id);
-
         if (!currentUserUtil.hasPermission("mr.submit")) {
             throw new RuntimeException("Bạn không có quyền gửi duyệt MR");
         }
-
         if (!"DRAFT".equals(mr.getStatus())) {
             throw new RuntimeException("Chỉ có thể gửi duyệt MR ở trạng thái DRAFT");
         }
@@ -117,7 +116,8 @@ public class MRService {
         mrRepository.save(mr);
     }
 
-    // ===== APPROVE (SỬ DỤNG WORKFLOW ĐỘNG) =====
+    // ===== APPROVE =====
+
     @Transactional
     public void approve(Long id) {
         MR mr = getById(id);
@@ -126,7 +126,7 @@ public class MRService {
         }
 
         // Lấy steps từ workflow đang active của module "mr"
-        List<Map<String, Object>> steps = workflowService.getStepsByModule("mr");
+        List<Map<String, Object>> steps = workflowService.getStepsWithStatusByModule("mr");
         int currentStep = mr.getApprovalStep() != null ? mr.getApprovalStep() : 1;
 
         Map<String, Object> step = steps.stream()
@@ -148,51 +148,57 @@ public class MRService {
             throw new RuntimeException("Bạn không thuộc phòng ban được chỉ định để duyệt");
         }
 
-        // Kiểm tra user permission (ghi đè role nếu có)
         if (!currentUserUtil.hasPermission("mr.approve")) {
             throw new RuntimeException("Bạn không có quyền duyệt MR (user permission)");
         }
 
-        // Kiểm tra nếu đã duyệt xong bước cuối cùng
+        // Lấy status code từ step
+        String statusCode = (String) step.get("statusCode");
+
         if (currentStep == steps.size()) {
+            // Bước cuối cùng - hoàn thành
             mr.setStatus("APPROVED");
         } else {
+            // Chuyển sang bước tiếp theo
             mr.setApprovalStep(currentStep + 1);
-            mr.setStatus("PENDING");
+            // Cập nhật status nếu có
+            if (statusCode != null && !statusCode.isEmpty()) {
+                mr.setStatus(statusCode);
+            } else {
+                mr.setStatus("PENDING");
+            }
         }
         mr.setUpdatedAt(LocalDate.now());
         mrRepository.save(mr);
     }
 
     // ===== REJECT =====
+
     @Transactional
     public void reject(Long id) {
         MR mr = getById(id);
         if (!"PENDING".equals(mr.getStatus())) {
             throw new RuntimeException("MR không ở trạng thái chờ duyệt");
         }
-
         if (!currentUserUtil.hasPermission("mr.reject")) {
             throw new RuntimeException("Bạn không có quyền từ chối MR");
         }
-
         mr.setStatus("REJECTED");
         mr.setUpdatedAt(LocalDate.now());
         mrRepository.save(mr);
     }
 
     // ===== DELETE =====
+
     @Transactional
     public void delete(Long id) {
         MR mr = getById(id);
         if (!"DRAFT".equals(mr.getStatus())) {
             throw new RuntimeException("Chỉ có thể xóa MR ở trạng thái DRAFT");
         }
-
         if (!currentUserUtil.hasPermission("mr.delete")) {
             throw new RuntimeException("Bạn không có quyền xóa MR");
         }
-
         mrRepository.delete(mr);
     }
 }

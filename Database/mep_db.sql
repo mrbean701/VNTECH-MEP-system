@@ -1,13 +1,16 @@
 -- ================================================================
--- TẠO DATABASE MEP
+-- RESET DATABASE - CHỈ ADMIN + WORKFLOW MẪU + STATUS + PERMISSIONS
 -- ================================================================
+
 DROP DATABASE IF EXISTS mep_db;
 CREATE DATABASE IF NOT EXISTS mep_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE mep_db;
 
 -- ================================================================
--- 1. BẢNG USERS
+-- TẠO CÁC BẢNG
 -- ================================================================
+
+-- 1. USERS
 CREATE TABLE IF NOT EXISTS users (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     email VARCHAR(100) UNIQUE NOT NULL,
@@ -22,9 +25,7 @@ CREATE TABLE IF NOT EXISTS users (
     INDEX idx_role (`role`)
 );
 
--- ================================================================
--- 2. BẢNG DEPARTMENTS
--- ================================================================
+-- 2. DEPARTMENTS
 CREATE TABLE IF NOT EXISTS departments (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     `code` VARCHAR(50) UNIQUE NOT NULL,
@@ -36,9 +37,7 @@ CREATE TABLE IF NOT EXISTS departments (
     INDEX idx_code (`code`)
 );
 
--- ================================================================
--- 3. BẢNG PROJECTS
--- ================================================================
+-- 3. PROJECTS
 CREATE TABLE IF NOT EXISTS projects (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     `code` VARCHAR(50) UNIQUE NOT NULL,
@@ -55,9 +54,7 @@ CREATE TABLE IF NOT EXISTS projects (
     INDEX idx_status (`status`)
 );
 
--- ================================================================
--- 4. BẢNG VENDORS
--- ================================================================
+-- 4. VENDORS
 CREATE TABLE IF NOT EXISTS vendors (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     `code` VARCHAR(50) UNIQUE NOT NULL,
@@ -73,9 +70,7 @@ CREATE TABLE IF NOT EXISTS vendors (
     INDEX idx_code (`code`)
 );
 
--- ================================================================
--- 5. BẢNG ITEMS
--- ================================================================
+-- 5. ITEMS
 CREATE TABLE IF NOT EXISTS items (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     `code` VARCHAR(50) UNIQUE NOT NULL,
@@ -92,9 +87,7 @@ CREATE TABLE IF NOT EXISTS items (
     INDEX idx_status (`status`)
 );
 
--- ================================================================
--- 6. BẢNG MR (Material Request)
--- ================================================================
+-- 6. MR
 CREATE TABLE IF NOT EXISTS mr (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     `code` VARCHAR(50) UNIQUE NOT NULL,
@@ -115,9 +108,7 @@ CREATE TABLE IF NOT EXISTS mr (
     INDEX idx_status (`status`)
 );
 
--- ================================================================
--- 7. BẢNG PR (Purchase Request)
--- ================================================================
+-- 7. PR
 CREATE TABLE IF NOT EXISTS pr (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     `code` VARCHAR(50) UNIQUE NOT NULL,
@@ -140,9 +131,7 @@ CREATE TABLE IF NOT EXISTS pr (
     INDEX idx_mr_id (mr_id)
 );
 
--- ================================================================
--- 8. BẢNG PO (Purchase Order)
--- ================================================================
+-- 8. PO
 CREATE TABLE IF NOT EXISTS po (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     `code` VARCHAR(50) UNIQUE NOT NULL,
@@ -165,9 +154,7 @@ CREATE TABLE IF NOT EXISTS po (
     INDEX idx_pr_id (pr_id)
 );
 
--- ================================================================
--- 9. BẢNG WAREHOUSES
--- ================================================================
+-- 9. WAREHOUSES
 CREATE TABLE IF NOT EXISTS warehouses (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     `code` VARCHAR(50) UNIQUE NOT NULL,
@@ -185,9 +172,7 @@ CREATE TABLE IF NOT EXISTS warehouses (
     INDEX idx_status (`status`)
 );
 
--- ================================================================
--- 10. BẢNG INVENTORY
--- ================================================================
+-- 10. INVENTORY
 CREATE TABLE IF NOT EXISTS inventory (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     warehouse_id BIGINT NOT NULL,
@@ -199,9 +184,7 @@ CREATE TABLE IF NOT EXISTS inventory (
     INDEX idx_item_id (item_id)
 );
 
--- ================================================================
--- 11. BẢNG GRN (Goods Receipt Note)
--- ================================================================
+-- 11. GRN
 CREATE TABLE IF NOT EXISTS grn (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     `code` VARCHAR(50) UNIQUE NOT NULL,
@@ -228,9 +211,7 @@ CREATE TABLE IF NOT EXISTS grn (
     INDEX idx_status (`status`)
 );
 
--- ================================================================
--- 12. BẢNG STO (Stock Transfer Order)
--- ================================================================
+-- 12. STO
 CREATE TABLE IF NOT EXISTS sto (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     `code` VARCHAR(50) UNIQUE NOT NULL,
@@ -255,9 +236,7 @@ CREATE TABLE IF NOT EXISTS sto (
     INDEX idx_status (`status`)
 );
 
--- ================================================================
--- 13. BẢNG ISSUE (Cấp phát vật tư)
--- ================================================================
+-- 13. ISSUES
 CREATE TABLE IF NOT EXISTS issues (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     `code` VARCHAR(50) UNIQUE NOT NULL,
@@ -284,9 +263,7 @@ CREATE TABLE IF NOT EXISTS issues (
     INDEX idx_status (`status`)
 );
 
--- ================================================================
--- 14. BẢNG MATERIAL_RETURNS (Hoàn trả vật tư)
--- ================================================================
+-- 14. MATERIAL_RETURNS
 CREATE TABLE IF NOT EXISTS material_returns (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     `code` VARCHAR(50) UNIQUE NOT NULL,
@@ -312,9 +289,7 @@ CREATE TABLE IF NOT EXISTS material_returns (
     INDEX idx_status (`status`)
 );
 
--- ================================================================
--- 15. BẢNG MIN_STOCK
--- ================================================================
+-- 15. MIN_STOCK
 CREATE TABLE IF NOT EXISTS min_stock (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     warehouse_id BIGINT NOT NULL,
@@ -326,9 +301,7 @@ CREATE TABLE IF NOT EXISTS min_stock (
     INDEX idx_item_id (item_id)
 );
 
--- ================================================================
--- 16. BẢNG AUTO_REORDER_CONFIG
--- ================================================================
+-- 16. AUTO_REORDER_CONFIG
 CREATE TABLE IF NOT EXISTS auto_reorder_config (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     enabled BOOLEAN DEFAULT FALSE,
@@ -337,17 +310,15 @@ CREATE TABLE IF NOT EXISTS auto_reorder_config (
     updated_at DATE NULL
 );
 
--- ================================================================
--- 17. BẢNG WORKFLOWS (ĐÃ CẬP NHẬT - HỖ TRỢ ĐA MẪU)
--- ================================================================
+-- 17. WORKFLOWS
 CREATE TABLE IF NOT EXISTS workflows (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
-    module VARCHAR(50) NOT NULL,                -- KHÔNG UNIQUE (cho phép nhiều mẫu)
+    module VARCHAR(50) NOT NULL,
     `name` VARCHAR(100) NOT NULL,
     description TEXT NULL,
     steps JSON NOT NULL,
-    is_active BOOLEAN NOT NULL DEFAULT FALSE,   -- TRUE nếu đang áp dụng
-    is_system BOOLEAN NOT NULL DEFAULT FALSE,   -- TRUE nếu là mẫu hệ thống
+    is_active BOOLEAN NOT NULL DEFAULT FALSE,
+    is_system BOOLEAN NOT NULL DEFAULT FALSE,
     created_at DATE NULL,
     updated_at DATE NULL,
     INDEX idx_workflows_module (module),
@@ -355,21 +326,47 @@ CREATE TABLE IF NOT EXISTS workflows (
     INDEX idx_workflows_module_active (module, is_active)
 );
 
--- ================================================================
--- 18. BẢNG PERMISSIONS
--- ================================================================
-CREATE TABLE IF NOT EXISTS permissions (
+-- 18. STATUSES
+CREATE TABLE IF NOT EXISTS statuses (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
-    `role` VARCHAR(50) NOT NULL,
-    permission_key VARCHAR(100) NOT NULL,
-    enabled BOOLEAN DEFAULT TRUE,
-    UNIQUE KEY uk_role_permission (`role`, permission_key),
-    INDEX idx_role (`role`)
+    entity_type VARCHAR(50) NOT NULL,
+    `name` VARCHAR(100) NOT NULL,
+    `code` VARCHAR(50) NOT NULL UNIQUE,
+    description TEXT NULL,
+    is_default BOOLEAN DEFAULT FALSE,
+    is_final BOOLEAN DEFAULT FALSE,
+    sort_order INT DEFAULT 0,
+    color VARCHAR(20) NULL,
+    created_at DATE NULL,
+    updated_at DATE NULL,
+    INDEX idx_statuses_entity_type (entity_type),
+    INDEX idx_statuses_code (code)
 );
 
--- ================================================================
--- 19. BẢNG USER_PERMISSIONS
--- ================================================================
+-- 19. WORKFLOW_STEP_STATUS
+CREATE TABLE IF NOT EXISTS workflow_step_status (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    workflow_id BIGINT NOT NULL,
+    step INT NOT NULL,
+    status_code VARCHAR(50) NOT NULL,
+    FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE,
+    INDEX idx_wf_step_status_workflow (workflow_id),
+    INDEX idx_wf_step_status_step (step),
+    INDEX idx_wf_step_status_code (status_code)
+);
+
+-- 20. PERMISSIONS
+CREATE TABLE IF NOT EXISTS permissions (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    `role` VARCHAR(50) DEFAULT 'DEPARTMENT',
+    department_id BIGINT NULL,
+    permission_key VARCHAR(100) NOT NULL,
+    enabled BOOLEAN DEFAULT TRUE,
+    UNIQUE KEY uk_dept_permission (department_id, permission_key),
+    INDEX idx_department (department_id)
+);
+
+-- 21. USER_PERMISSIONS
 CREATE TABLE IF NOT EXISTS user_permissions (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     user_id BIGINT NOT NULL,
@@ -379,9 +376,7 @@ CREATE TABLE IF NOT EXISTS user_permissions (
     INDEX idx_user_id (user_id)
 );
 
--- ================================================================
--- 20. BẢNG AUTO_REORDER_RULES
--- ================================================================
+-- 22. AUTO_REORDER_RULES
 CREATE TABLE IF NOT EXISTS auto_reorder_rules (
     id VARCHAR(50) PRIMARY KEY,
     item_id BIGINT NOT NULL,
@@ -400,8 +395,23 @@ CREATE TABLE IF NOT EXISTS auto_reorder_rules (
     INDEX idx_warehouse_id (warehouse_id)
 );
 
+-- 23. ACTIVITY_LOGS
+CREATE TABLE IF NOT EXISTS activity_logs (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NULL,
+    username VARCHAR(100) NULL,
+    action VARCHAR(50) NOT NULL,
+    entity_type VARCHAR(50) NOT NULL,
+    entity_id BIGINT NULL,
+    old_values JSON NULL,
+    new_values JSON NULL,
+    ip_address VARCHAR(45) NULL,
+    user_agent TEXT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- ================================================================
--- THÊM KHÓA NGOẠI
+-- KHÓA NGOẠI
 -- ================================================================
 ALTER TABLE users ADD CONSTRAINT fk_users_department
     FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL;
@@ -423,181 +433,117 @@ ALTER TABLE user_permissions ADD CONSTRAINT fk_userperm_user
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
 
 -- ================================================================
--- BỔ SUNG CÁC TRƯỜNG AUDIT (Procedure an toàn)
+-- DỮ LIỆU MẪU
 -- ================================================================
+
+-- 1. DEPARTMENTS
+INSERT INTO departments (code, name, manager_id, manager_name, created_at, updated_at) VALUES
+('BGD', 'Ban Giám đốc', 1, 'Admin', CURDATE(), CURDATE());
+
+-- 2. USERS (admin - password = 'password')
+INSERT INTO users (email, password, name, role, department_id, position, created_at, updated_at) VALUES
+('admin@mep.com', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', 'Admin', 'ADMIN', 1, 'Quản trị hệ thống', CURDATE(), CURDATE());
+
+-- 3. STATUSES
 DELIMITER $$
-DROP PROCEDURE IF EXISTS AddColumnIfNotExists $$
-CREATE PROCEDURE AddColumnIfNotExists(
-    IN tableName VARCHAR(100),
-    IN columnName VARCHAR(100),
-    IN columnDefinition VARCHAR(200)
+DROP PROCEDURE IF EXISTS InsertStatusIfNotExists $$
+CREATE PROCEDURE InsertStatusIfNotExists(
+    IN p_entity_type VARCHAR(50),
+    IN p_name VARCHAR(100),
+    IN p_code VARCHAR(50),
+    IN p_description TEXT,
+    IN p_is_default BOOLEAN,
+    IN p_is_final BOOLEAN,
+    IN p_sort_order INT,
+    IN p_color VARCHAR(20)
 )
 BEGIN
-    IF NOT EXISTS (
-        SELECT * FROM information_schema.COLUMNS 
-        WHERE TABLE_SCHEMA = DATABASE() 
-          AND TABLE_NAME = tableName 
-          AND COLUMN_NAME = columnName
-    ) THEN
-        SET @sql = CONCAT('ALTER TABLE ', tableName, ' ADD COLUMN ', columnName, ' ', columnDefinition);
-        PREPARE stmt FROM @sql;
-        EXECUTE stmt;
-        DEALLOCATE PREPARE stmt;
+    IF NOT EXISTS (SELECT 1 FROM statuses WHERE code = p_code) THEN
+        INSERT INTO statuses (entity_type, name, code, description, is_default, is_final, sort_order, color, created_at, updated_at)
+        VALUES (p_entity_type, p_name, p_code, p_description, p_is_default, p_is_final, p_sort_order, p_color, CURDATE(), CURDATE());
     END IF;
 END $$
 DELIMITER ;
 
--- Thêm audit columns cho các bảng
-CALL AddColumnIfNotExists('projects', 'created_by', 'INT NULL');
-CALL AddColumnIfNotExists('projects', 'updated_by', 'INT NULL');
-CALL AddColumnIfNotExists('projects', 'created_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP');
-CALL AddColumnIfNotExists('projects', 'updated_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
+CALL InsertStatusIfNotExists('mr', 'Nháp', 'DRAFT', 'Trạng thái nháp', TRUE, FALSE, 0, '#6b7280');
+CALL InsertStatusIfNotExists('mr', 'Chờ duyệt', 'PENDING', 'Đã gửi duyệt', FALSE, FALSE, 1, '#f59e0b');
+CALL InsertStatusIfNotExists('mr', 'Đã duyệt', 'APPROVED', 'Đã được duyệt', FALSE, FALSE, 2, '#22c55e');
+CALL InsertStatusIfNotExists('mr', 'Từ chối', 'REJECTED', 'Bị từ chối', FALSE, TRUE, 3, '#ef4444');
 
-CALL AddColumnIfNotExists('vendors', 'created_by', 'INT NULL');
-CALL AddColumnIfNotExists('vendors', 'updated_by', 'INT NULL');
-CALL AddColumnIfNotExists('vendors', 'created_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP');
-CALL AddColumnIfNotExists('vendors', 'updated_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
+CALL InsertStatusIfNotExists('pr', 'Nháp', 'DRAFT', 'Nháp', TRUE, FALSE, 0, '#6b7280');
+CALL InsertStatusIfNotExists('pr', 'Chờ duyệt KH', 'PENDING_PLANNING', 'Chờ KH duyệt', FALSE, FALSE, 1, '#f59e0b');
+CALL InsertStatusIfNotExists('pr', 'KH đã duyệt', 'PLANNING_APPROVED', 'KH đã duyệt', FALSE, FALSE, 2, '#3b82f6');
+CALL InsertStatusIfNotExists('pr', 'Chờ duyệt DA', 'PENDING_PROJECT', 'Chờ DA duyệt', FALSE, FALSE, 3, '#f59e0b');
+CALL InsertStatusIfNotExists('pr', 'DA đã duyệt', 'PROJECT_APPROVED', 'DA đã duyệt', FALSE, FALSE, 4, '#3b82f6');
+CALL InsertStatusIfNotExists('pr', 'Chờ duyệt CEO', 'PENDING_CEO', 'Chờ CEO duyệt', FALSE, FALSE, 5, '#f59e0b');
+CALL InsertStatusIfNotExists('pr', 'Đã duyệt', 'APPROVED', 'Đã duyệt', FALSE, FALSE, 6, '#22c55e');
+CALL InsertStatusIfNotExists('pr', 'Từ chối', 'REJECTED', 'Từ chối', FALSE, TRUE, 7, '#ef4444');
 
-CALL AddColumnIfNotExists('items', 'created_by', 'INT NULL');
-CALL AddColumnIfNotExists('items', 'updated_by', 'INT NULL');
-CALL AddColumnIfNotExists('items', 'created_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP');
-CALL AddColumnIfNotExists('items', 'updated_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
+CALL InsertStatusIfNotExists('po', 'Nháp', 'DRAFT', 'Nháp', TRUE, FALSE, 0, '#6b7280');
+CALL InsertStatusIfNotExists('po', 'Chờ duyệt KH', 'PENDING_PLANNING', 'Chờ KH duyệt', FALSE, FALSE, 1, '#f59e0b');
+CALL InsertStatusIfNotExists('po', 'KH đã duyệt', 'PLANNING_APPROVED', 'KH đã duyệt', FALSE, FALSE, 2, '#3b82f6');
+CALL InsertStatusIfNotExists('po', 'Chờ duyệt DA', 'PENDING_PROJECT', 'Chờ DA duyệt', FALSE, FALSE, 3, '#f59e0b');
+CALL InsertStatusIfNotExists('po', 'DA đã duyệt', 'PROJECT_APPROVED', 'DA đã duyệt', FALSE, FALSE, 4, '#3b82f6');
+CALL InsertStatusIfNotExists('po', 'Chờ duyệt CEO', 'PENDING_CEO', 'Chờ CEO duyệt', FALSE, FALSE, 5, '#f59e0b');
+CALL InsertStatusIfNotExists('po', 'Đã duyệt', 'APPROVED', 'Đã duyệt', FALSE, FALSE, 6, '#22c55e');
+CALL InsertStatusIfNotExists('po', 'Từ chối', 'REJECTED', 'Từ chối', FALSE, TRUE, 7, '#ef4444');
 
-CALL AddColumnIfNotExists('warehouses', 'created_by', 'INT NULL');
-CALL AddColumnIfNotExists('warehouses', 'updated_by', 'INT NULL');
-CALL AddColumnIfNotExists('warehouses', 'created_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP');
-CALL AddColumnIfNotExists('warehouses', 'updated_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
+CALL InsertStatusIfNotExists('grn', 'Nháp', 'DRAFT', 'Nháp', TRUE, FALSE, 0, '#6b7280');
+CALL InsertStatusIfNotExists('grn', 'Đã nhận', 'RECEIVED', 'Đã nhận', FALSE, FALSE, 1, '#3b82f6');
+CALL InsertStatusIfNotExists('grn', 'QC kiểm tra', 'QC_CHECKED', 'QC đã kiểm tra', FALSE, FALSE, 2, '#8b5cf6');
+CALL InsertStatusIfNotExists('grn', 'Hoàn thành', 'COMPLETED', 'Hoàn thành', FALSE, TRUE, 3, '#22c55e');
+CALL InsertStatusIfNotExists('grn', 'Từ chối', 'REJECTED', 'Từ chối', FALSE, TRUE, 4, '#ef4444');
 
-CALL AddColumnIfNotExists('mr', 'created_by', 'INT NULL');
-CALL AddColumnIfNotExists('mr', 'updated_by', 'INT NULL');
-CALL AddColumnIfNotExists('mr', 'created_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP');
-CALL AddColumnIfNotExists('mr', 'updated_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
+CALL InsertStatusIfNotExists('sto', 'Nháp', 'DRAFT', 'Nháp', TRUE, FALSE, 0, '#6b7280');
+CALL InsertStatusIfNotExists('sto', 'Chờ duyệt', 'PENDING', 'Chờ duyệt', FALSE, FALSE, 1, '#f59e0b');
+CALL InsertStatusIfNotExists('sto', 'Đã duyệt', 'APPROVED', 'Đã duyệt', FALSE, FALSE, 2, '#3b82f6');
+CALL InsertStatusIfNotExists('sto', 'Hoàn thành', 'COMPLETED', 'Hoàn thành', FALSE, TRUE, 3, '#22c55e');
 
-CALL AddColumnIfNotExists('pr', 'created_by', 'INT NULL');
-CALL AddColumnIfNotExists('pr', 'updated_by', 'INT NULL');
-CALL AddColumnIfNotExists('pr', 'created_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP');
-CALL AddColumnIfNotExists('pr', 'updated_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
+CALL InsertStatusIfNotExists('issue', 'Nháp', 'DRAFT', 'Nháp', TRUE, FALSE, 0, '#6b7280');
+CALL InsertStatusIfNotExists('issue', 'Chờ duyệt', 'PENDING', 'Chờ duyệt', FALSE, FALSE, 1, '#f59e0b');
+CALL InsertStatusIfNotExists('issue', 'Đã duyệt', 'APPROVED', 'Đã duyệt', FALSE, FALSE, 2, '#3b82f6');
+CALL InsertStatusIfNotExists('issue', 'Đã cấp phát', 'COMPLETED', 'Đã cấp phát', FALSE, FALSE, 3, '#8b5cf6');
+CALL InsertStatusIfNotExists('issue', 'Đã xác nhận', 'CONFIRMED', 'Đã xác nhận', FALSE, TRUE, 4, '#22c55e');
+CALL InsertStatusIfNotExists('issue', 'Từ chối', 'REJECTED', 'Từ chối', FALSE, TRUE, 5, '#ef4444');
 
-CALL AddColumnIfNotExists('po', 'created_by', 'INT NULL');
-CALL AddColumnIfNotExists('po', 'updated_by', 'INT NULL');
-CALL AddColumnIfNotExists('po', 'created_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP');
-CALL AddColumnIfNotExists('po', 'updated_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
+CALL InsertStatusIfNotExists('materialreturn', 'Nháp', 'DRAFT', 'Nháp', TRUE, FALSE, 0, '#6b7280');
+CALL InsertStatusIfNotExists('materialreturn', 'Chờ duyệt', 'PENDING', 'Chờ duyệt', FALSE, FALSE, 1, '#f59e0b');
+CALL InsertStatusIfNotExists('materialreturn', 'Đã nhận', 'APPROVED', 'Thủ kho đã nhận', FALSE, FALSE, 2, '#3b82f6');
+CALL InsertStatusIfNotExists('materialreturn', 'Đã xác nhận', 'CONFIRMED', 'Đã xác nhận', FALSE, TRUE, 3, '#22c55e');
+CALL InsertStatusIfNotExists('materialreturn', 'Từ chối', 'REJECTED', 'Từ chối', FALSE, TRUE, 4, '#ef4444');
 
-CALL AddColumnIfNotExists('grn', 'created_by', 'INT NULL');
-CALL AddColumnIfNotExists('grn', 'updated_by', 'INT NULL');
-CALL AddColumnIfNotExists('grn', 'created_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP');
-CALL AddColumnIfNotExists('grn', 'updated_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
+DROP PROCEDURE IF EXISTS InsertStatusIfNotExists;
 
-CALL AddColumnIfNotExists('sto', 'created_by', 'INT NULL');
-CALL AddColumnIfNotExists('sto', 'updated_by', 'INT NULL');
-CALL AddColumnIfNotExists('sto', 'created_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP');
-CALL AddColumnIfNotExists('sto', 'updated_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
+-- 4. WORKFLOWS
+INSERT INTO workflows (module, name, description, steps, is_active, is_system, created_at, updated_at) VALUES
+('mr', 'MR - Mặc định', 'Quy trình duyệt MR', '[{"step":1,"role":"SITE_COMMANDER","label":"Chỉ huy trưởng duyệt","departmentId":5}]', TRUE, TRUE, CURDATE(), CURDATE()),
+('pr', 'PR - 3 bước mặc định', 'Planning → Project → CEO', '[{"step":1,"role":"PLANNING","label":"Kế hoạch duyệt","departmentId":2},{"step":2,"role":"PROJECT","label":"Dự án duyệt","departmentId":3},{"step":3,"role":"CEO","label":"CEO duyệt","departmentId":1}]', TRUE, TRUE, CURDATE(), CURDATE()),
+('po', 'PO - 3 bước mặc định', 'Planning → Project → CEO', '[{"step":1,"role":"PLANNING","label":"Kế hoạch duyệt","departmentId":2},{"step":2,"role":"PROJECT","label":"Dự án duyệt","departmentId":3},{"step":3,"role":"CEO","label":"CEO duyệt","departmentId":1}]', TRUE, TRUE, CURDATE(), CURDATE()),
+('grn', 'GRN - 4 bước mặc định', 'Lập phiếu → Nhận → QC → Hoàn thành', '[{"step":1,"role":"PURCHASING","label":"Lập phiếu","departmentId":4},{"step":2,"role":"WAREHOUSE","label":"Thủ kho nhận","departmentId":null},{"step":3,"role":"QC","label":"QC kiểm tra","departmentId":6},{"step":4,"role":"PURCHASING","label":"Hoàn thành","departmentId":4}]', TRUE, TRUE, CURDATE(), CURDATE()),
+('sto', 'STO - 3 bước mặc định', 'Lập phiếu → Duyệt → Xuất kho', '[{"step":1,"role":"PURCHASING","label":"Lập phiếu","departmentId":4},{"step":2,"role":"PURCHASING","label":"Duyệt","departmentId":4},{"step":3,"role":"PURCHASING","label":"Xuất kho","departmentId":4}]', TRUE, TRUE, CURDATE(), CURDATE()),
+('issue', 'Issue - 4 bước mặc định', 'Tạo phiếu → Duyệt → Cấp phát → Xác nhận', '[{"step":1,"role":"SITE_COMMANDER","label":"Tạo phiếu","departmentId":5},{"step":2,"role":"SITE_COMMANDER","label":"Duyệt","departmentId":5},{"step":3,"role":"PURCHASING","label":"Cấp phát","departmentId":4},{"step":4,"role":"SITE_COMMANDER","label":"Xác nhận","departmentId":5}]', TRUE, TRUE, CURDATE(), CURDATE()),
+('materialreturn', 'Material Return - 3 bước mặc định', 'Tạo phiếu → Nhận → Xác nhận', '[{"step":1,"role":"SITE_COMMANDER","label":"Tạo phiếu","departmentId":5},{"step":2,"role":"PURCHASING","label":"Thủ kho nhận","departmentId":4},{"step":3,"role":"SITE_COMMANDER","label":"Xác nhận","departmentId":5}]', TRUE, TRUE, CURDATE(), CURDATE());
 
-CALL AddColumnIfNotExists('users', 'created_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP');
-CALL AddColumnIfNotExists('users', 'updated_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
+-- 5. PERMISSIONS (cấp full quyền cho BGD)
+INSERT INTO permissions (department_id, permission_key, enabled) VALUES
+(1, 'dashboard.view', TRUE),
+(1, 'mr.view', TRUE), (1, 'mr.create', TRUE), (1, 'mr.edit', TRUE), (1, 'mr.delete', TRUE), (1, 'mr.approve', TRUE), (1, 'mr.submit', TRUE), (1, 'mr.reject', TRUE),
+(1, 'pr.view', TRUE), (1, 'pr.create', TRUE), (1, 'pr.edit', TRUE), (1, 'pr.delete', TRUE), (1, 'pr.approve', TRUE), (1, 'pr.submit', TRUE), (1, 'pr.reject', TRUE),
+(1, 'po.view', TRUE), (1, 'po.create', TRUE), (1, 'po.edit', TRUE), (1, 'po.delete', TRUE), (1, 'po.approve', TRUE), (1, 'po.submit', TRUE), (1, 'po.reject', TRUE),
+(1, 'inventory.view', TRUE), (1, 'inventory.edit', TRUE), (1, 'inventory.delete', TRUE),
+(1, 'grn.view', TRUE), (1, 'grn.create', TRUE), (1, 'grn.edit', TRUE), (1, 'grn.delete', TRUE), (1, 'grn.receive', TRUE), (1, 'grn.qc', TRUE), (1, 'grn.complete', TRUE),
+(1, 'sto.view', TRUE), (1, 'sto.create', TRUE), (1, 'sto.edit', TRUE), (1, 'sto.delete', TRUE), (1, 'sto.submit', TRUE), (1, 'sto.approve', TRUE), (1, 'sto.complete', TRUE),
+(1, 'issue.view', TRUE), (1, 'issue.create', TRUE), (1, 'issue.edit', TRUE), (1, 'issue.delete', TRUE), (1, 'issue.submit', TRUE), (1, 'issue.approve', TRUE), (1, 'issue.complete', TRUE), (1, 'issue.confirm', TRUE), (1, 'issue.reject', TRUE),
+(1, 'materialreturn.view', TRUE), (1, 'materialreturn.create', TRUE), (1, 'materialreturn.edit', TRUE), (1, 'materialreturn.delete', TRUE), (1, 'materialreturn.submit', TRUE), (1, 'materialreturn.approve', TRUE), (1, 'materialreturn.confirm', TRUE), (1, 'materialreturn.reject', TRUE),
+(1, 'admin.view', TRUE);
 
-DROP PROCEDURE IF EXISTS AddColumnIfNotExists;
-
--- ================================================================
--- TẠO BẢNG ACTIVITY_LOGS
--- ================================================================
-CREATE TABLE IF NOT EXISTS activity_logs (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    user_id INT NULL,
-    username VARCHAR(100) NULL,
-    action VARCHAR(50) NOT NULL,
-    entity_type VARCHAR(50) NOT NULL,
-    entity_id BIGINT NULL,
-    old_values JSON NULL,
-    new_values JSON NULL,
-    ip_address VARCHAR(45) NULL,
-    user_agent TEXT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- ================================================================
--- THÊM INDEX (Procedure an toàn)
--- ================================================================
-DELIMITER $$
-DROP PROCEDURE IF EXISTS AddIndexIfNotExists $$
-CREATE PROCEDURE AddIndexIfNotExists(
-    IN tableName VARCHAR(100),
-    IN indexName VARCHAR(100),
-    IN columnList VARCHAR(200)
-)
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.STATISTICS
-        WHERE TABLE_SCHEMA = DATABASE()
-          AND TABLE_NAME = tableName
-          AND INDEX_NAME = indexName
-    ) THEN
-        SET @sql = CONCAT('CREATE INDEX ', indexName, ' ON ', tableName, ' (', columnList, ')');
-        PREPARE stmt FROM @sql;
-        EXECUTE stmt;
-        DEALLOCATE PREPARE stmt;
-    END IF;
-END $$
-DELIMITER ;
-
-CALL AddIndexIfNotExists('activity_logs', 'idx_activity_user_id', 'user_id');
-CALL AddIndexIfNotExists('activity_logs', 'idx_activity_entity', 'entity_type, entity_id');
-CALL AddIndexIfNotExists('activity_logs', 'idx_activity_created', 'created_at');
-
--- Các index khác
-CALL AddIndexIfNotExists('projects', 'idx_projects_code', 'code');
-CALL AddIndexIfNotExists('vendors', 'idx_vendors_code', 'code');
-CALL AddIndexIfNotExists('vendors', 'idx_vendors_name', 'name');
-CALL AddIndexIfNotExists('items', 'idx_items_code', 'code');
-CALL AddIndexIfNotExists('items', 'idx_items_status', 'status');
-CALL AddIndexIfNotExists('mr', 'idx_mr_project', 'project_code');
-CALL AddIndexIfNotExists('mr', 'idx_mr_status', 'status');
-CALL AddIndexIfNotExists('pr', 'idx_pr_project', 'project_code');
-CALL AddIndexIfNotExists('pr', 'idx_pr_status', 'status');
-CALL AddIndexIfNotExists('po', 'idx_po_project', 'project_code');
-CALL AddIndexIfNotExists('po', 'idx_po_status', 'status');
-CALL AddIndexIfNotExists('grn', 'idx_grn_po', 'po_id');
-CALL AddIndexIfNotExists('grn', 'idx_grn_warehouse', 'warehouse_id');
-CALL AddIndexIfNotExists('sto', 'idx_sto_from', 'from_warehouse_id');
-CALL AddIndexIfNotExists('sto', 'idx_sto_to', 'to_warehouse_id');
-CALL AddIndexIfNotExists('issues', 'idx_issues_project', 'project_code');
-CALL AddIndexIfNotExists('material_returns', 'idx_material_returns_project', 'project_code');
-
-DROP PROCEDURE IF EXISTS AddIndexIfNotExists;
+-- 6. AUTO_REORDER_CONFIG (mặc định)
+INSERT INTO auto_reorder_config (enabled, multiplier, default_vendor_code, updated_at) VALUES
+(FALSE, 2.0, NULL, CURDATE());
 
 -- ================================================================
--- DỮ LIỆU MẪU BỔ SUNG CHO WORKFLOW (2 MẪU NHANH)
+-- KIỂM TRA
 -- ================================================================
-INSERT INTO workflows (module, name, description, steps, is_active, is_system, created_at, updated_at)
-SELECT 
-    'pr', 
-    'PR - 1 bước CEO duyệt', 
-    'Quy trình nhanh chỉ cần CEO duyệt 1 bước duy nhất',
-    '[{"step":1,"role":"CEO","label":"CEO duyệt","departmentId":1}]',
-    FALSE,
-    TRUE,
-    CURDATE(),
-    CURDATE()
-WHERE NOT EXISTS (
-    SELECT 1 FROM workflows WHERE module = 'pr' AND name LIKE '%1 bước%'
-);
-
-INSERT INTO workflows (module, name, description, steps, is_active, is_system, created_at, updated_at)
-SELECT 
-    'po', 
-    'PO - 1 bước CEO duyệt', 
-    'Quy trình nhanh chỉ cần CEO duyệt 1 bước duy nhất',
-    '[{"step":1,"role":"CEO","label":"CEO duyệt","departmentId":1}]',
-    FALSE,
-    TRUE,
-    CURDATE(),
-    CURDATE()
-WHERE NOT EXISTS (
-    SELECT 1 FROM workflows WHERE module = 'po' AND name LIKE '%1 bước%'
-);
-
--- ================================================================
--- HOÀN TẤT
--- ================================================================
-SELECT '✅ Database MEP đã được tạo và cập nhật thành công!' AS Message;
-SELECT '✅ Workflows đã được nâng cấp hỗ trợ đa mẫu (is_active, is_system)!' AS Message;
+SELECT '✅ Database reset thành công! Tài khoản admin: admin@mep.com / password' AS Message;
+SELECT COUNT(*) AS total_users FROM users;
+SELECT COUNT(*) AS total_workflows FROM workflows;
