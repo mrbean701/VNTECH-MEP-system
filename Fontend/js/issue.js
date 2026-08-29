@@ -1,6 +1,7 @@
 // ================================================================
-// MATERIAL ISSUE - Cấp phát vật tư (SỬ DỤNG API)
+// MATERIAL ISSUE - Cấp phát vật tư - ĐÃ TÍCH HỢP PHÂN QUYỀN
 // ================================================================
+let issuePageState = { page: 1, perPage: 10 };
 
 // ====== HÀM TẠO MÃ TỰ ĐỘNG ======
 function generateIssueCode() {
@@ -10,6 +11,7 @@ function generateIssueCode() {
 // ====== RENDER TRANG ======
 async function renderIssuePage() {
     console.log('🔄 renderIssuePage được gọi');
+
     let page = document.getElementById('page-issue');
     if (!page) {
         const content = document.querySelector('.content');
@@ -35,11 +37,23 @@ async function renderIssuePage() {
 
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     page.classList.add('active');
+
+    // Kiểm tra quyền xem
+    if (!hasPermission('issue.view')) {
+        document.getElementById('issue-container').innerHTML = `
+            <div style="padding:20px; text-align:center; color:#e74c3c;">
+                <i class="fas fa-lock" style="font-size:24px; display:block; margin-bottom:10px;"></i>
+                Bạn không có quyền xem danh sách cấp phát
+            </div>
+        `;
+        return;
+    }
+
     await renderIssues();
 }
 
 // ====== RENDER DANH SÁCH ======
-async function renderIssues() {
+async function renderIssues(page = null) {
     const container = document.getElementById('issue-container');
     if (!container) {
         console.error('❌ Không tìm thấy issue-container');
@@ -52,20 +66,28 @@ async function renderIssues() {
         const statusFilter = document.getElementById('issue-status-filter')?.value || '';
 
         const filtered = issues.filter(item => {
-            const matchCode = item.code.toLowerCase().includes(filter);
+            const matchCode = (item.code || '').toLowerCase().includes(filter);
             const matchProject = (item.projectName || '').toLowerCase().includes(filter);
             const matchStatus = statusFilter ? item.status === statusFilter : true;
             return (matchCode || matchProject) && matchStatus;
         });
 
+        if (page) issuePageState.page = page;
+        const perPage = getPageSize('issue');
+        issuePageState.perPage = perPage;
+        const paging = paginate(filtered, issuePageState.page, perPage);
+
+        // Kiểm tra quyền
+        const canCreate = hasPermission('issue.create');
+
+        // Ẩn/hiện nút Tạo phiếu
+        const btnCreate = document.getElementById('btn-create-issue');
+        if (btnCreate) {
+            btnCreate.style.display = canCreate ? 'inline-block' : 'none';
+        }
+
+        // Tạo HTML (không có header)
         let html = `
-            <div class="page-header">
-                <h2>📤 Cấp phát vật tư (Material Issue)</h2>
-                <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                    <button class="btn" id="btn-create-issue"><i class="fas fa-plus"></i> Tạo phiếu</button>
-                    <button class="btn btn-success" onclick="exportIssues()"><i class="fas fa-file-excel"></i> Xuất Excel</button>
-                </div>
-            </div>
             <div class="filter-bar">
                 <input type="text" id="issue-filter" placeholder="Tìm theo mã hoặc dự án..." style="flex:1;" />
                 <select id="issue-status-filter">
@@ -95,11 +117,11 @@ async function renderIssues() {
                     <tbody>
         `;
 
-        if (!filtered.length) {
+        if (!paging.items.length) {
             html += `<tr><td colspan="7" style="text-align:center; color:#999;">Không có dữ liệu</td></tr>`;
         }
 
-        for (const item of filtered) {
+        for (const item of paging.items) {
             const statusBadge = getStatusBadge(item.status);
             const projectId = getProjectIdByCode(item.projectCode);
             const projectDisplay = projectId ?
@@ -119,20 +141,26 @@ async function renderIssues() {
             </tr>`;
         }
 
-        html += `
+                html += `
                     </tbody>
                 </table>
             </div>
         `;
+        html += buildPaginationHTML(paging, 'renderIssues', 'issue');
 
         container.innerHTML = html;
 
-        document.getElementById('btn-create-issue')?.addEventListener('click', function() {
-            showCreateIssueModal();
-        });
-
-        document.getElementById('issue-filter')?.addEventListener('input', renderIssues);
-        document.getElementById('issue-status-filter')?.addEventListener('change', renderIssues);
+        // Gắn sự kiện cho filter
+        const filterInput = document.getElementById('issue-filter');
+        const statusSelect = document.getElementById('issue-status-filter');
+        if (filterInput) {
+            filterInput.removeEventListener('input', renderIssues);
+            filterInput.addEventListener('input', () => { issuePageState.page = 1; renderIssues(); });
+        }
+        if (statusSelect) {
+            statusSelect.removeEventListener('change', renderIssues);
+            statusSelect.addEventListener('change', () => { issuePageState.page = 1; renderIssues(); });
+        }
 
     } catch (error) {
         showError('Không thể tải danh sách cấp phát: ' + error.message);
@@ -143,37 +171,52 @@ async function renderIssues() {
 // ====== HÀM LẤY ACTION ======
 function getIssueActions(item) {
     const user = getUser();
-    const isAdmin = user?.role === 'ADMIN';
-    const isCommander = user?.role === 'SITE_COMMANDER';
-    const isPurchasing = user?.role === 'PURCHASING' || isAdmin;
-    const isCreator = user?.id === item.createdBy;
     let actions = '';
 
+    // Xem luôn hiển thị
     actions += `<button class="btn btn-info btn-sm" onclick="viewIssue(${item.id})"><i class="fas fa-eye"></i></button>`;
 
-    if (item.status === 'DRAFT' && (isAdmin || isCreator)) {
+    // Quyền sửa: DRAFT và có quyền edit + (admin hoặc người tạo)
+    const canEdit = hasPermission('issue.edit') && 
+                   (item.status === 'DRAFT' || item.status === 'PENDING') && 
+                   (user?.role === 'ADMIN' || user?.id === item.createdBy);
+    if (canEdit) {
         actions += ` <button class="btn btn-warning btn-sm" onclick="editIssue(${item.id})"><i class="fas fa-edit"></i></button>`;
     }
 
-    if (item.status === 'DRAFT' && (isAdmin || isCreator)) {
+    // Quyền xóa: DRAFT và có quyền delete + (admin hoặc người tạo)
+    const canDelete = hasPermission('issue.delete') && 
+                     item.status === 'DRAFT' && 
+                     (user?.role === 'ADMIN' || user?.id === item.createdBy);
+    if (canDelete) {
+        actions += ` <button class="btn btn-danger btn-sm" onclick="deleteIssue(${item.id})"><i class="fas fa-trash"></i></button>`;
+    }
+
+    // Gửi duyệt: DRAFT và có quyền submit + (admin hoặc người tạo)
+    const canSubmit = hasPermission('issue.submit') && 
+                     item.status === 'DRAFT' && 
+                     (user?.role === 'ADMIN' || user?.id === item.createdBy);
+    if (canSubmit) {
         actions += ` <button class="btn btn-success btn-sm" onclick="submitIssue(${item.id})">Gửi duyệt</button>`;
     }
 
-    if (item.status === 'PENDING' && (isCommander || isAdmin)) {
+    // Duyệt: PENDING và có quyền approve
+    const canApprove = hasPermission('issue.approve') && item.status === 'PENDING';
+    if (canApprove) {
         actions += ` <button class="btn btn-success btn-sm" onclick="approveIssue(${item.id})">Duyệt</button>`;
         actions += ` <button class="btn btn-danger btn-sm" onclick="rejectIssue(${item.id})">Từ chối</button>`;
     }
 
-    if (item.status === 'APPROVED' && (isPurchasing || isAdmin)) {
+    // Cấp phát: APPROVED và có quyền complete
+    const canComplete = hasPermission('issue.complete') && item.status === 'APPROVED';
+    if (canComplete) {
         actions += ` <button class="btn btn-success btn-sm" onclick="showCompleteIssueModal(${item.id})">Cấp phát</button>`;
     }
 
-    if (item.status === 'COMPLETED' && (isCommander || isAdmin)) {
+    // Xác nhận: COMPLETED và có quyền confirm
+    const canConfirm = hasPermission('issue.confirm') && item.status === 'COMPLETED';
+    if (canConfirm) {
         actions += ` <button class="btn btn-success btn-sm" onclick="confirmIssue(${item.id})">Xác nhận</button>`;
-    }
-
-    if ((isAdmin || (isCreator && item.status === 'DRAFT'))) {
-        actions += ` <button class="btn btn-danger btn-sm" onclick="deleteIssue(${item.id})"><i class="fas fa-trash"></i></button>`;
     }
 
     return actions || '-';
@@ -182,8 +225,12 @@ function getIssueActions(item) {
 // ====== TẠO PHIẾU (MODAL) ======
 function showCreateIssueModal() {
     Promise.all([api.getProjects(), api.getItems()]).then(([projects, items]) => {
+        // Cache items cho dropdown
+        window._itemsCache = items;
+
         const projectOpts = projects.map(p => `<option value="${p.code}">${p.code} - ${p.name}</option>`).join('');
         const itemOpts = items.map(i => `<option value="${i.id}">${i.code} - ${i.name} (${i.unit || 'đvt'})</option>`).join('');
+
         showModal('Tạo phiếu cấp phát vật tư', `
             <div class="form-group">
                 <label>Dự án</label>
@@ -294,6 +341,11 @@ function collectIssueItemsFromForm(container) {
 
 // ====== LƯU PHIẾU ======
 async function saveIssue() {
+    if (!hasPermission('issue.create')) {
+        showWarning('Bạn không có quyền tạo phiếu cấp phát!');
+        return;
+    }
+
     const projectCode = document.getElementById('f-issue-project').value;
     const date = document.getElementById('f-issue-date').value;
     const area = document.getElementById('f-issue-area').value.trim();
@@ -333,7 +385,7 @@ async function saveIssue() {
     }
 }
 
-// ====== XEM CHI TIẾT ======
+// ====== XEM CHI TIẾT PHIẾU ======
 async function viewIssue(id) {
     try {
         let item = await api.getIssueById ? await api.getIssueById(id) : null;
@@ -358,12 +410,32 @@ async function viewIssue(id) {
             </tr>
         `).join('');
 
-        const progressHtml = renderIssueProgress(item.status);
+        // Lấy workflow steps từ workflowId của Issue
+        let stepsConfig = [
+            { id: 1, label: 'Tạo phiếu' },
+            { id: 2, label: 'Duyệt' },
+            { id: 3, label: 'Cấp phát' },
+            { id: 4, label: 'Xác nhận' }
+        ];
+        if (item.workflowId) {
+            try {
+                const wf = await api.getWorkflowById ? await api.getWorkflowById(item.workflowId) : null;
+                if (wf && wf.steps) {
+                    const steps = JSON.parse(wf.steps);
+                    stepsConfig = steps.map(s => ({
+                        id: s.step || s.id,
+                        label: s.label || `Bước ${s.step || s.id}`
+                    }));
+                }
+            } catch (e) {
+                console.warn('Không lấy được workflow steps:', e);
+            }
+        }
+        const progressHtml = renderApprovalProgress(item.status, item.approvalStep || 1, stepsConfig);
         const projectId = getProjectIdByCode(item.projectCode);
         const projectDisplay = projectId ?
             `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="closeModal(); viewProject(${projectId})">${item.projectName || item.projectCode}</span>` :
             (item.projectName || item.projectCode || '');
-
         const warehouseDisplay = item.warehouseId ? getWarehouseName(item.warehouseId) : 'Chưa chọn';
 
         showModal('Chi tiết phiếu cấp phát', `
@@ -401,6 +473,11 @@ async function viewIssue(id) {
 
 // ====== SỬA PHIẾU (DRAFT) ======
 async function editIssue(id) {
+    if (!hasPermission('issue.edit')) {
+        showWarning('Bạn không có quyền sửa phiếu cấp phát!');
+        return;
+    }
+
     try {
         const issues = await api.getIssues();
         const item = issues.find(i => i.id === id);
@@ -502,6 +579,10 @@ async function updateIssue(id) {
 
 // ====== GỬI DUYỆT ======
 async function submitIssue(id) {
+    if (!hasPermission('issue.submit')) {
+        showWarning('Bạn không có quyền gửi duyệt phiếu cấp phát!');
+        return;
+    }
     try {
         await api.submitIssue(id);
         await renderIssues();
@@ -513,6 +594,10 @@ async function submitIssue(id) {
 
 // ====== DUYỆT ======
 async function approveIssue(id) {
+    if (!hasPermission('issue.approve')) {
+        showWarning('Bạn không có quyền duyệt phiếu cấp phát!');
+        return;
+    }
     try {
         await api.approveIssue(id);
         await renderIssues();
@@ -524,6 +609,10 @@ async function approveIssue(id) {
 
 // ====== TỪ CHỐI ======
 async function rejectIssue(id) {
+    if (!hasPermission('issue.reject')) {
+        showWarning('Bạn không có quyền từ chối phiếu cấp phát!');
+        return;
+    }
     try {
         await api.rejectIssue(id);
         await renderIssues();
@@ -576,6 +665,11 @@ async function getAvailableWarehousesForIssue(items, projectCode) {
 
 // ====== HIỂN THỊ MODAL CHỌN KHO ======
 async function showCompleteIssueModal(id) {
+    if (!hasPermission('issue.complete')) {
+        showWarning('Bạn không có quyền thực hiện cấp phát!');
+        return;
+    }
+
     try {
         const issues = await api.getIssues();
         const item = issues.find(i => i.id === id);
@@ -686,8 +780,6 @@ async function completeIssueWithWarehouse(id) {
             hasError = true;
             return;
         }
-        // Lưu ý: cần lấy requestedQty từ dữ liệu gốc (không có ở đây), nhưng ta sẽ so sánh với yêu cầu gốc sau.
-        // Tạm thời chấp nhận, backend sẽ kiểm tra.
         updatedItems.push({
             itemId,
             actualQty,
@@ -714,6 +806,10 @@ function completeIssue(id) {
 
 // ====== XÁC NHẬN CUỐI ======
 async function confirmIssue(id) {
+    if (!hasPermission('issue.confirm')) {
+        showWarning('Bạn không có quyền xác nhận phiếu cấp phát!');
+        return;
+    }
     try {
         await api.confirmIssue(id);
         await renderIssues();
@@ -725,6 +821,10 @@ async function confirmIssue(id) {
 
 // ====== XÓA PHIẾU ======
 async function deleteIssue(id) {
+    if (!hasPermission('issue.delete')) {
+        showWarning('Bạn không có quyền xóa phiếu cấp phát!');
+        return;
+    }
     if (!confirm('Xóa phiếu cấp phát này?')) return;
     try {
         await api.deleteIssue(id);
@@ -756,36 +856,33 @@ function renderIssueProgress(status) {
 
 // ====== EXPORT EXCEL ======
 function exportIssues() {
-    // Giữ nguyên từ file cũ (không liên quan API)
-    const issues = getIssues(); // vẫn dùng localStorage tạm
-    if (!issues.length) {
-        showWarning('Không có dữ liệu để xuất!');
-        return;
-    }
-    const data = issues.map(item => ({
-        'Mã phiếu': item.code,
-        'Dự án': item.projectName || item.projectCode || '',
-        'Ngày cấp': item.date || '',
-        'Khu vực/Hạng mục': item.area || '',
-        'Đội thi công': item.team || '',
-        'Người yêu cầu': item.requester || '',
-        'Trạng thái': item.status,
-        'Số lượng vật tư': item.items ? item.items.reduce((sum, it) => sum + (it.actualQty || it.requestedQty), 0) : 0,
-        'Kho xuất': item.warehouseId ? getWarehouseName(item.warehouseId) : '',
-        'Ghi chú': item.note || ''
-    }));
-    exportToExcel(data, 'Danh_sach_cap_phat', Object.keys(data[0]));
+    // Sử dụng API để lấy dữ liệu
+    api.getIssues().then(issues => {
+        if (!issues || !issues.length) {
+            showWarning('Không có dữ liệu để xuất!');
+            return;
+        }
+        const data = issues.map(item => ({
+            'Mã phiếu': item.code,
+            'Dự án': item.projectName || item.projectCode || '',
+            'Ngày cấp': item.date || '',
+            'Khu vực/Hạng mục': item.area || '',
+            'Đội thi công': item.team || '',
+            'Người yêu cầu': item.requester || '',
+            'Trạng thái': item.status,
+            'Số lượng vật tư': item.items ? JSON.parse(item.items).reduce((sum, it) => sum + (it.actualQty || it.requestedQty), 0) : 0,
+            'Kho xuất': item.warehouseId ? getWarehouseName(item.warehouseId) : '',
+            'Ghi chú': item.note || ''
+        }));
+        exportToExcel(data, 'Danh_sach_cap_phat', Object.keys(data[0]));
+    }).catch(err => {
+        showError('Lỗi lấy dữ liệu xuất: ' + err.message);
+    });
 }
 
 // ====== IN PHIẾU ======
 function printIssue(id) {
-    // Giữ nguyên từ file cũ
     showInfo('Chức năng in đang được phát triển.');
-}
-
-// ====== THÊM MENU ======
-function addIssueMenu() {
-    // Đã có trong HTML
 }
 
 // ====== EXPORT RA WINDOW ======
@@ -804,4 +901,4 @@ window.showCompleteIssueModal = showCompleteIssueModal;
 window.completeIssueWithWarehouse = completeIssueWithWarehouse;
 window.printIssue = printIssue;
 
-console.log('✅ Issue module updated to use API.');
+console.log('✅ Issue module updated with full permission checks.');

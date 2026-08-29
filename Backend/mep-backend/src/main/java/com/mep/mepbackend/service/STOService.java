@@ -2,12 +2,15 @@ package com.mep.mepbackend.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.mep.mepbackend.entity.STO;
+import com.mep.mepbackend.entity.ApprovalHistory;
 import com.mep.mepbackend.entity.Inventory;
+import com.mep.mepbackend.entity.STO;
 import com.mep.mepbackend.entity.User;
+import com.mep.mepbackend.entity.Workflow;
 import com.mep.mepbackend.exception.ResourceNotFoundException;
-import com.mep.mepbackend.repository.STORepository;
+import com.mep.mepbackend.repository.ApprovalHistoryRepository;
 import com.mep.mepbackend.repository.InventoryRepository;
+import com.mep.mepbackend.repository.STORepository;
 import com.mep.mepbackend.util.CurrentUserUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -15,6 +18,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -24,13 +29,30 @@ public class STOService {
 
     private final STORepository stoRepository;
     private final InventoryRepository inventoryRepository;
+    private final ApprovalHistoryRepository approvalHistoryRepository;
     private final ObjectMapper objectMapper;
     private final WorkflowService workflowService;
     private final StatusService statusService;
     private final CurrentUserUtil currentUserUtil;
 
-    // ===== GETTERS =====
+    private static final List<String> PENDING_STATUSES = Arrays.asList("PENDING");
 
+    // ===== HELPERS =====
+    private String generateCode(String prefix) {
+        long count = stoRepository.count() + 1;
+        String code = prefix + "-" + String.format("%03d", count);
+        while (stoRepository.existsByCode(code)) {
+            count++;
+            code = prefix + "-" + String.format("%03d", count);
+        }
+        return code;
+    }
+
+    private boolean isPendingStatus(String status) {
+        return PENDING_STATUSES.contains(status);
+    }
+
+    // ===== GETTERS =====
     public List<STO> getAll() {
         return stoRepository.findAll();
     }
@@ -40,45 +62,47 @@ public class STOService {
                 .orElseThrow(() -> new ResourceNotFoundException("STO not found with id: " + id));
     }
 
-    public STO getByCode(String code) {
-        return stoRepository.findByCode(code)
-                .orElseThrow(() -> new ResourceNotFoundException("STO not found with code: " + code));
-    }
-
     // ===== CREATE =====
-
     @Transactional
     public STO create(STO sto) {
         if (!currentUserUtil.hasPermission("sto.create")) {
             throw new RuntimeException("Bạn không có quyền tạo STO");
         }
 
-        long count = stoRepository.count();
-        String nextCode = "STO-" + String.format("%03d", count + 1);
-        if (stoRepository.existsByCode(nextCode)) {
-            long i = count + 2;
-            while (stoRepository.existsByCode("STO-" + String.format("%03d", i))) i++;
-            nextCode = "STO-" + String.format("%03d", i);
-        }
+        sto.setCode(generateCode("STO"));
+        Workflow activeWorkflow = workflowService.getActiveWorkflow("sto");
+        sto.setWorkflowId(activeWorkflow.getId());
 
         String defaultStatus = statusService.getDefaultStatus("sto").getCode();
-        sto.setCode(nextCode);
         sto.setStatus(defaultStatus);
+        sto.setApprovalStep(1);
+
+        User currentUser = currentUserUtil.getCurrentUser();
+        sto.setCreatedBy(currentUser.getId());
+        sto.setCreatedByName(currentUser.getName());
+
         sto.setCreatedAt(LocalDate.now());
         return stoRepository.save(sto);
     }
 
     // ===== UPDATE =====
-
     @Transactional
     public STO update(Long id, STO details) {
         STO sto = getById(id);
         if (!currentUserUtil.hasPermission("sto.edit")) {
             throw new RuntimeException("Bạn không có quyền sửa STO");
         }
+
         if (!"DRAFT".equals(sto.getStatus())) {
-            throw new RuntimeException("Chỉ có thể sửa STO ở trạng thái DRAFT");
+            if (isPendingStatus(sto.getStatus())) {
+                if (approvalHistoryRepository.existsByEntityTypeAndEntityId("STO", id)) {
+                    throw new RuntimeException("Không thể sửa STO vì đã được duyệt bước 1");
+                }
+            } else {
+                throw new RuntimeException("Chỉ có thể sửa STO ở trạng thái DRAFT hoặc PENDING chưa duyệt");
+            }
         }
+
         sto.setTransferDate(details.getTransferDate());
         sto.setRequestedBy(details.getRequestedBy());
         sto.setWarehouseStaff(details.getWarehouseStaff());
@@ -91,7 +115,6 @@ public class STOService {
     }
 
     // ===== SUBMIT =====
-
     @Transactional
     public void submit(Long id) {
         STO sto = getById(id);
@@ -101,33 +124,82 @@ public class STOService {
         if (!"DRAFT".equals(sto.getStatus())) {
             throw new RuntimeException("Chỉ có thể gửi duyệt STO ở trạng thái DRAFT");
         }
-        sto.setStatus("PENDING");
+
+        Workflow wf = workflowService.getById(sto.getWorkflowId());
+        List<Map<String, Object>> steps = workflowService.getStepsByWorkflowId(wf.getId());
+        if (steps.isEmpty()) {
+            throw new RuntimeException("Workflow không có bước duyệt nào");
+        }
+
+        if (steps.size() == 1) {
+            if (!currentUserUtil.hasPermission("sto.approve")) {
+                throw new RuntimeException("Bạn không có quyền duyệt STO");
+            }
+            approve(id);
+            return;
+        }
+
+        Map<String, Object> firstStep = steps.get(0);
+        String statusCode = (String) firstStep.get("statusCode");
+        sto.setStatus(statusCode != null && !statusCode.isEmpty() ? statusCode : "PENDING");
+        sto.setApprovalStep(1);
         sto.setUpdatedAt(LocalDate.now());
         stoRepository.save(sto);
     }
 
     // ===== APPROVE =====
-
     @Transactional
     public void approve(Long id) {
         STO sto = getById(id);
-        if (!currentUserUtil.hasPermission("sto.approve")) {
-            throw new RuntimeException("Bạn không có quyền duyệt STO");
-        }
-        if (!"PENDING".equals(sto.getStatus())) {
+        if (!isPendingStatus(sto.getStatus())) {
             throw new RuntimeException("STO không ở trạng thái chờ duyệt");
         }
 
-        String statusCode = workflowService.getStatusForStep("sto", 2);
+        Workflow wf = workflowService.getById(sto.getWorkflowId());
+        List<Map<String, Object>> steps = workflowService.getStepsByWorkflowId(wf.getId());
+        int currentStep = sto.getApprovalStep() != null ? sto.getApprovalStep() : 1;
 
-        sto.setStatus(statusCode != null ? statusCode : "APPROVED");
-        sto.setApprovedBy(currentUserUtil.getCurrentUser().getName());
+        Map<String, Object> step = steps.stream()
+                .filter(s -> (int) s.get("step") == currentStep)
+                .findFirst()
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy bước duyệt " + currentStep));
+
+        String permissionKey = (String) step.get("permissionKey");
+        Long requiredDeptId = step.get("departmentId") != null ? ((Number) step.get("departmentId")).longValue() : null;
+        if (!currentUserUtil.hasPermissionAndDepartment(permissionKey, requiredDeptId)) {
+            throw new RuntimeException("Bạn không có quyền duyệt bước này");
+        }
+
+        User currentUser = currentUserUtil.getCurrentUser();
+        if (steps.size() > 1 && currentUser.getId().equals(sto.getCreatedBy())) {
+            throw new RuntimeException("Bạn không thể tự duyệt STO do chính mình tạo");
+        }
+
+        ApprovalHistory history = new ApprovalHistory();
+        history.setEntityType("STO");
+        history.setEntityId(sto.getId());
+        history.setWorkflowId(wf.getId());
+        history.setStep(currentStep);
+        history.setApproverId(currentUser.getId());
+        history.setApproverName(currentUser.getName());
+        history.setStatusBefore(sto.getStatus());
+
+        if (currentStep == steps.size()) {
+            sto.setStatus("APPROVED");
+        } else {
+            sto.setApprovalStep(currentStep + 1);
+            String nextStatusCode = workflowService.getStatusForStep(wf.getId(), currentStep + 1);
+            sto.setStatus(nextStatusCode != null && !nextStatusCode.isEmpty() ? nextStatusCode : "PENDING");
+        }
+        history.setStatusAfter(sto.getStatus());
+
+        approvalHistoryRepository.save(history);
+        sto.setApprovedBy(currentUser.getName());
         sto.setUpdatedAt(LocalDate.now());
         stoRepository.save(sto);
     }
 
     // ===== COMPLETE =====
-
     @Transactional
     public void complete(Long id) {
         STO sto = getById(id);
@@ -138,8 +210,28 @@ public class STOService {
             throw new RuntimeException("STO chưa được duyệt");
         }
 
-        String statusCode = workflowService.getStatusForStep("sto", 3);
+        Workflow wf = workflowService.getById(sto.getWorkflowId());
+        List<Map<String, Object>> steps = workflowService.getStepsByWorkflowId(wf.getId());
+        int currentStep = 3;
+        Map<String, Object> step = steps.stream()
+                .filter(s -> (int) s.get("step") == currentStep)
+                .findFirst()
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy bước hoàn thành"));
 
+        String permissionKey = (String) step.get("permissionKey");
+        Long requiredDeptId = step.get("departmentId") != null ? ((Number) step.get("departmentId")).longValue() : null;
+        if (!currentUserUtil.hasPermissionAndDepartment(permissionKey, requiredDeptId)) {
+            throw new RuntimeException("Bạn không có quyền hoàn thành STO");
+        }
+
+        User currentUser = currentUserUtil.getCurrentUser();
+        if (currentUser.getId().equals(sto.getCreatedBy())) {
+            throw new RuntimeException("Bạn không thể tự hoàn thành STO do chính mình tạo");
+        }
+
+        String statusCode = (String) step.get("statusCode");
+
+        // Cập nhật tồn kho
         try {
             ArrayNode itemsArray = (ArrayNode) objectMapper.readTree(sto.getItems());
             for (var item : itemsArray) {
@@ -182,13 +274,24 @@ public class STOService {
             throw new RuntimeException("Lỗi cập nhật tồn kho: " + e.getMessage());
         }
 
+        ApprovalHistory history = new ApprovalHistory();
+        history.setEntityType("STO");
+        history.setEntityId(sto.getId());
+        history.setWorkflowId(wf.getId());
+        history.setStep(currentStep);
+        history.setApproverId(currentUser.getId());
+        history.setApproverName(currentUser.getName());
+        history.setStatusBefore(sto.getStatus());
+
         sto.setStatus(statusCode != null ? statusCode : "COMPLETED");
+        history.setStatusAfter(sto.getStatus());
+
+        approvalHistoryRepository.save(history);
         sto.setUpdatedAt(LocalDate.now());
         stoRepository.save(sto);
     }
 
     // ===== DELETE =====
-
     @Transactional
     public void delete(Long id) {
         STO sto = getById(id);
@@ -199,5 +302,19 @@ public class STOService {
             throw new RuntimeException("Chỉ có thể xóa STO ở trạng thái DRAFT hoặc PENDING");
         }
         stoRepository.delete(sto);
+    }
+
+    // ===== GETTERS BỔ SUNG =====
+    public STO getByCode(String code) {
+        return stoRepository.findByCode(code)
+                .orElseThrow(() -> new ResourceNotFoundException("STO not found with code: " + code));
+    }
+
+    public List<STO> getByStatus(String status) {
+        return stoRepository.findByStatus(status);
+    }
+
+    public List<STO> getByProjectCode(String projectCode) {
+        return stoRepository.findByProjectCode(projectCode);
     }
 }

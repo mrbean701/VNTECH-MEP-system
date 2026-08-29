@@ -46,6 +46,17 @@ public interface StatusRepository extends JpaRepository<Status, Long> {
     List<Status> findByEntityTypeAndIsFinalTrue(String entityType);
 
     /**
+     * ✅ TRƯỜNG MỚI: Tìm trạng thái theo entityType và group
+     */
+    List<Status> findByEntityTypeAndGroupOrderBySortOrderAsc(String entityType, String group);
+
+    /**
+     * ✅ TRƯỜNG MỚI: Lấy tất cả group của một entityType
+     */
+    @org.springframework.data.jpa.repository.Query("SELECT DISTINCT s.group FROM Status s WHERE s.entityType = :entityType AND s.group IS NOT NULL")
+    List<String> findDistinctGroupsByEntityType(String entityType);
+
+    /**
      * Xóa tất cả trạng thái của một entityType
      */
     void deleteByEntityType(String entityType);

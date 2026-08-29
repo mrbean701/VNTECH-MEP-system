@@ -23,6 +23,9 @@ public class PO {
     @Column(name = "pr_id")
     private Long prId;
 
+    @Column(name = "workflow_id")
+    private Long workflowId;
+
     @Column(name = "project_code", nullable = false, length = 50)
     private String projectCode;
 

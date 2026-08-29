@@ -10,8 +10,8 @@ import java.time.LocalDate;
 @Entity
 @Table(name = "sto")
 @Data
-@NoArgsConstructor  // ✅ Thêm dòng này
-@AllArgsConstructor // ✅ Thêm nếu cần
+@NoArgsConstructor
+@AllArgsConstructor
 public class STO {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -31,8 +31,21 @@ public class STO {
     private String warehouseStaff;
     private String transporter;
     private String departureTime;
-    private String status; // DRAFT, PENDING, APPROVED, COMPLETED, CANCELLED
+    private String status;
     private String note;
     private LocalDate createdAt;
     private LocalDate updatedAt;
+
+    @Column(name = "workflow_id")
+    private Long workflowId;
+
+    @Column(name = "approval_step")
+    private Integer approvalStep;
+
+    // ✅ Thêm 2 trường này
+    @Column(name = "created_by")
+    private Long createdBy;
+
+    @Column(name = "created_by_name", length = 100)
+    private String createdByName;
 }

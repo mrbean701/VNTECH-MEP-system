@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -27,6 +28,17 @@ public class PermissionService {
 
     public List<Permission> getByDepartmentId(Long departmentId) {
         return permissionRepository.findByDepartmentId(departmentId);
+    }
+
+    /**
+     * Lấy tất cả permission keys của một department
+     */
+    public List<String> getAllPermissionKeysByDepartmentId(Long departmentId) {
+        return permissionRepository.findByDepartmentId(departmentId)
+                .stream()
+                .filter(Permission::getEnabled)
+                .map(Permission::getPermissionKey)
+                .collect(Collectors.toList());
     }
 
     public Permission getByDepartmentAndPermission(Long departmentId, String permissionKey) {
@@ -81,6 +93,17 @@ public class PermissionService {
             up.setPermissionKey(permissionKey);
             up.setEnabled(enabled);
             return userPermissionRepository.save(up);
+        }
+    }
+
+    /**
+     * Gán tất cả permission của department cho user
+     */
+    @Transactional
+    public void grantAllDepartmentPermissionsToUser(Long userId, Long departmentId) {
+        List<String> permissionKeys = getAllPermissionKeysByDepartmentId(departmentId);
+        for (String key : permissionKeys) {
+            assignUserPermission(userId, key, true);
         }
     }
 

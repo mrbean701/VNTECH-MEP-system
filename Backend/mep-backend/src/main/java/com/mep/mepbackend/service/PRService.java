@@ -1,17 +1,22 @@
 package com.mep.mepbackend.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mep.mepbackend.entity.ApprovalHistory;
 import com.mep.mepbackend.entity.PR;
 import com.mep.mepbackend.entity.User;
+import com.mep.mepbackend.entity.Workflow;
 import com.mep.mepbackend.exception.ResourceNotFoundException;
-import com.mep.mepbackend.repository.PRRepository;
+import com.mep.mepbackend.repository.ApprovalHistoryRepository;
 import com.mep.mepbackend.repository.MRRepository;
+import com.mep.mepbackend.repository.PRRepository;
 import com.mep.mepbackend.util.CurrentUserUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -21,13 +26,33 @@ public class PRService {
 
     private final PRRepository prRepository;
     private final MRRepository mrRepository;
+    private final ApprovalHistoryRepository approvalHistoryRepository;
     private final ObjectMapper objectMapper;
     private final WorkflowService workflowService;
     private final StatusService statusService;
     private final CurrentUserUtil currentUserUtil;
 
-    // ===== GETTERS ===== (giữ nguyên)
+    private static final List<String> PENDING_STATUSES = Arrays.asList(
+            "PENDING", "PENDING_PLANNING", "PENDING_PROJECT", "PENDING_CEO",
+            "PLANNING_APPROVED", "PROJECT_APPROVED"
+    );
 
+    // ===== HELPERS =====
+    private String generateCode(String prefix) {
+        long count = prRepository.count() + 1;
+        String code = prefix + "-" + String.format("%03d", count);
+        while (prRepository.existsByCode(code)) {
+            count++;
+            code = prefix + "-" + String.format("%03d", count);
+        }
+        return code;
+    }
+
+    private boolean isPendingStatus(String status) {
+        return PENDING_STATUSES.contains(status);
+    }
+
+    // ===== GETTERS =====
     public List<PR> getAll() {
         return prRepository.findAll();
     }
@@ -59,26 +84,24 @@ public class PRService {
     }
 
     // ===== CREATE =====
-
     @Transactional
     public PR create(PR pr) {
         if (!currentUserUtil.hasPermission("pr.create")) {
             throw new RuntimeException("Bạn không có quyền tạo PR");
         }
 
-        long count = prRepository.count();
-        String nextCode = "PR-" + String.format("%03d", count + 1);
-        if (prRepository.existsByCode(nextCode)) {
-            long i = count + 2;
-            while (prRepository.existsByCode("PR-" + String.format("%03d", i))) i++;
-            nextCode = "PR-" + String.format("%03d", i);
-        }
+        pr.setCode(generateCode("PR"));
+        Workflow activeWorkflow = workflowService.getActiveWorkflow("pr");
+        pr.setWorkflowId(activeWorkflow.getId());
 
-        // Set status mặc định từ cấu hình
         String defaultStatus = statusService.getDefaultStatus("pr").getCode();
-        pr.setCode(nextCode);
         pr.setStatus(defaultStatus);
         pr.setApprovalStep(1);
+
+        User currentUser = currentUserUtil.getCurrentUser();
+        pr.setCreatedBy(currentUser.getId());
+        pr.setCreatedByName(currentUser.getName());
+
         pr.setCreatedAt(LocalDate.now());
         return prRepository.save(pr);
     }
@@ -101,16 +124,23 @@ public class PRService {
     }
 
     // ===== UPDATE =====
-
     @Transactional
     public PR update(Long id, PR details) {
         PR pr = getById(id);
         if (!currentUserUtil.hasPermission("pr.edit")) {
             throw new RuntimeException("Bạn không có quyền sửa PR");
         }
-        if (!"DRAFT".equals(pr.getStatus()) && !"PENDING".equals(pr.getStatus())) {
-            throw new RuntimeException("Chỉ có thể sửa PR ở trạng thái DRAFT hoặc PENDING");
+
+        if (!"DRAFT".equals(pr.getStatus())) {
+            if (isPendingStatus(pr.getStatus())) {
+                if (approvalHistoryRepository.existsByEntityTypeAndEntityId("PR", id)) {
+                    throw new RuntimeException("Không thể sửa PR vì đã được duyệt bước 1");
+                }
+            } else {
+                throw new RuntimeException("Chỉ có thể sửa PR ở trạng thái DRAFT hoặc PENDING chưa duyệt");
+            }
         }
+
         pr.setProjectCode(details.getProjectCode());
         pr.setProjectName(details.getProjectName());
         pr.setVendorCode(details.getVendorCode());
@@ -122,7 +152,6 @@ public class PRService {
     }
 
     // ===== SUBMIT =====
-
     @Transactional
     public void submit(Long id) {
         PR pr = getById(id);
@@ -132,23 +161,39 @@ public class PRService {
         if (!"DRAFT".equals(pr.getStatus())) {
             throw new RuntimeException("Chỉ có thể gửi duyệt PR ở trạng thái DRAFT");
         }
-        pr.setStatus("PENDING");
+
+        Workflow wf = workflowService.getById(pr.getWorkflowId());
+        List<Map<String, Object>> steps = workflowService.getStepsByWorkflowId(wf.getId());
+        if (steps.isEmpty()) {
+            throw new RuntimeException("Workflow không có bước duyệt nào");
+        }
+
+        if (steps.size() == 1) {
+            if (!currentUserUtil.hasPermission("pr.approve")) {
+                throw new RuntimeException("Bạn không có quyền duyệt PR");
+            }
+            approve(id);
+            return;
+        }
+
+        Map<String, Object> firstStep = steps.get(0);
+        String statusCode = (String) firstStep.get("statusCode");
+        pr.setStatus(statusCode != null && !statusCode.isEmpty() ? statusCode : "PENDING");
         pr.setApprovalStep(1);
         pr.setUpdatedAt(LocalDate.now());
         prRepository.save(pr);
     }
 
     // ===== APPROVE =====
-
     @Transactional
     public void approve(Long id) {
         PR pr = getById(id);
-        if (!"PENDING".equals(pr.getStatus())) {
+        if (!isPendingStatus(pr.getStatus())) {
             throw new RuntimeException("PR không ở trạng thái chờ duyệt");
         }
 
-        // Lấy steps kèm status từ workflow đang active của module "pr"
-        List<Map<String, Object>> steps = workflowService.getStepsWithStatusByModule("pr");
+        Workflow wf = workflowService.getById(pr.getWorkflowId());
+        List<Map<String, Object>> steps = workflowService.getStepsByWorkflowId(wf.getId());
         int currentStep = pr.getApprovalStep() != null ? pr.getApprovalStep() : 1;
 
         Map<String, Object> step = steps.stream()
@@ -156,46 +201,45 @@ public class PRService {
                 .findFirst()
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy bước duyệt " + currentStep));
 
-        String requiredRole = (String) step.get("role");
-        Integer requiredDeptId = step.get("departmentId") != null ? (Integer) step.get("departmentId") : null;
+        String permissionKey = (String) step.get("permissionKey");
+        Long requiredDeptId = step.get("departmentId") != null ? ((Number) step.get("departmentId")).longValue() : null;
+        if (!currentUserUtil.hasPermissionAndDepartment(permissionKey, requiredDeptId)) {
+            throw new RuntimeException("Bạn không có quyền duyệt bước này");
+        }
 
         User currentUser = currentUserUtil.getCurrentUser();
-
-        if (!currentUser.getRole().equals(requiredRole)) {
-            throw new RuntimeException("Bạn không có quyền duyệt bước này (yêu cầu role: " + requiredRole + ")");
-        }
-        if (requiredDeptId != null && (currentUser.getDepartmentId() == null ||
-                !currentUser.getDepartmentId().equals(Long.valueOf(requiredDeptId)))) {
-            throw new RuntimeException("Bạn không thuộc phòng ban được chỉ định để duyệt");
+        if (steps.size() > 1 && currentUser.getId().equals(pr.getCreatedBy())) {
+            throw new RuntimeException("Bạn không thể tự duyệt PR do chính mình tạo");
         }
 
-        if (!currentUserUtil.hasPermission("pr.approve")) {
-            throw new RuntimeException("Bạn không có quyền duyệt PR (user permission)");
-        }
-
-        // Lấy status code từ step
-        String statusCode = (String) step.get("statusCode");
+        ApprovalHistory history = new ApprovalHistory();
+        history.setEntityType("PR");
+        history.setEntityId(pr.getId());
+        history.setWorkflowId(wf.getId());
+        history.setStep(currentStep);
+        history.setApproverId(currentUser.getId());
+        history.setApproverName(currentUser.getName());
+        history.setStatusBefore(pr.getStatus());
 
         if (currentStep == steps.size()) {
             pr.setStatus("APPROVED");
         } else {
             pr.setApprovalStep(currentStep + 1);
-            if (statusCode != null && !statusCode.isEmpty()) {
-                pr.setStatus(statusCode);
-            } else {
-                pr.setStatus("PENDING");
-            }
+            String nextStatusCode = workflowService.getStatusForStep(wf.getId(), currentStep + 1);
+            pr.setStatus(nextStatusCode != null && !nextStatusCode.isEmpty() ? nextStatusCode : "PENDING");
         }
+        history.setStatusAfter(pr.getStatus());
+
+        approvalHistoryRepository.save(history);
         pr.setUpdatedAt(LocalDate.now());
         prRepository.save(pr);
     }
 
     // ===== REJECT =====
-
     @Transactional
     public void reject(Long id) {
         PR pr = getById(id);
-        if (!"PENDING".equals(pr.getStatus())) {
+        if (!isPendingStatus(pr.getStatus())) {
             throw new RuntimeException("PR không ở trạng thái chờ duyệt");
         }
         if (!currentUserUtil.hasPermission("pr.reject")) {
@@ -207,7 +251,6 @@ public class PRService {
     }
 
     // ===== DELETE =====
-
     @Transactional
     public void delete(Long id) {
         PR pr = getById(id);

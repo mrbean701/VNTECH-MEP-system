@@ -48,6 +48,16 @@ public class AutoReorderRule {
     @Column(columnDefinition = "TEXT")
     private String notes;
 
+    // === Các trường mới (Giai đoạn 1) ===
+    @Column(length = 100)
+    private String schedule; // Lịch riêng cho từng rule (có thể override config)
+
+    @Column(columnDefinition = "TEXT")
+    private String note; // Ghi chú riêng cho từng rule
+
+    @Column(name = "created_by")
+    private Long createdBy; // Người tạo rule này
+
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 

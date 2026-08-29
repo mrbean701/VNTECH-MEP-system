@@ -29,9 +29,15 @@ public class Department {
     @Column(name = "manager_name", length = 100)
     private String managerName;
 
+    @Column(name = "parent_id")
+    private Long parentId;
+
     @Column(name = "created_at")
     private LocalDate createdAt;
 
     @Column(name = "updated_at")
     private LocalDate updatedAt;
+
+    public Department(Object o, String bgd, String banGiámĐốc, long l, String admin, LocalDate now, Object o1) {
+    }
 }

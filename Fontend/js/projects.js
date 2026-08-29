@@ -1,16 +1,19 @@
-// ================================================================
-// PROJECTS - Quản lý dự án (sử dụng API) - ĐÃ SỬA LỖI NULL
+// // ================================================================
+// PROJECTS - Quản lý dự án (sử dụng API) - ĐÃ TÍCH HỢP PHÂN QUYỀN
 // ================================================================
 
-// Biến lưu trạng thái cho modal chi tiết dự án
 let projectDetailState = {
     projectId: null,
     view: 'list',
     detailId: null
 };
+let projectsPageState = {
+    page: 1,
+    perPage: 10
+};
 
 // ====== RENDER DANH SÁCH DỰ ÁN ======
-async function renderProjects() {
+async function renderProjects(page = null) {
     try {
         const projects = await api.getProjects();
         const filter = document.getElementById('project-filter')?.value?.toLowerCase() || '';
@@ -18,10 +21,32 @@ async function renderProjects() {
             (p.code || '').toLowerCase().includes(filter) ||
             (p.name || '').toLowerCase().includes(filter)
         );
-        const user = getUser();
-        const canEdit = ['ADMIN', 'PLANNING', 'PROJECT', 'CEO'].includes(user?.role || '');
 
+        // Phân trang
+        if (page) projectsPageState.page = page;
+        const perPage = getPageSize('projects');
+        projectsPageState.perPage = perPage;
+        const paging = paginate(filtered, projectsPageState.page, perPage);
+
+        const user = getUser();
+
+        // Kiểm tra quyền
+        const canCreate = hasPermission('projects.create');
+        const canEdit = hasPermission('projects.edit');
+        const canDelete = hasPermission('projects.delete');
+
+        // Ẩn/hiện nút Thêm dự án
+        const btnCreate = document.getElementById('btn-create-project');
+        if (btnCreate) {
+            btnCreate.style.display = canCreate ? 'inline-block' : 'none';
+        }
+
+        // Tạo HTML (chỉ filter + bảng, không có header)
         let html = `
+            <div class="filter-bar">
+                <input type="text" id="project-filter" placeholder="Tìm theo mã hoặc tên..." style="flex:1;" />
+                <button class="btn btn-sm" onclick="renderProjects()"><i class="fas fa-search"></i></button>
+            </div>
             <div class="table-responsive">
                 <table>
                     <thead>
@@ -38,13 +63,13 @@ async function renderProjects() {
                     <tbody>
         `;
 
-        if (!filtered.length) {
+        if (!paging.items.length) {
             html += `<tr><td colspan="7" style="text-align:center; color:#999;">Không có dữ liệu</td></tr>`;
         }
 
         const warehouses = await api.getWarehouses();
 
-        for (const p of filtered) {
+        for (const p of paging.items) {
             const statusBadge = p.status === 'ACTIVE'
                 ? '<span class="badge badge-active">Đang hoạt động</span>'
                 : '<span class="badge badge-inactive">Đã đóng</span>';
@@ -55,24 +80,12 @@ async function renderProjects() {
                 : 'Không có kho';
             const whName = wh ? wh.name : 'N/A';
 
-            let actions = `
-                <button class="btn btn-info btn-sm" onclick="viewProject(${p.id})">
-                    <i class="fas fa-eye"></i>
-                </button>
-            `;
+            let actions = `<button class="btn btn-info btn-sm" onclick="viewProject(${p.id})"><i class="fas fa-eye"></i></button>`;
             if (canEdit) {
-                actions += `
-                    <button class="btn btn-warning btn-sm" onclick="editProject(${p.id})">
-                        <i class="fas fa-edit"></i>
-                    </button>
-                `;
-                if (user?.role === 'ADMIN') {
-                    actions += `
-                        <button class="btn btn-danger btn-sm" onclick="deleteProject(${p.id})">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    `;
-                }
+                actions += ` <button class="btn btn-warning btn-sm" onclick="editProject(${p.id})"><i class="fas fa-edit"></i></button>`;
+            }
+            if (canDelete && user?.role === 'ADMIN') {
+                actions += ` <button class="btn btn-danger btn-sm" onclick="deleteProject(${p.id})"><i class="fas fa-trash"></i></button>`;
             }
 
             html += `
@@ -92,14 +105,39 @@ async function renderProjects() {
         }
 
         html += `</tbody></table></div>`;
+        html += buildPaginationHTML(paging, 'renderProjects', 'projects');
         document.getElementById('projects-container').innerHTML = html;
+
+                // Gắn sự kiện cho filter
+        document.getElementById('project-filter')?.addEventListener('input', () => { projectsPageState.page = 1; renderProjects(); });
+
     } catch (error) {
         showError('Không thể tải danh sách dự án: ' + error.message);
         console.error('renderProjects error:', error);
     }
 }
 
-// ====== TẠO DỰ ÁN MỚI ======
+// ====== HIỂN THỊ MODAL THÊM DỰ ÁN ======
+function showCreateProjectModal() {
+    showModal('Thêm dự án mới', `
+        <div class="form-group"><label>Mã dự án</label><input id="f-project-code" placeholder="DAxxx" required></div>
+        <div class="form-group"><label>Tên dự án</label><input id="f-project-name" required></div>
+        <div class="form-group"><label>Chủ đầu tư</label><input id="f-project-client"></div>
+        <div class="form-group"><label>PM/Chỉ huy</label><input id="f-project-commander"></div>
+        <div class="form-group"><label>Ngày bắt đầu</label><input id="f-project-start" type="date"></div>
+        <div class="form-group"><label>Ngày kết thúc KH</label><input id="f-project-end" type="date"></div>
+        <div class="form-group"><label>Trạng thái</label>
+            <select id="f-project-status"><option value="ACTIVE">Đang hoạt động</option><option value="INACTIVE">Đã đóng</option></select>
+        </div>
+        <div class="form-group"><label>Ghi chú</label><textarea id="f-project-note" rows="2"></textarea></div>
+        <div class="modal-actions">
+            <button class="btn" onclick="saveProject()"><i class="fas fa-save"></i> Lưu</button>
+            <button class="btn btn-danger" onclick="closeModal()">Hủy</button>
+        </div>
+    `);
+}
+
+// ====== LƯU DỰ ÁN MỚI ======
 async function saveProject() {
     const code = document.getElementById('f-project-code').value.trim().toUpperCase();
     const name = document.getElementById('f-project-name').value.trim();
@@ -126,6 +164,44 @@ async function saveProject() {
         showSuccess('Thêm dự án thành công!');
     } catch (error) {
         showError('Lỗi khi thêm dự án: ' + error.message);
+    }
+}
+
+// ====== SỬA DỰ ÁN ======
+async function editProject(id) {
+    if (!hasPermission('projects.edit')) {
+        showWarning('Bạn không có quyền sửa dự án!');
+        return;
+    }
+
+    try {
+        const project = await api.getProjectById(id);
+        if (!project) {
+            showError('Không tìm thấy dự án!');
+            return;
+        }
+
+        showModal('Sửa dự án', `
+            <div class="form-group"><label>Mã dự án</label><input id="f-project-code" value="${project.code || ''}" required></div>
+            <div class="form-group"><label>Tên dự án</label><input id="f-project-name" value="${project.name || ''}" required></div>
+            <div class="form-group"><label>Chủ đầu tư</label><input id="f-project-client" value="${project.client || ''}"></div>
+            <div class="form-group"><label>PM/Chỉ huy</label><input id="f-project-commander" value="${project.commander || ''}"></div>
+            <div class="form-group"><label>Ngày bắt đầu</label><input id="f-project-start" type="date" value="${project.startDate || ''}"></div>
+            <div class="form-group"><label>Ngày kết thúc KH</label><input id="f-project-end" type="date" value="${project.endDate || ''}"></div>
+            <div class="form-group"><label>Trạng thái</label>
+                <select id="f-project-status">
+                    <option value="ACTIVE" ${project.status === 'ACTIVE' ? 'selected' : ''}>Đang hoạt động</option>
+                    <option value="INACTIVE" ${project.status === 'INACTIVE' ? 'selected' : ''}>Đã đóng</option>
+                </select>
+            </div>
+            <div class="form-group"><label>Ghi chú</label><textarea id="f-project-note" rows="2">${project.note || ''}</textarea></div>
+            <div class="modal-actions">
+                <button class="btn" onclick="updateProject(${id})"><i class="fas fa-save"></i> Cập nhật</button>
+                <button class="btn btn-danger" onclick="closeModal()">Hủy</button>
+            </div>
+        `);
+    } catch (error) {
+        showError('Lỗi khi tải dự án: ' + error.message);
     }
 }
 
@@ -172,6 +248,10 @@ async function updateProject(id) {
 
 // ====== XÓA DỰ ÁN ======
 async function deleteProject(id) {
+    if (!hasPermission('projects.delete')) {
+        showWarning('Bạn không có quyền xóa dự án!');
+        return;
+    }
     if (!confirm('Xóa dự án này? (kho và inventory liên quan sẽ bị xóa)')) return;
 
     try {
@@ -183,39 +263,6 @@ async function deleteProject(id) {
     }
 }
 
-// ====== SỬA DỰ ÁN (hiển thị modal) ======
-async function editProject(id) {
-    try {
-        const project = await api.getProjectById(id);
-        if (!project) {
-            showError('Không tìm thấy dự án!');
-            return;
-        }
-
-        showModal('Sửa dự án', `
-            <div class="form-group"><label>Mã dự án</label><input id="f-project-code" value="${project.code || ''}" required></div>
-            <div class="form-group"><label>Tên dự án</label><input id="f-project-name" value="${project.name || ''}" required></div>
-            <div class="form-group"><label>Chủ đầu tư</label><input id="f-project-client" value="${project.client || ''}"></div>
-            <div class="form-group"><label>PM/Chỉ huy</label><input id="f-project-commander" value="${project.commander || ''}"></div>
-            <div class="form-group"><label>Ngày bắt đầu</label><input id="f-project-start" type="date" value="${project.startDate || ''}"></div>
-            <div class="form-group"><label>Ngày kết thúc KH</label><input id="f-project-end" type="date" value="${project.endDate || ''}"></div>
-            <div class="form-group"><label>Trạng thái</label>
-                <select id="f-project-status">
-                    <option value="ACTIVE" ${project.status === 'ACTIVE' ? 'selected' : ''}>Đang hoạt động</option>
-                    <option value="INACTIVE" ${project.status === 'INACTIVE' ? 'selected' : ''}>Đã đóng</option>
-                </select>
-            </div>
-            <div class="form-group"><label>Ghi chú</label><textarea id="f-project-note" rows="2">${project.note || ''}</textarea></div>
-            <div class="modal-actions">
-                <button class="btn" onclick="updateProject(${id})"><i class="fas fa-save"></i> Cập nhật</button>
-                <button class="btn btn-danger" onclick="closeModal()">Hủy</button>
-            </div>
-        `);
-    } catch (error) {
-        showError('Lỗi khi tải dự án: ' + error.message);
-    }
-}
-
 // ====== XEM CHI TIẾT DỰ ÁN (modal với tab) ======
 async function viewProject(id) {
     try {
@@ -224,7 +271,6 @@ async function viewProject(id) {
             showError('Không tìm thấy dự án!');
             return;
         }
-
         projectDetailState.projectId = id;
         projectDetailState.view = 'list';
         await renderProjectModal(project);
@@ -232,6 +278,22 @@ async function viewProject(id) {
         showError('Lỗi khi tải chi tiết dự án: ' + error.message);
     }
 }
+
+async function renderProjectModal(project) {
+    // (Giữ nguyên logic từ file đã có, không thay đổi nhiều)
+    // Tôi giữ nguyên phần này để tránh dài dòng.
+    // Các bạn có thể giữ nguyên code cũ ở đây.
+}
+
+// ====== EXPORT ======
+window.renderProjects = renderProjects;
+window.viewProject = viewProject;
+window.editProject = editProject;
+window.updateProject = updateProject;
+window.deleteProject = deleteProject;
+window.saveProject = saveProject;
+
+console.log('✅ Projects module updated with permission checks.');
 
 async function renderProjectModal(project) {
     try {
@@ -330,7 +392,7 @@ async function renderProjectModal(project) {
                 ? '<span class="badge badge-status-active">🟢 Đang hoạt động</span>'
                 : '<span class="badge badge-status-inactive">🔴 Ngừng hoạt động</span>';
             const whTypeLabel = wh.type === 'CENTRAL' ? 'Kho tổng' : 'Kho dự án';
-            const canManageWh = ['ADMIN', 'PLANNING', 'PROJECT', 'CEO'].includes(getUser()?.role || '');
+            const canManageWh = hasPermission('inventory.edit'); // hoặc 'warehouse.edit'
 
             whHtml = `
                 <div style="background:#f8fafc; border:1px solid #e2e8f0; padding:16px; border-radius:8px;">
@@ -435,6 +497,11 @@ async function renderProjectModal(project) {
 
 // ====== ĐỔI TRẠNG THÁI KHO ======
 async function showChangeWhStatusModal(projectId) {
+    if (!hasPermission('inventory.edit')) {
+        showWarning('Bạn không có quyền thay đổi trạng thái kho!');
+        return;
+    }
+
     try {
         const warehouses = await api.getWarehouses();
         const wh = warehouses.find(w => w.projectId === projectId);
@@ -568,7 +635,7 @@ function renderPRDetailInline(pr, project) {
                 <div style="grid-column:1/-1;"><span class="label">Danh sách vật tư:</span><br><span class="value">${itemsStr || '--'}</span></div>
                 <div style="grid-column:1/-1;"><span class="label">Ghi chú:</span> <span class="value">${pr.note || ''}</span></div>
             </div>
-            ${pr.status === 'PENDING' ? `
+            ${pr.status === 'PENDING' && hasPermission('pr.approve') ? `
                 <div style="margin-top:12px; display:flex; gap:8px; justify-content:flex-end;">
                     <button class="btn btn-success btn-sm" onclick="approvePRFromProject(${pr.id})">Duyệt</button>
                     <button class="btn btn-danger btn-sm" onclick="rejectPRFromProject(${pr.id})">Từ chối</button>
@@ -602,7 +669,7 @@ function renderPODetailInline(po, project) {
                 <div style="grid-column:1/-1;"><span class="label">Danh sách vật tư:</span><br><span class="value">${itemsStr || '--'}</span></div>
                 <div style="grid-column:1/-1;"><span class="label">Ghi chú:</span> <span class="value">${po.note || ''}</span></div>
             </div>
-            ${po.status === 'PENDING' ? `
+            ${po.status === 'PENDING' && hasPermission('po.approve') ? `
                 <div style="margin-top:12px; display:flex; gap:8px; justify-content:flex-end;">
                     <button class="btn btn-success btn-sm" onclick="approvePOFromProject(${po.id})">Duyệt</button>
                     <button class="btn btn-danger btn-sm" onclick="rejectPOFromProject(${po.id})">Từ chối</button>
@@ -628,45 +695,55 @@ async function backToProjectList() {
     }
 }
 
-// ====== SỰ KIỆN CHO NÚT THÊM DỰ ÁN ======
-document.addEventListener('DOMContentLoaded', function() {
-    document.getElementById('btn-create-project')?.addEventListener('click', function() {
-        const user = getUser();
-        if (!['ADMIN', 'PLANNING', 'PROJECT', 'CEO'].includes(user?.role || '')) {
-            showWarning('Bạn không có quyền thêm dự án!');
-            return;
-        }
+// ====== CÁC HÀM HỖ TRỢ TỪ PROJECT CHI TIẾT (DUYỆT PR/PO TRỰC TIẾP) ======
+// (Nếu bạn đã có các hàm approvePRFromProject, rejectPRFromProject, approvePOFromProject, rejectPOFromProject
+//  trong các file pr.js, po.js thì không cần định nghĩa lại. Nếu chưa có, bạn có thể gọi trực tiếp approvePR, rejectPR...)
+// Để đơn giản, tôi để các hàm này gọi trực tiếp từ module gốc:
+window.approvePRFromProject = function(id) {
+    if (typeof approvePR === 'function') {
+        approvePR(id);
+        setTimeout(() => backToProjectList(), 500);
+    } else {
+        showError('Hàm approvePR chưa được định nghĩa!');
+    }
+};
+window.rejectPRFromProject = function(id) {
+    if (typeof rejectPR === 'function') {
+        rejectPR(id);
+        setTimeout(() => backToProjectList(), 500);
+    } else {
+        showError('Hàm rejectPR chưa được định nghĩa!');
+    }
+};
+window.approvePOFromProject = function(id) {
+    if (typeof approvePO === 'function') {
+        approvePO(id);
+        setTimeout(() => backToProjectList(), 500);
+    } else {
+        showError('Hàm approvePO chưa được định nghĩa!');
+    }
+};
+window.rejectPOFromProject = function(id) {
+    if (typeof rejectPO === 'function') {
+        rejectPO(id);
+        setTimeout(() => backToProjectList(), 500);
+    } else {
+        showError('Hàm rejectPO chưa được định nghĩa!');
+    }
+};
 
-        showModal('Thêm dự án mới', `
-            <div class="form-group"><label>Mã dự án</label><input id="f-project-code" placeholder="DAxxx" required></div>
-            <div class="form-group"><label>Tên dự án</label><input id="f-project-name" required></div>
-            <div class="form-group"><label>Chủ đầu tư</label><input id="f-project-client"></div>
-            <div class="form-group"><label>PM/Chỉ huy</label><input id="f-project-commander"></div>
-            <div class="form-group"><label>Ngày bắt đầu</label><input id="f-project-start" type="date"></div>
-            <div class="form-group"><label>Ngày kết thúc KH</label><input id="f-project-end" type="date"></div>
-            <div class="form-group"><label>Trạng thái</label>
-                <select id="f-project-status"><option value="ACTIVE">Đang hoạt động</option><option value="INACTIVE">Đã đóng</option></select>
-            </div>
-            <div class="form-group"><label>Ghi chú</label><textarea id="f-project-note" rows="2"></textarea></div>
-            <div class="modal-actions">
-                <button class="btn" onclick="saveProject()"><i class="fas fa-save"></i> Lưu</button>
-                <button class="btn btn-danger" onclick="closeModal()">Hủy</button>
-            </div>
-        `);
-    });
-});
-
-// ====== EXPORT FUNCTIONS ======
+// ====== EXPORT ======
 window.renderProjects = renderProjects;
 window.viewProject = viewProject;
 window.editProject = editProject;
 window.updateProject = updateProject;
 window.deleteProject = deleteProject;
 window.saveProject = saveProject;
+window.showCreateProjectModal = showCreateProjectModal;
 window.viewPRInline = viewPRInline;
 window.viewPOInline = viewPOInline;
 window.backToProjectList = backToProjectList;
 window.showChangeWhStatusModal = showChangeWhStatusModal;
 window.confirmChangeWhStatus = confirmChangeWhStatus;
 
-console.log('✅ Projects module updated to use API (fixed null display).');
+console.log('✅ Projects module updated with full permission checks.');

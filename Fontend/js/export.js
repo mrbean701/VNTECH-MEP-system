@@ -1,4 +1,5 @@
 // ================================================================
+
 // EXPORT FUNCTIONS - Xuất dữ liệu ra Excel/CSV
 // ================================================================
 
@@ -234,16 +235,18 @@ function exportInventory() {
         const inventory = getInventory();
         const items = getItems();
 
-        if (!warehouses.length || !inventory.length) {
+        if (!warehouses.length) {
             showWarning('Không có dữ liệu tồn kho để xuất!');
             return;
         }
 
         const data = [];
         warehouses.forEach(wh => {
-            const invs = inventory.filter(i => i.warehouse_id === wh.id);
+            const invs = inventory.filter(i =>
+                (i.warehouseId || i.warehouse_id) === wh.id
+            );
             invs.forEach(inv => {
-                const item = items.find(it => it.id === inv.item_id);
+                const item = items.find(it => it.id === (inv.itemId || inv.item_id));
                 data.push({
                     'Mã kho': wh.code,
                     'Tên kho': wh.name,
@@ -274,20 +277,28 @@ function exportGRNs() {
             showWarning('Không có GRN để xuất!');
             return;
         }
-        const data = grns.map(g => ({
-            'Mã GRN': g.code,
-            'PO nguồn': g.po_id ? `PO-${String(g.po_id).padStart(3, '0')}` : '',
-            'Dự án': g.projectName || '',
-            'Kho nhập': getWarehouseName(g.warehouse_id),
-            'Nhà cung cấp': g.vendorName || '',
-            'Ngày nhập': g.receiptDate || '',
-            'Người giao': g.receiver || '',
-            'Thủ kho': g.warehouseStaff || '',
-            'QC xác nhận': g.qcConfirm || '',
-            'Kế toán xác nhận': g.accountantConfirm || '',
-            'Trạng thái': g.status,
-            'Số lượng vật tư': g.items ? g.items.reduce((sum, it) => sum + it.actualQty, 0) : 0
-        }));
+        const data = grns.map(g => {
+            const warehouseId = g.warehouseId || g.warehouse_id;
+            const poId = g.poId || g.po_id;
+            let items = [];
+            if (g.items) {
+                try { items = typeof g.items === 'string' ? JSON.parse(g.items) : g.items; } catch(e) { items = []; }
+            }
+            return {
+                'Mã GRN': g.code,
+                'PO nguồn': poId ? `PO-${String(poId).padStart(3, '0')}` : '',
+                'Dự án': g.projectName || '',
+                'Kho nhập': getWarehouseName(warehouseId),
+                'Nhà cung cấp': g.vendorName || '',
+                'Ngày nhập': g.receiptDate || '',
+                'Người giao': g.receiver || '',
+                'Thủ kho': g.warehouseStaff || '',
+                'QC xác nhận': g.qcConfirm || '',
+                'Kế toán xác nhận': g.accountantConfirm || '',
+                'Trạng thái': g.status,
+                'Số lượng vật tư': items.reduce((sum, it) => sum + (it.actualQty || it.poQty || 0), 0)
+            };
+        });
         exportToExcel(data, 'Danh_sach_GRN', Object.keys(data[0]));
     } catch (e) {
         showError('Lỗi xuất GRN: ' + e.message);
@@ -417,8 +428,8 @@ function exportMinStock() {
 // ====== XUẤT ĐƠN HÀNG TỰ ĐỘNG (AUTO REORDER) ======
 function exportAutoReorderHistory() {
     try {
-        const prs = getPRs();
-        const autoPRs = prs.filter(pr => pr.note && pr.note.includes('Tự động tạo từ Auto Reorder'));
+                const prs = getPRs();
+        const autoPRs = prs.filter(pr => pr.note && (String(pr.note).includes('Auto Reorder') || String(pr.note).includes('Tự động tạo từ Auto Reorder')));
 
         if (!autoPRs.length) {
             showWarning('Không có đơn hàng tự động nào để xuất!');
@@ -531,6 +542,18 @@ function exportWorkflows() {
     }
 }
 
+// ====== XUẤT DỮ LIỆU KHO THEO TAB HIỆN TẠI ======
+function exportWarehouseData() {
+    const currentTab = window.currentWhTab || 'wh-list';
+    if (currentTab === 'wh-grn') {
+        exportGRNs();
+    } else if (currentTab === 'wh-sto') {
+        exportSTOs();
+    } else {
+        exportInventory();
+    }
+}
+
 // ====== EXPORT GLOBAL ======
 window.exportToExcel = exportToExcel;
 window.exportProjects = exportProjects;
@@ -542,6 +565,7 @@ window.exportPOs = exportPOs;
 window.exportInventory = exportInventory;
 window.exportGRNs = exportGRNs;
 window.exportSTOs = exportSTOs;
+window.exportWarehouseData = exportWarehouseData;
 window.exportIssues = exportIssues;
 window.exportMaterialReturns = exportMaterialReturns;
 window.exportMinStock = exportMinStock;

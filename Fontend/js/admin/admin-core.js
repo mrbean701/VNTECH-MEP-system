@@ -70,8 +70,6 @@ async function refreshAdminStatuses() {
 async function refreshAdminPermissions() {
     try {
         const data = await api.getPermissions();
-        _adminPermissions = safeObject(data); // nếu data là mảng, safeObject sẽ trả về object? Cần sửa
-        // Thực tế, nếu data là mảng, chúng ta muốn giữ nguyên mảng.
         if (Array.isArray(data)) {
             _adminPermissions = data;
         } else {
@@ -125,6 +123,7 @@ async function renderAdminPage() {
         await refreshAdminWorkflows();
         await refreshAdminStatuses();
         await refreshAdminPermissions();
+        if (typeof refreshAdminPositions === 'function') await refreshAdminPositions();
     } catch(e) { console.warn('Load data error:', e); }
 
     renderAdminUI();
@@ -142,10 +141,12 @@ function renderAdminUI(tab) {
         <div class="tab-bar">
             <div class="tab ${currentAdminTab === 'users' ? 'active' : ''}" onclick="switchAdminTab('users')">👤 Người dùng</div>
             <div class="tab ${currentAdminTab === 'departments' ? 'active' : ''}" onclick="switchAdminTab('departments')">🏢 Phòng ban</div>
+            <div class="tab ${currentAdminTab === 'positions' ? 'active' : ''}" onclick="switchAdminTab('positions')">🏷️ Chức vụ</div>
             <div class="tab ${currentAdminTab === 'workflows' ? 'active' : ''}" onclick="switchAdminTab('workflows')">⚙️ Workflow</div>
             <div class="tab ${currentAdminTab === 'statuses' ? 'active' : ''}" onclick="switchAdminTab('statuses')">📊 Trạng thái</div>
             <div class="tab ${currentAdminTab === 'department-permissions' ? 'active' : ''}" onclick="switchAdminTab('department-permissions')">🏢 Phân quyền phòng ban</div>
             <div class="tab ${currentAdminTab === 'user-permissions' ? 'active' : ''}" onclick="switchAdminTab('user-permissions')">👤 Phân quyền user</div>
+            <div class="tab ${currentAdminTab === 'audit' ? 'active' : ''}" onclick="switchAdminTab('audit')">📜 Nhật ký</div>
         </div>
         <div id="admin-tab-content">
     `;
@@ -171,6 +172,13 @@ function renderAdminUI(tab) {
 
     html += `</div>`;
     container.innerHTML = html;
+
+    // Các tab async render riêng (positions, audit)
+    if (currentAdminTab === 'positions' && typeof renderPositionsTab === 'function') {
+        renderPositionsTab();
+    } else if (currentAdminTab === 'audit' && typeof renderAuditTab === 'function') {
+        renderAuditTab();
+    }
 
     // Gán sự kiện cho filter
     if (currentAdminTab === 'users') {

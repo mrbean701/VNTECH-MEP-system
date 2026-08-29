@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/min-stock")
@@ -36,6 +37,12 @@ public class MinStockController {
         return minStockService.getByWarehouseAndItem(warehouseId, itemId);
     }
 
+    // ===== PHƯƠNG THỨC MỚI: Lấy cảnh báo tồn kho theo kho =====
+    @GetMapping("/alerts/warehouse/{warehouseId}")
+    public List<Map<String, Object>> getAlertsByWarehouse(@PathVariable Long warehouseId) {
+        return minStockService.getAlertsByWarehouse(warehouseId);
+    }
+
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public MinStock create(@RequestBody MinStock minStock) {
@@ -50,8 +57,10 @@ public class MinStockController {
     @PostMapping("/save")
     public MinStock saveOrUpdate(@RequestParam Long warehouseId,
                                  @RequestParam Long itemId,
-                                 @RequestParam BigDecimal minQuantity) {
-        return minStockService.saveOrUpdate(warehouseId, itemId, minQuantity);
+                                 @RequestParam BigDecimal minQuantity,
+                                 @RequestParam(required = false) BigDecimal safeQuantity,
+                                 @RequestParam(required = false) BigDecimal alertPercent) {
+        return minStockService.saveOrUpdate(warehouseId, itemId, minQuantity, safeQuantity, alertPercent);
     }
 
     @DeleteMapping("/{id}")

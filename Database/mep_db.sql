@@ -1,5 +1,6 @@
 -- ================================================================
 -- RESET DATABASE - CHỈ ADMIN + WORKFLOW MẪU + STATUS + PERMISSIONS
+-- PHIÊN BẢN 2.0.27 (Ngày 29/08/2025)
 -- ================================================================
 
 DROP DATABASE IF EXISTS mep_db;
@@ -337,10 +338,12 @@ CREATE TABLE IF NOT EXISTS statuses (
     is_final BOOLEAN DEFAULT FALSE,
     sort_order INT DEFAULT 0,
     color VARCHAR(20) NULL,
+    `group` VARCHAR(50) NULL, -- ✅ TRƯỜNG MỚI (Phiên bản 2.0.27)
     created_at DATE NULL,
     updated_at DATE NULL,
     INDEX idx_statuses_entity_type (entity_type),
-    INDEX idx_statuses_code (code)
+    INDEX idx_statuses_code (code),
+    INDEX idx_statuses_group (`group`)
 );
 
 -- 19. WORKFLOW_STEP_STATUS
@@ -438,13 +441,19 @@ ALTER TABLE user_permissions ADD CONSTRAINT fk_userperm_user
 
 -- 1. DEPARTMENTS
 INSERT INTO departments (code, name, manager_id, manager_name, created_at, updated_at) VALUES
-('BGD', 'Ban Giám đốc', 1, 'Admin', CURDATE(), CURDATE());
+('BGD', 'Ban Giám đốc', 1, 'Admin', CURDATE(), CURDATE()),
+('PURCHASING', 'Phòng Mua hàng', NULL, NULL, CURDATE(), CURDATE()),
+('PLANNING', 'Phòng Kế hoạch', NULL, NULL, CURDATE(), CURDATE()),
+('PROJECT', 'Phòng Dự án', NULL, NULL, CURDATE(), CURDATE()),
+('QC', 'Phòng QC', NULL, NULL, CURDATE(), CURDATE()),
+('CT', 'Công trường', NULL, NULL, CURDATE(), CURDATE());
 
 -- 2. USERS (admin - password = 'password')
 INSERT INTO users (email, password, name, role, department_id, position, created_at, updated_at) VALUES
 ('admin@mep.com', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', 'Admin', 'ADMIN', 1, 'Quản trị hệ thống', CURDATE(), CURDATE());
 
--- 3. STATUSES
+-- 3. STATUSES (Đầy đủ các entity type + group)
+-- Helper procedure
 DELIMITER $$
 DROP PROCEDURE IF EXISTS InsertStatusIfNotExists $$
 CREATE PROCEDURE InsertStatusIfNotExists(
@@ -455,74 +464,111 @@ CREATE PROCEDURE InsertStatusIfNotExists(
     IN p_is_default BOOLEAN,
     IN p_is_final BOOLEAN,
     IN p_sort_order INT,
-    IN p_color VARCHAR(20)
+    IN p_color VARCHAR(20),
+    IN p_group VARCHAR(50)
 )
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM statuses WHERE code = p_code) THEN
-        INSERT INTO statuses (entity_type, name, code, description, is_default, is_final, sort_order, color, created_at, updated_at)
-        VALUES (p_entity_type, p_name, p_code, p_description, p_is_default, p_is_final, p_sort_order, p_color, CURDATE(), CURDATE());
+        INSERT INTO statuses (entity_type, name, code, description, is_default, is_final, sort_order, color, `group`, created_at, updated_at)
+        VALUES (p_entity_type, p_name, p_code, p_description, p_is_default, p_is_final, p_sort_order, p_color, p_group, CURDATE(), CURDATE());
     END IF;
 END $$
 DELIMITER ;
 
-CALL InsertStatusIfNotExists('mr', 'Nháp', 'DRAFT', 'Trạng thái nháp', TRUE, FALSE, 0, '#6b7280');
-CALL InsertStatusIfNotExists('mr', 'Chờ duyệt', 'PENDING', 'Đã gửi duyệt', FALSE, FALSE, 1, '#f59e0b');
-CALL InsertStatusIfNotExists('mr', 'Đã duyệt', 'APPROVED', 'Đã được duyệt', FALSE, FALSE, 2, '#22c55e');
-CALL InsertStatusIfNotExists('mr', 'Từ chối', 'REJECTED', 'Bị từ chối', FALSE, TRUE, 3, '#ef4444');
+-- MR
+CALL InsertStatusIfNotExists('mr', 'Nháp', 'DRAFT', 'Trạng thái nháp', TRUE, FALSE, 0, '#6b7280', 'order');
+CALL InsertStatusIfNotExists('mr', 'Chờ duyệt', 'PENDING', 'Đã gửi duyệt', FALSE, FALSE, 1, '#f59e0b', 'order');
+CALL InsertStatusIfNotExists('mr', 'Đã duyệt', 'APPROVED', 'Đã được duyệt', FALSE, FALSE, 2, '#22c55e', 'order');
+CALL InsertStatusIfNotExists('mr', 'Từ chối', 'REJECTED', 'Bị từ chối', FALSE, TRUE, 3, '#ef4444', 'order');
 
-CALL InsertStatusIfNotExists('pr', 'Nháp', 'DRAFT', 'Nháp', TRUE, FALSE, 0, '#6b7280');
-CALL InsertStatusIfNotExists('pr', 'Chờ duyệt KH', 'PENDING_PLANNING', 'Chờ KH duyệt', FALSE, FALSE, 1, '#f59e0b');
-CALL InsertStatusIfNotExists('pr', 'KH đã duyệt', 'PLANNING_APPROVED', 'KH đã duyệt', FALSE, FALSE, 2, '#3b82f6');
-CALL InsertStatusIfNotExists('pr', 'Chờ duyệt DA', 'PENDING_PROJECT', 'Chờ DA duyệt', FALSE, FALSE, 3, '#f59e0b');
-CALL InsertStatusIfNotExists('pr', 'DA đã duyệt', 'PROJECT_APPROVED', 'DA đã duyệt', FALSE, FALSE, 4, '#3b82f6');
-CALL InsertStatusIfNotExists('pr', 'Chờ duyệt CEO', 'PENDING_CEO', 'Chờ CEO duyệt', FALSE, FALSE, 5, '#f59e0b');
-CALL InsertStatusIfNotExists('pr', 'Đã duyệt', 'APPROVED', 'Đã duyệt', FALSE, FALSE, 6, '#22c55e');
-CALL InsertStatusIfNotExists('pr', 'Từ chối', 'REJECTED', 'Từ chối', FALSE, TRUE, 7, '#ef4444');
+-- PR
+CALL InsertStatusIfNotExists('pr', 'Nháp', 'DRAFT', 'Nháp', TRUE, FALSE, 0, '#6b7280', 'order');
+CALL InsertStatusIfNotExists('pr', 'Chờ duyệt KH', 'PENDING_PLANNING', 'Chờ KH duyệt', FALSE, FALSE, 1, '#f59e0b', 'order');
+CALL InsertStatusIfNotExists('pr', 'KH đã duyệt', 'PLANNING_APPROVED', 'KH đã duyệt', FALSE, FALSE, 2, '#3b82f6', 'order');
+CALL InsertStatusIfNotExists('pr', 'Chờ duyệt DA', 'PENDING_PROJECT', 'Chờ DA duyệt', FALSE, FALSE, 3, '#f59e0b', 'order');
+CALL InsertStatusIfNotExists('pr', 'DA đã duyệt', 'PROJECT_APPROVED', 'DA đã duyệt', FALSE, FALSE, 4, '#3b82f6', 'order');
+CALL InsertStatusIfNotExists('pr', 'Chờ duyệt CEO', 'PENDING_CEO', 'Chờ CEO duyệt', FALSE, FALSE, 5, '#f59e0b', 'order');
+CALL InsertStatusIfNotExists('pr', 'Đã duyệt', 'APPROVED', 'Đã duyệt', FALSE, FALSE, 6, '#22c55e', 'order');
+CALL InsertStatusIfNotExists('pr', 'Từ chối', 'REJECTED', 'Từ chối', FALSE, TRUE, 7, '#ef4444', 'order');
 
-CALL InsertStatusIfNotExists('po', 'Nháp', 'DRAFT', 'Nháp', TRUE, FALSE, 0, '#6b7280');
-CALL InsertStatusIfNotExists('po', 'Chờ duyệt KH', 'PENDING_PLANNING', 'Chờ KH duyệt', FALSE, FALSE, 1, '#f59e0b');
-CALL InsertStatusIfNotExists('po', 'KH đã duyệt', 'PLANNING_APPROVED', 'KH đã duyệt', FALSE, FALSE, 2, '#3b82f6');
-CALL InsertStatusIfNotExists('po', 'Chờ duyệt DA', 'PENDING_PROJECT', 'Chờ DA duyệt', FALSE, FALSE, 3, '#f59e0b');
-CALL InsertStatusIfNotExists('po', 'DA đã duyệt', 'PROJECT_APPROVED', 'DA đã duyệt', FALSE, FALSE, 4, '#3b82f6');
-CALL InsertStatusIfNotExists('po', 'Chờ duyệt CEO', 'PENDING_CEO', 'Chờ CEO duyệt', FALSE, FALSE, 5, '#f59e0b');
-CALL InsertStatusIfNotExists('po', 'Đã duyệt', 'APPROVED', 'Đã duyệt', FALSE, FALSE, 6, '#22c55e');
-CALL InsertStatusIfNotExists('po', 'Từ chối', 'REJECTED', 'Từ chối', FALSE, TRUE, 7, '#ef4444');
+-- PO
+CALL InsertStatusIfNotExists('po', 'Nháp', 'DRAFT', 'Nháp', TRUE, FALSE, 0, '#6b7280', 'order');
+CALL InsertStatusIfNotExists('po', 'Chờ duyệt KH', 'PENDING_PLANNING', 'Chờ KH duyệt', FALSE, FALSE, 1, '#f59e0b', 'order');
+CALL InsertStatusIfNotExists('po', 'KH đã duyệt', 'PLANNING_APPROVED', 'KH đã duyệt', FALSE, FALSE, 2, '#3b82f6', 'order');
+CALL InsertStatusIfNotExists('po', 'Chờ duyệt DA', 'PENDING_PROJECT', 'Chờ DA duyệt', FALSE, FALSE, 3, '#f59e0b', 'order');
+CALL InsertStatusIfNotExists('po', 'DA đã duyệt', 'PROJECT_APPROVED', 'DA đã duyệt', FALSE, FALSE, 4, '#3b82f6', 'order');
+CALL InsertStatusIfNotExists('po', 'Chờ duyệt CEO', 'PENDING_CEO', 'Chờ CEO duyệt', FALSE, FALSE, 5, '#f59e0b', 'order');
+CALL InsertStatusIfNotExists('po', 'Đã duyệt', 'APPROVED', 'Đã duyệt', FALSE, FALSE, 6, '#22c55e', 'order');
+CALL InsertStatusIfNotExists('po', 'Từ chối', 'REJECTED', 'Từ chối', FALSE, TRUE, 7, '#ef4444', 'order');
 
-CALL InsertStatusIfNotExists('grn', 'Nháp', 'DRAFT', 'Nháp', TRUE, FALSE, 0, '#6b7280');
-CALL InsertStatusIfNotExists('grn', 'Đã nhận', 'RECEIVED', 'Đã nhận', FALSE, FALSE, 1, '#3b82f6');
-CALL InsertStatusIfNotExists('grn', 'QC kiểm tra', 'QC_CHECKED', 'QC đã kiểm tra', FALSE, FALSE, 2, '#8b5cf6');
-CALL InsertStatusIfNotExists('grn', 'Hoàn thành', 'COMPLETED', 'Hoàn thành', FALSE, TRUE, 3, '#22c55e');
-CALL InsertStatusIfNotExists('grn', 'Từ chối', 'REJECTED', 'Từ chối', FALSE, TRUE, 4, '#ef4444');
+-- GRN
+CALL InsertStatusIfNotExists('grn', 'Nháp', 'DRAFT', 'Nháp', TRUE, FALSE, 0, '#6b7280', 'warehouse');
+CALL InsertStatusIfNotExists('grn', 'Đã nhận', 'RECEIVED', 'Đã nhận', FALSE, FALSE, 1, '#3b82f6', 'warehouse');
+CALL InsertStatusIfNotExists('grn', 'QC kiểm tra', 'QC_CHECKED', 'QC đã kiểm tra', FALSE, FALSE, 2, '#8b5cf6', 'warehouse');
+CALL InsertStatusIfNotExists('grn', 'Hoàn thành', 'COMPLETED', 'Hoàn thành', FALSE, TRUE, 3, '#22c55e', 'warehouse');
+CALL InsertStatusIfNotExists('grn', 'Từ chối', 'REJECTED', 'Từ chối', FALSE, TRUE, 4, '#ef4444', 'warehouse');
 
-CALL InsertStatusIfNotExists('sto', 'Nháp', 'DRAFT', 'Nháp', TRUE, FALSE, 0, '#6b7280');
-CALL InsertStatusIfNotExists('sto', 'Chờ duyệt', 'PENDING', 'Chờ duyệt', FALSE, FALSE, 1, '#f59e0b');
-CALL InsertStatusIfNotExists('sto', 'Đã duyệt', 'APPROVED', 'Đã duyệt', FALSE, FALSE, 2, '#3b82f6');
-CALL InsertStatusIfNotExists('sto', 'Hoàn thành', 'COMPLETED', 'Hoàn thành', FALSE, TRUE, 3, '#22c55e');
+-- STO
+CALL InsertStatusIfNotExists('sto', 'Nháp', 'DRAFT', 'Nháp', TRUE, FALSE, 0, '#6b7280', 'warehouse');
+CALL InsertStatusIfNotExists('sto', 'Chờ duyệt', 'PENDING', 'Chờ duyệt', FALSE, FALSE, 1, '#f59e0b', 'warehouse');
+CALL InsertStatusIfNotExists('sto', 'Đã duyệt', 'APPROVED', 'Đã duyệt', FALSE, FALSE, 2, '#3b82f6', 'warehouse');
+CALL InsertStatusIfNotExists('sto', 'Hoàn thành', 'COMPLETED', 'Hoàn thành', FALSE, TRUE, 3, '#22c55e', 'warehouse');
 
-CALL InsertStatusIfNotExists('issue', 'Nháp', 'DRAFT', 'Nháp', TRUE, FALSE, 0, '#6b7280');
-CALL InsertStatusIfNotExists('issue', 'Chờ duyệt', 'PENDING', 'Chờ duyệt', FALSE, FALSE, 1, '#f59e0b');
-CALL InsertStatusIfNotExists('issue', 'Đã duyệt', 'APPROVED', 'Đã duyệt', FALSE, FALSE, 2, '#3b82f6');
-CALL InsertStatusIfNotExists('issue', 'Đã cấp phát', 'COMPLETED', 'Đã cấp phát', FALSE, FALSE, 3, '#8b5cf6');
-CALL InsertStatusIfNotExists('issue', 'Đã xác nhận', 'CONFIRMED', 'Đã xác nhận', FALSE, TRUE, 4, '#22c55e');
-CALL InsertStatusIfNotExists('issue', 'Từ chối', 'REJECTED', 'Từ chối', FALSE, TRUE, 5, '#ef4444');
+-- Issue
+CALL InsertStatusIfNotExists('issue', 'Nháp', 'DRAFT', 'Nháp', TRUE, FALSE, 0, '#6b7280', 'warehouse');
+CALL InsertStatusIfNotExists('issue', 'Chờ duyệt', 'PENDING', 'Chờ duyệt', FALSE, FALSE, 1, '#f59e0b', 'warehouse');
+CALL InsertStatusIfNotExists('issue', 'Đã duyệt', 'APPROVED', 'Đã duyệt', FALSE, FALSE, 2, '#3b82f6', 'warehouse');
+CALL InsertStatusIfNotExists('issue', 'Đã cấp phát', 'COMPLETED', 'Đã cấp phát', FALSE, FALSE, 3, '#8b5cf6', 'warehouse');
+CALL InsertStatusIfNotExists('issue', 'Đã xác nhận', 'CONFIRMED', 'Đã xác nhận', FALSE, TRUE, 4, '#22c55e', 'warehouse');
+CALL InsertStatusIfNotExists('issue', 'Từ chối', 'REJECTED', 'Từ chối', FALSE, TRUE, 5, '#ef4444', 'warehouse');
 
-CALL InsertStatusIfNotExists('materialreturn', 'Nháp', 'DRAFT', 'Nháp', TRUE, FALSE, 0, '#6b7280');
-CALL InsertStatusIfNotExists('materialreturn', 'Chờ duyệt', 'PENDING', 'Chờ duyệt', FALSE, FALSE, 1, '#f59e0b');
-CALL InsertStatusIfNotExists('materialreturn', 'Đã nhận', 'APPROVED', 'Thủ kho đã nhận', FALSE, FALSE, 2, '#3b82f6');
-CALL InsertStatusIfNotExists('materialreturn', 'Đã xác nhận', 'CONFIRMED', 'Đã xác nhận', FALSE, TRUE, 3, '#22c55e');
-CALL InsertStatusIfNotExists('materialreturn', 'Từ chối', 'REJECTED', 'Từ chối', FALSE, TRUE, 4, '#ef4444');
+-- Material Return
+CALL InsertStatusIfNotExists('materialreturn', 'Nháp', 'DRAFT', 'Nháp', TRUE, FALSE, 0, '#6b7280', 'warehouse');
+CALL InsertStatusIfNotExists('materialreturn', 'Chờ duyệt', 'PENDING', 'Chờ duyệt', FALSE, FALSE, 1, '#f59e0b', 'warehouse');
+CALL InsertStatusIfNotExists('materialreturn', 'Đã nhận', 'APPROVED', 'Thủ kho đã nhận', FALSE, FALSE, 2, '#3b82f6', 'warehouse');
+CALL InsertStatusIfNotExists('materialreturn', 'Đã xác nhận', 'CONFIRMED', 'Đã xác nhận', FALSE, TRUE, 3, '#22c55e', 'warehouse');
+CALL InsertStatusIfNotExists('materialreturn', 'Từ chối', 'REJECTED', 'Từ chối', FALSE, TRUE, 4, '#ef4444', 'warehouse');
+
+-- ===== CÁC ENTITY TYPE MỚI (Phiên bản 2.0.27) =====
+
+-- User
+CALL InsertStatusIfNotExists('user', 'Hoạt động', 'ACTIVE', 'User đang hoạt động', TRUE, FALSE, 0, '#22c55e', 'user');
+CALL InsertStatusIfNotExists('user', 'Bị khóa', 'LOCKED', 'User bị khóa', FALSE, TRUE, 1, '#ef4444', 'user');
+CALL InsertStatusIfNotExists('user', 'Chờ kích hoạt', 'PENDING', 'Chờ kích hoạt', FALSE, FALSE, 2, '#f59e0b', 'user');
+
+-- Department
+CALL InsertStatusIfNotExists('department', 'Hoạt động', 'ACTIVE', 'Phòng ban hoạt động', TRUE, FALSE, 0, '#22c55e', 'department');
+CALL InsertStatusIfNotExists('department', 'Đã đóng', 'INACTIVE', 'Phòng ban đã đóng', FALSE, TRUE, 1, '#ef4444', 'department');
+
+-- Vendor
+CALL InsertStatusIfNotExists('vendor', 'Đang hợp tác', 'ACTIVE', 'Đang hợp tác', TRUE, FALSE, 0, '#22c55e', 'vendor');
+CALL InsertStatusIfNotExists('vendor', 'Ngừng hợp tác', 'INACTIVE', 'Ngừng hợp tác', FALSE, TRUE, 1, '#ef4444', 'vendor');
+
+-- Project
+CALL InsertStatusIfNotExists('project', 'Đang hoạt động', 'ACTIVE', 'Dự án đang hoạt động', TRUE, FALSE, 0, '#22c55e', 'project');
+CALL InsertStatusIfNotExists('project', 'Đã đóng', 'INACTIVE', 'Dự án đã đóng', FALSE, TRUE, 1, '#ef4444', 'project');
+CALL InsertStatusIfNotExists('project', 'Tạm dừng', 'SUSPENDED', 'Dự án tạm dừng', FALSE, FALSE, 2, '#f59e0b', 'project');
+
+-- Warehouse
+CALL InsertStatusIfNotExists('warehouse', 'Đang hoạt động', 'ACTIVE', 'Kho đang hoạt động', TRUE, FALSE, 0, '#22c55e', 'warehouse');
+CALL InsertStatusIfNotExists('warehouse', 'Đã đóng', 'INACTIVE', 'Kho đã đóng', FALSE, TRUE, 1, '#ef4444', 'warehouse');
+
+-- Workflow
+CALL InsertStatusIfNotExists('workflow', 'Nháp', 'DRAFT', 'Workflow nháp', TRUE, FALSE, 0, '#6b7280', 'workflow');
+CALL InsertStatusIfNotExists('workflow', 'Đang áp dụng', 'ACTIVE', 'Workflow đang áp dụng', FALSE, FALSE, 1, '#22c55e', 'workflow');
+CALL InsertStatusIfNotExists('workflow', 'Ngừng áp dụng', 'INACTIVE', 'Workflow ngừng áp dụng', FALSE, FALSE, 2, '#ef4444', 'workflow');
 
 DROP PROCEDURE IF EXISTS InsertStatusIfNotExists;
 
 -- 4. WORKFLOWS
 INSERT INTO workflows (module, name, description, steps, is_active, is_system, created_at, updated_at) VALUES
-('mr', 'MR - Mặc định', 'Quy trình duyệt MR', '[{"step":1,"role":"SITE_COMMANDER","label":"Chỉ huy trưởng duyệt","departmentId":5}]', TRUE, TRUE, CURDATE(), CURDATE()),
-('pr', 'PR - 3 bước mặc định', 'Planning → Project → CEO', '[{"step":1,"role":"PLANNING","label":"Kế hoạch duyệt","departmentId":2},{"step":2,"role":"PROJECT","label":"Dự án duyệt","departmentId":3},{"step":3,"role":"CEO","label":"CEO duyệt","departmentId":1}]', TRUE, TRUE, CURDATE(), CURDATE()),
-('po', 'PO - 3 bước mặc định', 'Planning → Project → CEO', '[{"step":1,"role":"PLANNING","label":"Kế hoạch duyệt","departmentId":2},{"step":2,"role":"PROJECT","label":"Dự án duyệt","departmentId":3},{"step":3,"role":"CEO","label":"CEO duyệt","departmentId":1}]', TRUE, TRUE, CURDATE(), CURDATE()),
-('grn', 'GRN - 4 bước mặc định', 'Lập phiếu → Nhận → QC → Hoàn thành', '[{"step":1,"role":"PURCHASING","label":"Lập phiếu","departmentId":4},{"step":2,"role":"WAREHOUSE","label":"Thủ kho nhận","departmentId":null},{"step":3,"role":"QC","label":"QC kiểm tra","departmentId":6},{"step":4,"role":"PURCHASING","label":"Hoàn thành","departmentId":4}]', TRUE, TRUE, CURDATE(), CURDATE()),
-('sto', 'STO - 3 bước mặc định', 'Lập phiếu → Duyệt → Xuất kho', '[{"step":1,"role":"PURCHASING","label":"Lập phiếu","departmentId":4},{"step":2,"role":"PURCHASING","label":"Duyệt","departmentId":4},{"step":3,"role":"PURCHASING","label":"Xuất kho","departmentId":4}]', TRUE, TRUE, CURDATE(), CURDATE()),
-('issue', 'Issue - 4 bước mặc định', 'Tạo phiếu → Duyệt → Cấp phát → Xác nhận', '[{"step":1,"role":"SITE_COMMANDER","label":"Tạo phiếu","departmentId":5},{"step":2,"role":"SITE_COMMANDER","label":"Duyệt","departmentId":5},{"step":3,"role":"PURCHASING","label":"Cấp phát","departmentId":4},{"step":4,"role":"SITE_COMMANDER","label":"Xác nhận","departmentId":5}]', TRUE, TRUE, CURDATE(), CURDATE()),
-('materialreturn', 'Material Return - 3 bước mặc định', 'Tạo phiếu → Nhận → Xác nhận', '[{"step":1,"role":"SITE_COMMANDER","label":"Tạo phiếu","departmentId":5},{"step":2,"role":"PURCHASING","label":"Thủ kho nhận","departmentId":4},{"step":3,"role":"SITE_COMMANDER","label":"Xác nhận","departmentId":5}]', TRUE, TRUE, CURDATE(), CURDATE());
+('mr', 'MR - Mặc định', 'Quy trình duyệt MR', '[{"step":1,"permissionKey":"mr.approve","label":"Chỉ huy trưởng duyệt","departmentId":5}]', TRUE, TRUE, CURDATE(), CURDATE()),
+('pr', 'PR - 3 bước mặc định', 'Planning → Project → CEO', '[{"step":1,"permissionKey":"pr.approve","label":"Kế hoạch duyệt","departmentId":2},{"step":2,"permissionKey":"pr.approve","label":"Dự án duyệt","departmentId":3},{"step":3,"permissionKey":"pr.approve","label":"CEO duyệt","departmentId":1}]', TRUE, TRUE, CURDATE(), CURDATE()),
+('po', 'PO - 3 bước mặc định', 'Planning → Project → CEO', '[{"step":1,"permissionKey":"po.approve","label":"Kế hoạch duyệt","departmentId":2},{"step":2,"permissionKey":"po.approve","label":"Dự án duyệt","departmentId":3},{"step":3,"permissionKey":"po.approve","label":"CEO duyệt","departmentId":1}]', TRUE, TRUE, CURDATE(), CURDATE()),
+('grn', 'GRN - 4 bước mặc định', 'Lập phiếu → Nhận → QC → Hoàn thành', '[{"step":1,"permissionKey":"grn.create","label":"Lập phiếu","departmentId":4},{"step":2,"permissionKey":"grn.receive","label":"Thủ kho nhận","departmentId":null},{"step":3,"permissionKey":"grn.qc","label":"QC kiểm tra","departmentId":6},{"step":4,"permissionKey":"grn.complete","label":"Hoàn thành","departmentId":4}]', TRUE, TRUE, CURDATE(), CURDATE()),
+('sto', 'STO - 3 bước mặc định', 'Lập phiếu → Duyệt → Xuất kho', '[{"step":1,"permissionKey":"sto.create","label":"Lập phiếu","departmentId":4},{"step":2,"permissionKey":"sto.approve","label":"Duyệt","departmentId":4},{"step":3,"permissionKey":"sto.complete","label":"Xuất kho","departmentId":4}]', TRUE, TRUE, CURDATE(), CURDATE()),
+('issue', 'Issue - 4 bước mặc định', 'Tạo phiếu → Duyệt → Cấp phát → Xác nhận', '[{"step":1,"permissionKey":"issue.create","label":"Tạo phiếu","departmentId":5},{"step":2,"permissionKey":"issue.approve","label":"Duyệt","departmentId":5},{"step":3,"permissionKey":"issue.complete","label":"Cấp phát","departmentId":4},{"step":4,"permissionKey":"issue.confirm","label":"Xác nhận","departmentId":5}]', TRUE, TRUE, CURDATE(), CURDATE()),
+('materialreturn', 'Material Return - 3 bước mặc định', 'Tạo phiếu → Nhận → Xác nhận', '[{"step":1,"permissionKey":"materialreturn.create","label":"Tạo phiếu","departmentId":5},{"step":2,"permissionKey":"materialreturn.approve","label":"Thủ kho nhận","departmentId":4},{"step":3,"permissionKey":"materialreturn.confirm","label":"Xác nhận","departmentId":5}]', TRUE, TRUE, CURDATE(), CURDATE());
 
 -- 5. PERMISSIONS (cấp full quyền cho BGD)
 INSERT INTO permissions (department_id, permission_key, enabled) VALUES
@@ -535,7 +581,8 @@ INSERT INTO permissions (department_id, permission_key, enabled) VALUES
 (1, 'sto.view', TRUE), (1, 'sto.create', TRUE), (1, 'sto.edit', TRUE), (1, 'sto.delete', TRUE), (1, 'sto.submit', TRUE), (1, 'sto.approve', TRUE), (1, 'sto.complete', TRUE),
 (1, 'issue.view', TRUE), (1, 'issue.create', TRUE), (1, 'issue.edit', TRUE), (1, 'issue.delete', TRUE), (1, 'issue.submit', TRUE), (1, 'issue.approve', TRUE), (1, 'issue.complete', TRUE), (1, 'issue.confirm', TRUE), (1, 'issue.reject', TRUE),
 (1, 'materialreturn.view', TRUE), (1, 'materialreturn.create', TRUE), (1, 'materialreturn.edit', TRUE), (1, 'materialreturn.delete', TRUE), (1, 'materialreturn.submit', TRUE), (1, 'materialreturn.approve', TRUE), (1, 'materialreturn.confirm', TRUE), (1, 'materialreturn.reject', TRUE),
-(1, 'admin.view', TRUE);
+(1, 'admin.view', TRUE),
+(1, 'workflow.override', TRUE);
 
 -- 6. AUTO_REORDER_CONFIG (mặc định)
 INSERT INTO auto_reorder_config (enabled, multiplier, default_vendor_code, updated_at) VALUES
@@ -544,6 +591,9 @@ INSERT INTO auto_reorder_config (enabled, multiplier, default_vendor_code, updat
 -- ================================================================
 -- KIỂM TRA
 -- ================================================================
-SELECT '✅ Database reset thành công! Tài khoản admin: admin@mep.com / password' AS Message;
-SELECT COUNT(*) AS total_users FROM users;
+
+SELECT '✅ Database reset thành công! (Phiên bản 2.0.27)' AS Message;
+SELECT '👤 Tài khoản admin: admin@mep.com / password' AS Credential;
+SELECT entity_type, COUNT(*) AS total, GROUP_CONCAT(DISTINCT `group`) AS groups FROM statuses GROUP BY entity_type ORDER BY entity_type;
 SELECT COUNT(*) AS total_workflows FROM workflows;
+SELECT COUNT(*) AS total_permissions FROM permissions;

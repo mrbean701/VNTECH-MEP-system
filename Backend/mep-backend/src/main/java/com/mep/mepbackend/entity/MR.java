@@ -17,6 +17,9 @@ public class MR {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(name = "workflow_id")
+    private Long workflowId;
+
     @Column(unique = true, nullable = false)
     private String code;
 

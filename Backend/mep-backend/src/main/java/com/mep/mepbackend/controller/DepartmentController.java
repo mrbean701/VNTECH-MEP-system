@@ -25,10 +25,17 @@ public class DepartmentController {
         return departmentService.getById(id);
     }
 
-    @GetMapping("/code/{code}")
+        @GetMapping("/code/{code}")
     public Department getByCode(@PathVariable String code) {
         return departmentService.getByCode(code);
     }
+
+    @GetMapping("/{id}/sub")
+    public List<Department> getSubDepartments(@PathVariable Long id) {
+        return departmentService.getSubDepartments(id);
+    }
+
+
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)

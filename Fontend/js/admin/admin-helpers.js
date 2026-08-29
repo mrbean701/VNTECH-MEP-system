@@ -93,6 +93,23 @@ function getModuleLabel(module) {
     return map[module] || module;
 }
 
+// ✅ Danh sách chức vụ đặc biệt (sẽ được hiển thị checkbox gán quyền)
+function getSpecialPositions() {
+    return [
+        'Trưởng phòng',
+        'Phó trưởng phòng',
+        'Giám đốc',
+        'Phó giám đốc',
+        'Tổng giám đốc',
+        'Phó tổng giám đốc',
+        'Chủ tịch',
+        'Phó chủ tịch',
+        'Quản lý',
+        'Trưởng ban',
+        'Phó trưởng ban'
+    ];
+}
+
 // Export ra window
 window.safeArray = safeArray;
 window.safeObject = safeObject;
@@ -101,3 +118,4 @@ window.getModuleActions = getModuleActions;
 window.getAllPermissionKeys = getAllPermissionKeys;
 window.getActionLabel = getActionLabel;
 window.getModuleLabel = getModuleLabel;
+window.getSpecialPositions = getSpecialPositions;

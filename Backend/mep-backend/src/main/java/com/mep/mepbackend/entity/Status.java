@@ -22,7 +22,8 @@ public class Status {
     private Long id;
 
     /**
-     * Loại đối tượng áp dụng: mr, pr, po, grn, sto, issue, materialreturn
+     * Loại đối tượng áp dụng: mr, pr, po, grn, sto, issue, materialreturn,
+     * user, department, vendor, project, warehouse, workflow
      */
     @Column(name = "entity_type", nullable = false, length = 50)
     private String entityType;
@@ -72,6 +73,13 @@ public class Status {
     @Column(length = 20)
     private String color;
 
+    /**
+     * ✅ TRƯỜNG MỚI: Nhóm trạng thái
+     * Ví dụ: 'order' (đơn hàng), 'warehouse' (kho), 'user' (người dùng)
+     */
+    @Column(length = 50)
+    private String group;
+
     @Column(name = "created_at")
     private LocalDate createdAt;
 
@@ -82,7 +90,7 @@ public class Status {
      * Constructor tiện ích cho DataInitializer
      */
     public Status(String entityType, String name, String code, String description,
-                  Boolean isDefault, Boolean isFinal, Integer sortOrder, String color) {
+                  Boolean isDefault, Boolean isFinal, Integer sortOrder, String color, String group) {
         this.entityType = entityType;
         this.name = name;
         this.code = code;
@@ -91,6 +99,7 @@ public class Status {
         this.isFinal = isFinal != null ? isFinal : false;
         this.sortOrder = sortOrder != null ? sortOrder : 0;
         this.color = color;
+        this.group = group;
         this.createdAt = LocalDate.now();
         this.updatedAt = LocalDate.now();
     }

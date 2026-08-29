@@ -1,9 +1,10 @@
 // ================================================================
-// ITEMS - QUẢN LÝ DANH MỤC VẬT TƯ (DÙNG API) - ĐÃ SỬA LỖI NULL
+// ITEMS - Quản lý danh mục vật tư (sử dụng API) - ĐÃ TÍCH HỢP PHÂN QUYỀN
 // ================================================================
+let itemsPageState = { page: 1, perPage: 10 };
 
 // ====== RENDER DANH SÁCH VẬT TƯ ======
-async function renderItems() {
+async function renderItems(page = null) {
     try {
         const items = await api.getItems();
         // Cập nhật cache
@@ -18,10 +19,31 @@ async function renderItems() {
             (it.code || '').toLowerCase().includes(filter) ||
             (it.name || '').toLowerCase().includes(filter)
         );
-        const user = getUser();
-        const isAdmin = user && (user.role === 'ADMIN' || (typeof hasPermission === 'function' && hasPermission('items.edit')));
 
+        if (page) itemsPageState.page = page;
+        const perPage = getPageSize('items');
+        itemsPageState.perPage = perPage;
+        const paging = paginate(filtered, itemsPageState.page, perPage);
+
+        const user = getUser();
+
+        // ===== KIỂM TRA QUYỀN =====
+        const canCreate = hasPermission('items.create');
+        const canEdit = hasPermission('items.edit');
+        const canDelete = hasPermission('items.delete');
+
+        // Ẩn/hiện nút "Thêm mới"
+        const btnAdd = document.getElementById('btn-add-item');
+        if (btnAdd) {
+            btnAdd.style.display = canCreate ? 'inline-block' : 'none';
+        }
+
+        // ===== TẠO NỘI DUNG (chỉ filter + bảng, KHÔNG có header) =====
         let html = `
+            <div class="filter-bar">
+                <input type="text" id="item-filter" placeholder="Tìm theo mã hoặc tên..." style="flex:1;" />
+                <button class="btn btn-sm" onclick="renderItems()"><i class="fas fa-search"></i></button>
+            </div>
             <div class="table-responsive">
                 <table>
                     <thead>
@@ -39,18 +61,20 @@ async function renderItems() {
                     <tbody>
         `;
 
-        if (!filtered.length) {
+                if (!paging.items.length) {
             html += `<tr><td colspan="8" style="text-align:center; color:#999;">Không có dữ liệu</td></tr>`;
         }
 
-        for (const it of filtered) {
+        for (const it of paging.items) {
             const statusBadge = it.status === 'ACTIVE'
                 ? '<span class="badge badge-active"><i class="fas fa-check-circle"></i> Sử dụng</span>'
                 : '<span class="badge badge-inactive"><i class="fas fa-times-circle"></i> Ngừng</span>';
 
             let actions = `<button class="btn btn-info btn-sm" onclick="viewItem(${it.id})"><i class="fas fa-eye"></i></button>`;
-            if (isAdmin) {
+            if (canEdit) {
                 actions += ` <button class="btn btn-warning btn-sm" onclick="editItem(${it.id})"><i class="fas fa-edit"></i></button>`;
+            }
+            if (canDelete) {
                 actions += ` <button class="btn btn-danger btn-sm" onclick="deleteItem(${it.id})"><i class="fas fa-trash"></i></button>`;
             }
             html += `<tr>
@@ -65,17 +89,12 @@ async function renderItems() {
             </tr>`;
         }
 
-        html += `
-                    </tbody>
-                </table>
-            </div>
-        `;
+                html += `</tbody></table></div>`;
+        html += buildPaginationHTML(paging, 'renderItems', 'items');
         document.getElementById('items-container').innerHTML = html;
 
-        const btnAdd = document.getElementById('btn-add-item');
-        const btnExport = document.getElementById('btn-export-items');
-        if (btnAdd) btnAdd.style.display = isAdmin ? 'inline-block' : 'none';
-        if (btnExport) btnExport.style.display = isAdmin ? 'inline-block' : 'none';
+        // Gắn sự kiện cho filter
+        document.getElementById('item-filter')?.addEventListener('input', () => { itemsPageState.page = 1; renderItems(); });
 
     } catch (error) {
         showError('Không thể tải danh sách vật tư: ' + error.message);
@@ -83,72 +102,8 @@ async function renderItems() {
     }
 }
 
-// ====== XEM CHI TIẾT VẬT TƯ ======
-async function viewItem(id) {
-    try {
-        let item = window._itemsCache ? window._itemsCache.find(i => i.id === id) : null;
-        if (!item) {
-            const items = await api.getItems();
-            item = items.find(i => i.id === id);
-            if (item) {
-                if (typeof updateItemsCache === 'function') {
-                    updateItemsCache(items);
-                } else {
-                    window._itemsCache = items;
-                }
-            }
-        }
-        if (!item) {
-            showError('Không tìm thấy vật tư!');
-            return;
-        }
-
-        const inventory = await api.getInventory();
-        const warehouses = await api.getWarehouses();
-        const invData = inventory.filter(i => i.itemId === id);
-        let totalQty = 0;
-        let whHtml = '';
-        if (invData.length) {
-            whHtml = `<div style="margin-top:8px;"><strong>Tồn kho theo kho:</strong>
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; margin-top:4px;">`;
-            invData.forEach(inv => {
-                const wh = warehouses.find(w => w.id === inv.warehouseId);
-                const whName = wh ? wh.name : `Kho #${inv.warehouseId}`;
-                whHtml += `<div style="padding:4px 8px; background:#f8fafc; border-radius:4px; font-size:13px;">${whName}: <strong>${inv.quantity || 0}</strong></div>`;
-                totalQty += inv.quantity || 0;
-            });
-            whHtml += `</div></div>`;
-        }
-
-        showModal('Chi tiết vật tư', `
-            <div class="detail-grid">
-                <div><span class="label">Mã:</span> <span class="value"><strong>${item.code || '--'}</strong></span></div>
-                <div><span class="label">Tên:</span> <span class="value">${item.name || '--'}</span></div>
-                <div><span class="label">Nhóm:</span> <span class="value">${item.itemGroup || '--'}</span></div>
-                <div><span class="label">Quy cách/Model:</span> <span class="value">${item.model || '--'}</span></div>
-                <div><span class="label">ĐVT:</span> <span class="value">${item.unit || '--'}</span></div>
-                <div><span class="label">Đơn giá chuẩn:</span> <span class="value">${(item.standardPrice || 0).toLocaleString()} VND</span></div>
-                <div><span class="label">Trạng thái:</span> <span class="value">${item.status === 'ACTIVE' ? '🟢 Sử dụng' : '🔴 Ngừng'}</span></div>
-                <div><span class="label">Ngày tạo:</span> <span class="value">${item.createdAt || '--'}</span></div>
-                <div style="grid-column:1/-1;"><span class="label">Ghi chú:</span> <span class="value">${item.note || '--'}</span></div>
-                ${whHtml ? `<div style="grid-column:1/-1;"><span class="label">Tổng tồn kho:</span> <span class="value"><strong>${totalQty}</strong></span>${whHtml}</div>` : ''}
-            </div>
-            <div class="modal-actions">
-                <button class="btn btn-danger" onclick="closeModal()">Đóng</button>
-            </div>
-        `);
-    } catch (error) {
-        showError('Lỗi khi tải chi tiết vật tư: ' + error.message);
-    }
-}
-
 // ====== HIỂN THỊ MODAL THÊM MỚI ======
 function showAddItemModal() {
-    const user = getUser();
-    if (user.role !== 'ADMIN' && !(typeof hasPermission === 'function' && hasPermission('items.create'))) {
-        showWarning('Bạn không có quyền thêm vật tư');
-        return;
-    }
     showModal('Thêm vật tư mới', `
         <div class="form-group"><label>Mã vật tư</label><input id="f-item-code" placeholder="VTxxx" required></div>
         <div class="form-group"><label>Tên vật tư</label><input id="f-item-name" required></div>
@@ -172,6 +127,11 @@ function showAddItemModal() {
 
 // ====== LƯU VẬT TƯ MỚI ======
 async function saveItem() {
+    if (!hasPermission('items.create')) {
+        showWarning('Bạn không có quyền thêm vật tư!');
+        return;
+    }
+
     const code = document.getElementById('f-item-code').value.trim().toUpperCase();
     const name = document.getElementById('f-item-name').value.trim();
     if (!code || !name) {
@@ -200,8 +160,72 @@ async function saveItem() {
     }
 }
 
+// ====== XEM CHI TIẾT VẬT TƯ ======
+async function viewItem(id) {
+    try {
+        let item = window._itemsCache ? window._itemsCache.find(i => i.id === id) : null;
+        if (!item) {
+            const items = await api.getItems();
+            item = items.find(i => i.id === id);
+            if (item) {
+                if (typeof updateItemsCache === 'function') {
+                    updateItemsCache(items);
+                } else {
+                    window._itemsCache = items;
+                }
+            }
+        }
+        if (!item) {
+            showError('Không tìm thấy vật tư!');
+            return;
+        }
+
+        const inventory = await api.getInventory();
+        const warehouses = await api.getWarehouses();
+        const invData = inventory.filter(i => i.itemId === id || i.item_id === id);
+        let totalQty = 0;
+        let whHtml = '';
+        if (invData.length) {
+            whHtml = `<div style="margin-top:8px;"><strong>Tồn kho theo kho:</strong>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; margin-top:4px;">`;
+            invData.forEach(inv => {
+                const wh = warehouses.find(w => w.id === (inv.warehouseId || inv.warehouse_id));
+                const whName = wh ? wh.name : `Kho #${inv.warehouseId || inv.warehouse_id}`;
+                whHtml += `<div style="padding:4px 8px; background:#f8fafc; border-radius:4px; font-size:13px;">${whName}: <strong>${inv.quantity || 0}</strong></div>`;
+                totalQty += inv.quantity || 0;
+            });
+            whHtml += `</div></div>`;
+        }
+
+        showModal('Chi tiết vật tư', `
+            <div class="detail-grid">
+                <div><span class="label">Mã:</span> <span class="value"><strong>${item.code || '--'}</strong></span></div>
+                <div><span class="label">Tên:</span> <span class="value">${item.name || '--'}</span></div>
+                <div><span class="label">Nhóm:</span> <span class="value">${item.itemGroup || '--'}</span></div>
+                <div><span class="label">Quy cách/Model:</span> <span class="value">${item.model || '--'}</span></div>
+                <div><span class="label">ĐVT:</span> <span class="value">${item.unit || '--'}</span></div>
+                <div><span class="label">Đơn giá chuẩn:</span> <span class="value">${(item.standardPrice || 0).toLocaleString()} VND</span></div>
+                <div><span class="label">Trạng thái:</span> <span class="value">${item.status === 'ACTIVE' ? '🟢 Sử dụng' : '🔴 Ngừng'}</span></div>
+                <div><span class="label">Ngày tạo:</span> <span class="value">${item.createdAt || '--'}</span></div>
+                <div style="grid-column:1/-1;"><span class="label">Ghi chú:</span> <span class="value">${item.note || '--'}</span></div>
+                ${whHtml ? `<div style="grid-column:1/-1;"><span class="label">Tổng tồn kho:</span> <span class="value"><strong>${totalQty}</strong></span>${whHtml}</div>` : ''}
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-danger" onclick="closeModal()">Đóng</button>
+            </div>
+        `);
+    } catch (error) {
+        showError('Lỗi khi tải chi tiết vật tư: ' + error.message);
+    }
+}
+
 // ====== SỬA VẬT TƯ ======
 async function editItem(id) {
+    if (!hasPermission('items.edit')) {
+        showWarning('Bạn không có quyền sửa vật tư!');
+        return;
+    }
+
     try {
         let item = window._itemsCache ? window._itemsCache.find(i => i.id === id) : null;
         if (!item) {
@@ -276,6 +300,11 @@ async function updateItem(id) {
 
 // ====== XÓA VẬT TƯ ======
 async function deleteItem(id) {
+    if (!hasPermission('items.delete')) {
+        showWarning('Bạn không có quyền xóa vật tư!');
+        return;
+    }
+
     try {
         let item = window._itemsCache ? window._itemsCache.find(i => i.id === id) : null;
         if (!item) {
@@ -301,9 +330,6 @@ async function deleteItem(id) {
     }
 }
 
-// ====== SỰ KIỆN CHO NÚT THÊM ======
-document.getElementById('btn-add-item')?.addEventListener('click', showAddItemModal);
-
 // ====== EXPORT ======
 window.renderItems = renderItems;
 window.viewItem = viewItem;
@@ -313,4 +339,4 @@ window.deleteItem = deleteItem;
 window.saveItem = saveItem;
 window.showAddItemModal = showAddItemModal;
 
-console.log('✅ Items module updated to use API (fixed null display).');
+console.log('✅ Items module updated with permission checks.');

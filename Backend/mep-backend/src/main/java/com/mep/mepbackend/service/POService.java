@@ -1,9 +1,12 @@
 package com.mep.mepbackend.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mep.mepbackend.entity.ApprovalHistory;
 import com.mep.mepbackend.entity.PO;
 import com.mep.mepbackend.entity.User;
+import com.mep.mepbackend.entity.Workflow;
 import com.mep.mepbackend.exception.ResourceNotFoundException;
+import com.mep.mepbackend.repository.ApprovalHistoryRepository;
 import com.mep.mepbackend.repository.PORepository;
 import com.mep.mepbackend.repository.PRRepository;
 import com.mep.mepbackend.util.CurrentUserUtil;
@@ -12,6 +15,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -21,13 +26,33 @@ public class POService {
 
     private final PORepository poRepository;
     private final PRRepository prRepository;
+    private final ApprovalHistoryRepository approvalHistoryRepository;
     private final ObjectMapper objectMapper;
     private final WorkflowService workflowService;
     private final StatusService statusService;
     private final CurrentUserUtil currentUserUtil;
 
-    // ===== GETTERS =====
+    private static final List<String> PENDING_STATUSES = Arrays.asList(
+            "PENDING", "PENDING_PLANNING", "PENDING_PROJECT", "PENDING_CEO",
+            "PLANNING_APPROVED", "PROJECT_APPROVED"
+    );
 
+    // ===== HELPERS =====
+    private String generateCode(String prefix) {
+        long count = poRepository.count() + 1;
+        String code = prefix + "-" + String.format("%03d", count);
+        while (poRepository.existsByCode(code)) {
+            count++;
+            code = prefix + "-" + String.format("%03d", count);
+        }
+        return code;
+    }
+
+    private boolean isPendingStatus(String status) {
+        return PENDING_STATUSES.contains(status);
+    }
+
+    // ===== GETTERS =====
     public List<PO> getAll() {
         return poRepository.findAll();
     }
@@ -37,47 +62,25 @@ public class POService {
                 .orElseThrow(() -> new ResourceNotFoundException("PO not found with id: " + id));
     }
 
-    public PO getByCode(String code) {
-        return poRepository.findByCode(code)
-                .orElseThrow(() -> new ResourceNotFoundException("PO not found with code: " + code));
-    }
-
-    public List<PO> getByProjectCode(String projectCode) {
-        return poRepository.findByProjectCode(projectCode);
-    }
-
-    public List<PO> getByStatus(String status) {
-        return poRepository.findByStatus(status);
-    }
-
-    public List<PO> getByPrId(Long prId) {
-        return poRepository.findByPrId(prId);
-    }
-
-    public List<PO> getByVendorCode(String vendorCode) {
-        return poRepository.findByVendorCode(vendorCode);
-    }
-
     // ===== CREATE =====
-
     @Transactional
     public PO create(PO po) {
         if (!currentUserUtil.hasPermission("po.create")) {
             throw new RuntimeException("Bạn không có quyền tạo PO");
         }
 
-        long count = poRepository.count();
-        String nextCode = "PO-" + String.format("%03d", count + 1);
-        if (poRepository.existsByCode(nextCode)) {
-            long i = count + 2;
-            while (poRepository.existsByCode("PO-" + String.format("%03d", i))) i++;
-            nextCode = "PO-" + String.format("%03d", i);
-        }
+        po.setCode(generateCode("PO"));
+        Workflow activeWorkflow = workflowService.getActiveWorkflow("po");
+        po.setWorkflowId(activeWorkflow.getId());
 
         String defaultStatus = statusService.getDefaultStatus("po").getCode();
-        po.setCode(nextCode);
         po.setStatus(defaultStatus);
         po.setApprovalStep(1);
+
+        User currentUser = currentUserUtil.getCurrentUser();
+        po.setCreatedBy(currentUser.getId());
+        po.setCreatedByName(currentUser.getName());
+
         po.setCreatedAt(LocalDate.now());
         return poRepository.save(po);
     }
@@ -102,16 +105,23 @@ public class POService {
     }
 
     // ===== UPDATE =====
-
     @Transactional
     public PO update(Long id, PO details) {
         PO po = getById(id);
         if (!currentUserUtil.hasPermission("po.edit")) {
             throw new RuntimeException("Bạn không có quyền sửa PO");
         }
-        if (!"DRAFT".equals(po.getStatus()) && !"PENDING".equals(po.getStatus())) {
-            throw new RuntimeException("Chỉ có thể sửa PO ở trạng thái DRAFT hoặc PENDING");
+
+        if (!"DRAFT".equals(po.getStatus())) {
+            if (isPendingStatus(po.getStatus())) {
+                if (approvalHistoryRepository.existsByEntityTypeAndEntityId("PO", id)) {
+                    throw new RuntimeException("Không thể sửa PO vì đã được duyệt bước 1");
+                }
+            } else {
+                throw new RuntimeException("Chỉ có thể sửa PO ở trạng thái DRAFT hoặc PENDING chưa duyệt");
+            }
         }
+
         po.setProjectCode(details.getProjectCode());
         po.setProjectName(details.getProjectName());
         po.setVendorCode(details.getVendorCode());
@@ -123,7 +133,6 @@ public class POService {
     }
 
     // ===== SUBMIT =====
-
     @Transactional
     public void submit(Long id) {
         PO po = getById(id);
@@ -133,22 +142,39 @@ public class POService {
         if (!"DRAFT".equals(po.getStatus())) {
             throw new RuntimeException("Chỉ có thể gửi duyệt PO ở trạng thái DRAFT");
         }
-        po.setStatus("PENDING");
+
+        Workflow wf = workflowService.getById(po.getWorkflowId());
+        List<Map<String, Object>> steps = workflowService.getStepsByWorkflowId(wf.getId());
+        if (steps.isEmpty()) {
+            throw new RuntimeException("Workflow không có bước duyệt nào");
+        }
+
+        if (steps.size() == 1) {
+            if (!currentUserUtil.hasPermission("po.approve")) {
+                throw new RuntimeException("Bạn không có quyền duyệt PO");
+            }
+            approve(id);
+            return;
+        }
+
+        Map<String, Object> firstStep = steps.get(0);
+        String statusCode = (String) firstStep.get("statusCode");
+        po.setStatus(statusCode != null && !statusCode.isEmpty() ? statusCode : "PENDING");
         po.setApprovalStep(1);
         po.setUpdatedAt(LocalDate.now());
         poRepository.save(po);
     }
 
     // ===== APPROVE =====
-
     @Transactional
     public void approve(Long id) {
         PO po = getById(id);
-        if (!"PENDING".equals(po.getStatus())) {
+        if (!isPendingStatus(po.getStatus())) {
             throw new RuntimeException("PO không ở trạng thái chờ duyệt");
         }
 
-        List<Map<String, Object>> steps = workflowService.getStepsWithStatusByModule("po");
+        Workflow wf = workflowService.getById(po.getWorkflowId());
+        List<Map<String, Object>> steps = workflowService.getStepsByWorkflowId(wf.getId());
         int currentStep = po.getApprovalStep() != null ? po.getApprovalStep() : 1;
 
         Map<String, Object> step = steps.stream()
@@ -156,45 +182,45 @@ public class POService {
                 .findFirst()
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy bước duyệt " + currentStep));
 
-        String requiredRole = (String) step.get("role");
-        Integer requiredDeptId = step.get("departmentId") != null ? (Integer) step.get("departmentId") : null;
+        String permissionKey = (String) step.get("permissionKey");
+        Long requiredDeptId = step.get("departmentId") != null ? ((Number) step.get("departmentId")).longValue() : null;
+        if (!currentUserUtil.hasPermissionAndDepartment(permissionKey, requiredDeptId)) {
+            throw new RuntimeException("Bạn không có quyền duyệt bước này");
+        }
 
         User currentUser = currentUserUtil.getCurrentUser();
-
-        if (!currentUser.getRole().equals(requiredRole)) {
-            throw new RuntimeException("Bạn không có quyền duyệt bước này (yêu cầu role: " + requiredRole + ")");
-        }
-        if (requiredDeptId != null && (currentUser.getDepartmentId() == null ||
-                !currentUser.getDepartmentId().equals(Long.valueOf(requiredDeptId)))) {
-            throw new RuntimeException("Bạn không thuộc phòng ban được chỉ định để duyệt");
+        if (steps.size() > 1 && currentUser.getId().equals(po.getCreatedBy())) {
+            throw new RuntimeException("Bạn không thể tự duyệt PO do chính mình tạo");
         }
 
-        if (!currentUserUtil.hasPermission("po.approve")) {
-            throw new RuntimeException("Bạn không có quyền duyệt PO (user permission)");
-        }
-
-        String statusCode = (String) step.get("statusCode");
+        ApprovalHistory history = new ApprovalHistory();
+        history.setEntityType("PO");
+        history.setEntityId(po.getId());
+        history.setWorkflowId(wf.getId());
+        history.setStep(currentStep);
+        history.setApproverId(currentUser.getId());
+        history.setApproverName(currentUser.getName());
+        history.setStatusBefore(po.getStatus());
 
         if (currentStep == steps.size()) {
             po.setStatus("APPROVED");
         } else {
             po.setApprovalStep(currentStep + 1);
-            if (statusCode != null && !statusCode.isEmpty()) {
-                po.setStatus(statusCode);
-            } else {
-                po.setStatus("PENDING");
-            }
+            String nextStatusCode = workflowService.getStatusForStep(wf.getId(), currentStep + 1);
+            po.setStatus(nextStatusCode != null && !nextStatusCode.isEmpty() ? nextStatusCode : "PENDING");
         }
+        history.setStatusAfter(po.getStatus());
+
+        approvalHistoryRepository.save(history);
         po.setUpdatedAt(LocalDate.now());
         poRepository.save(po);
     }
 
     // ===== REJECT =====
-
     @Transactional
     public void reject(Long id) {
         PO po = getById(id);
-        if (!"PENDING".equals(po.getStatus())) {
+        if (!isPendingStatus(po.getStatus())) {
             throw new RuntimeException("PO không ở trạng thái chờ duyệt");
         }
         if (!currentUserUtil.hasPermission("po.reject")) {
@@ -206,7 +232,6 @@ public class POService {
     }
 
     // ===== DELETE =====
-
     @Transactional
     public void delete(Long id) {
         PO po = getById(id);
@@ -217,5 +242,19 @@ public class POService {
             throw new RuntimeException("Bạn không có quyền xóa PO");
         }
         poRepository.delete(po);
+    }
+    // ===== GETTERS BỔ SUNG =====
+    public PO getByCode(String code) {
+        return poRepository.findByCode(code)
+                .orElseThrow(() -> new ResourceNotFoundException("PO not found with code: " + code));
+    }
+
+    public List<PO> getByProjectCode(String projectCode) {
+        return poRepository.findByProjectCode(projectCode);
+    }
+
+
+    public List<PO> getByStatus(String status) {
+        return List.of();
     }
 }

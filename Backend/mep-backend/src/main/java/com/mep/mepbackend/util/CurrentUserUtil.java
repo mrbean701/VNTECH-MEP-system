@@ -43,15 +43,6 @@ public class CurrentUserUtil {
                 .orElseThrow(() -> new UnauthorizedException("Không tìm thấy user với email: " + email));
     }
 
-    public boolean hasRole(String role) {
-        try {
-            User user = getCurrentUser();
-            return user.getRole() != null && user.getRole().equals(role);
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
     public boolean isInDepartment(Long departmentId) {
         if (departmentId == null) return true;
         try {
@@ -62,28 +53,28 @@ public class CurrentUserUtil {
         }
     }
 
-    public boolean canApprove(String requiredRole, Long requiredDepartmentId) {
-        if (requiredRole == null) return true;
+    /**
+     * Kiểm tra xem user có quyền override phòng ban không.
+     * Chỉ sử dụng permission workflow.override, KHÔNG hardcode role CEO hay ADMIN.
+     */
+    private boolean hasOverridePermission() {
         try {
-            User user = getCurrentUser();
-            if (!user.getRole().equals(requiredRole)) return false;
-            if (requiredDepartmentId != null) {
-                return user.getDepartmentId() != null && user.getDepartmentId().equals(requiredDepartmentId);
-            }
-            return true;
+            return hasPermission("workflow.override");
         } catch (Exception e) {
             return false;
         }
     }
 
+    /**
+     * Kiểm tra quyền dựa trên:
+     * 1. Nếu user có permission workflow.override -> true (chỉ dùng cho override department, không phải toàn quyền)
+     * 2. UserPermission (nếu có) -> theo enabled
+     * 3. DepartmentPermission (nếu user có departmentId) -> theo enabled
+     * 4. Mặc định -> false
+     */
     public boolean hasPermission(String permissionKey) {
         try {
             User user = getCurrentUser();
-
-            // Admin luôn có toàn quyền
-            if ("ADMIN".equals(user.getRole())) {
-                return true;
-            }
 
             // Bước 1: User permission (ghi đè)
             Optional<UserPermission> userPermOpt =
@@ -107,6 +98,25 @@ public class CurrentUserUtil {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    /**
+     * Kiểm tra quyền và phòng ban (nếu có yêu cầu)
+     * Nếu user có permission workflow.override, bỏ qua kiểm tra phòng ban.
+     */
+    public boolean hasPermissionAndDepartment(String permissionKey, Long departmentId) {
+        if (permissionKey == null || permissionKey.isEmpty()) return true;
+        if (!hasPermission(permissionKey)) return false;
+
+        // Nếu user có permission workflow.override, bỏ qua kiểm tra department
+        if (hasOverridePermission()) {
+            return true;
+        }
+
+        if (departmentId != null) {
+            return isInDepartment(departmentId);
+        }
+        return true;
     }
 
     public boolean hasAnyPermission(String... permissionKeys) {

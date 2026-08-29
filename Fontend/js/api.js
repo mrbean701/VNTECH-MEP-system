@@ -28,7 +28,6 @@ async function apiRequest(endpoint, method = 'GET', body = null) {
         throw new Error(errorMessage);
     }
     
-    // Nếu status 204 No Content hoặc không có body, trả về null
     if (response.status === 204 || response.headers.get('content-length') === '0') {
         return null;
     }
@@ -158,6 +157,27 @@ async function getInventory() {
         }
     } catch(e) { console.warn('getInventory fallback:', e); }
     return getData('inventory') || [];
+}
+
+async function getInventoryByWarehouse(warehouseId) {
+    try {
+        const data = await apiRequest(`/inventory/warehouse/${warehouseId}`);
+        return extractArray(data) || [];
+    } catch(e) {
+        console.warn('getInventoryByWarehouse fallback:', e);
+        const all = await getInventory();
+        return (all || []).filter(i => (i.warehouseId || i.warehouse_id) === warehouseId);
+    }
+}
+
+// ====== WAREHOUSE CRUD ======
+async function createWarehouse(warehouse) { return apiRequest('/warehouses', 'POST', warehouse); }
+async function updateWarehouse(id, warehouse) { return apiRequest(`/warehouses/${id}`, 'PUT', warehouse); }
+async function deleteWarehouse(id) { return apiRequest(`/warehouses/${id}`, 'DELETE'); }
+
+// ====== INVENTORY CRUD ======
+async function updateInventoryQuantity(warehouseId, itemId, quantity) {
+    return apiRequest(`/inventory/warehouse/${warehouseId}/item/${itemId}?quantity=${quantity}`, 'PATCH');
 }
 
 async function getGRNs() {
@@ -311,7 +331,7 @@ async function deleteWorkflow(id) {
     return apiRequest(`/workflows/${id}`, 'DELETE');
 }
 
-// ====== WORKFLOW STEP-STATUS MAPPING (MỚI) ======
+// ====== WORKFLOW STEP-STATUS MAPPING ======
 async function getStepsWithStatus(module) {
     return apiRequest(`/workflows/module/${module}/steps-with-status`);
 }
@@ -332,7 +352,19 @@ async function updateWorkflowWithStatuses(id, payload) {
     return apiRequest(`/workflows/${id}/with-statuses`, 'PUT', payload);
 }
 
-// ====== STATUS API (MỚI) ======
+// ====== WORKFLOW BY ID (mới thêm) ======
+async function getWorkflowById(id) {
+    try {
+        const data = await apiRequest(`/workflows/${id}`);
+        return data;
+    } catch(e) {
+        console.warn('getWorkflowById fallback:', e);
+        const all = getData('workflows') || [];
+        return all.find(w => w.id === id) || null;
+    }
+}
+
+// ====== STATUS API ======
 async function getStatuses(entityType) {
     if (entityType) {
         return apiRequest(`/statuses/entity/${entityType}`);
@@ -478,6 +510,34 @@ async function deleteMinStock(id) { return apiRequest(`/min-stock/${id}`, 'DELET
 async function updateAutoReorderConfig(config) { return apiRequest('/auto-reorder/config', 'PUT', config); }
 async function checkAutoReorder() { return apiRequest('/auto-reorder/check', 'POST'); }
 
+async function getAutoReorderConfig() {
+    try {
+        const data = await apiRequest('/auto-reorder/config');
+        const obj = extractObject(data);
+        if (obj && obj.id) {
+            saveData('auto_reorder_config', obj);
+            return obj;
+        }
+    } catch(e) { console.warn('getAutoReorderConfig fallback:', e); }
+    return getData('auto_reorder_config') || { enabled: false, multiplier: 2 };
+}
+
+async function getAutoReorderRules() {
+    try {
+        const data = await apiRequest('/auto-reorder/rules');
+        const arr = extractArray(data);
+        if (arr && arr.length > 0) {
+            saveData('auto_reorder_rules', arr);
+            return arr;
+        }
+    } catch(e) { console.warn('getAutoReorderRules fallback:', e); }
+    return getData('auto_reorder_rules') || [];
+}
+
+async function createAutoReorderRule(rule) { return apiRequest('/auto-reorder/rules', 'POST', rule); }
+async function updateAutoReorderRule(id, rule) { return apiRequest(`/auto-reorder/rules/${id}`, 'PUT', rule); }
+async function deleteAutoReorderRule(id) { return apiRequest(`/auto-reorder/rules/${id}`, 'DELETE'); }
+
 async function createUser(user) { return apiRequest('/users', 'POST', user); }
 async function updateUser(id, user) { return apiRequest(`/users/${id}`, 'PUT', user); }
 async function deleteUser(id) { return apiRequest(`/users/${id}`, 'DELETE'); }
@@ -485,61 +545,56 @@ async function deleteUser(id) { return apiRequest(`/users/${id}`, 'DELETE'); }
 async function createDepartment(dept) { return apiRequest('/departments', 'POST', dept); }
 async function updateDepartment(id, dept) { return apiRequest(`/departments/${id}`, 'PUT', dept); }
 async function deleteDepartment(id) { return apiRequest(`/departments/${id}`, 'DELETE'); }
+async function getDepartmentSubs(id) { return apiRequest(`/departments/${id}/sub`); }
 
-// ====== ROLE PERMISSIONS (theo department) ======
-
-/**
- * Lấy danh sách permission của một role trong một department
- */
-async function getRoleDepartmentPermissions(role, departmentId) {
-    return apiRequest(`/permissions/role/${role}/department/${departmentId}`);
+// ====== POSITIONS ======
+async function getPositions() {
+    try {
+        const data = await apiRequest('/positions');
+        const arr = extractArray(data);
+        if (arr && arr.length > 0) {
+            saveData('positions', arr);
+            return arr;
+        }
+    } catch(e) { console.warn('getPositions fallback:', e); }
+    return getData('positions') || [];
 }
 
-/**
- * Gán (hoặc cập nhật) permission cho role trong department
- */
-async function assignRolePermission(role, departmentId, permissionKey, enabled = true) {
-    return apiRequest(`/permissions/role/${role}/department/${departmentId}/assign?permissionKey=${permissionKey}&enabled=${enabled}`, 'POST');
+async function getActivePositions() {
+    try {
+        const data = await apiRequest('/positions/active');
+        return extractArray(data) || [];
+    } catch(e) { console.warn('getActivePositions fallback:', e); }
+    return getData('positions') || [];
 }
 
-/**
- * Xóa permission của role trong department
- */
-async function removeRolePermission(role, departmentId, permissionKey) {
-    return apiRequest(`/permissions/role/${role}/department/${departmentId}/permission/${permissionKey}`, 'DELETE');
-}
+async function createPosition(pos) { return apiRequest('/positions', 'POST', pos); }
+async function updatePosition(id, pos) { return apiRequest(`/positions/${id}`, 'PUT', pos); }
+async function deletePosition(id) { return apiRequest(`/positions/${id}`, 'DELETE'); }
 
-/**
- * Lấy tất cả permission của một department
- */
+// ====== AUDIT LOG ======
+async function getAuditLogs() {
+    try {
+        const data = await apiRequest('/audit');
+        return extractArray(data) || [];
+    } catch(e) { console.warn('getAuditLogs fallback:', e); }
+    return getData('audit_logs') || [];
+}
+async function clearAuditLogs() { return apiRequest('/audit/clear', 'DELETE'); }
+
+// ====== DEPARTMENT PERMISSIONS ======
 async function getDepartmentPermissions(departmentId) {
     return apiRequest(`/permissions/department/${departmentId}`);
 }
 
-// ================================================================
-// DEPARTMENT PERMISSIONS (module-action)
-// ================================================================
-
-/**
- * Lấy tất cả quyền của một phòng ban
- */
-async function getDepartmentPermissions(departmentId) {
-    return apiRequest(`/permissions/department/${departmentId}`);
-}
-
-/**
- * Gán quyền cho phòng ban (không cần role)
- */
 async function assignDepartmentPermission(departmentId, permissionKey, enabled = true) {
     return apiRequest(`/permissions/department/${departmentId}/assign?permissionKey=${permissionKey}&enabled=${enabled}`, 'POST');
 }
 
-/**
- * Xóa quyền của phòng ban
- */
 async function removeDepartmentPermission(departmentId, permissionKey) {
     return apiRequest(`/permissions/department/${departmentId}/remove?permissionKey=${permissionKey}`, 'DELETE');
 }
+
 // ====== EXPORT RA WINDOW ======
 window.api = {
     // Auth
@@ -552,10 +607,12 @@ window.api = {
     getWorkflows, getWorkflowsByModule, getActiveWorkflow,
     createWorkflow, updateWorkflow, activateWorkflow,
     duplicateWorkflow, deleteWorkflow,
-    // Workflow Step-Status (mới)
+    // Workflow Step-Status
     getStepsWithStatus, getStatusForStep, getWorkflowStepStatuses,
     createWorkflowWithStatuses, updateWorkflowWithStatuses,
-    // Status (mới)
+    // Workflow by ID
+    getWorkflowById,
+    // Status
     getStatuses, getDefaultStatus, getFinalStatuses, getStatusByEntityAndCode,
     createStatus, updateStatus, deleteStatus, deleteStatusesByEntityType,
     // User Permissions
@@ -564,6 +621,8 @@ window.api = {
     createProject, updateProject, deleteProject,
     createVendor, updateVendor, deleteVendor,
     createItem, updateItem, deleteItem,
+    createWarehouse, updateWarehouse, deleteWarehouse,
+    getInventoryByWarehouse, updateInventoryQuantity,
     createMR, updateMR, deleteMR, submitMR, approveMR, rejectMR,
     createPR, updatePR, deletePR, submitPR, approvePR, rejectPR,
     createPO, updatePO, deletePO, submitPO, approvePO, rejectPO,
@@ -574,14 +633,15 @@ window.api = {
     submitMaterialReturn, approveMaterialReturn, confirmMaterialReturn, rejectMaterialReturn,
     saveMinStock, deleteMinStock,
     updateAutoReorderConfig, checkAutoReorder,
+    getAutoReorderConfig, getAutoReorderRules,
+    createAutoReorderRule, updateAutoReorderRule, deleteAutoReorderRule,
     createUser, updateUser, deleteUser,
-    createDepartment, updateDepartment, deleteDepartment,
-    getRoleDepartmentPermissions,
-    assignRolePermission,
-    removeRolePermission,
+    createDepartment, updateDepartment, deleteDepartment, getDepartmentSubs,
+    getPositions, getActivePositions, createPosition, updatePosition, deletePosition,
+    getAuditLogs, clearAuditLogs,
     getDepartmentPermissions,
     assignDepartmentPermission,
     removeDepartmentPermission,
 };
 
-console.log('✅ API layer updated with Status and Workflow-Step-Status endpoints');
+console.log('✅ API layer loaded successfully');

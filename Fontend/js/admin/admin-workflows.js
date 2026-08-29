@@ -173,12 +173,13 @@ function viewWorkflowDetailWithStep(id, currentStep) {
         const statusText = isCompleted ? 'Đã hoàn thành' : (isCurrent ? 'Đang thực hiện' : 'Chưa đến');
 
         const deptName = step.departmentId ? (getDepartmentsData().find(d => d.id === step.departmentId)?.name || 'N/A') : 'Không giới hạn';
-        const roleLabel = getRoles().find(r => r.value === step.role)?.label || step.role;
+        // Hiển thị permissionKey thay vì role
+        const permKey = step.permissionKey || step.role || '--';
         const stepStatus = statusMap[stepNumber] || '--';
         stepsHtml += `
             <tr>
                 <td style="text-align:center; font-weight:600;">${stepNumber}</td>
-                <td>${roleLabel}</td>
+                <td><span class="badge badge-info">${permKey}</span></td>
                 <td>${deptName}</td>
                 <td>${step.label || '--'}</td>
                 <td><span style="color:${statusColor};">${statusText}</span></td>
@@ -222,7 +223,7 @@ function viewWorkflowDetailWithStep(id, currentStep) {
                     <thead>
                         <tr>
                             <th style="width:60px;">#</th>
-                            <th>Vai trò</th>
+                            <th>Permission Key</th>
                             <th>Phòng ban</th>
                             <th>Tên bước</th>
                             <th>Trạng thái</th>
@@ -276,7 +277,7 @@ function showCreateWorkflowModal(module) {
                 <div id="wf-steps-container" style="max-height:300px; overflow-y:auto; padding:4px; border:1px solid #e2e8f0; border-radius:6px; background:white;">
                 </div>
                 <div style="font-size:12px; color:#888; margin-top:4px;">
-                    <i class="fas fa-info-circle"></i> Mỗi bước gồm: Vai trò (role), Phòng ban (tùy chọn), Tên bước và Trạng thái.
+                    <i class="fas fa-info-circle"></i> Mỗi bước gồm: Permission Key, Phòng ban (tùy chọn), Tên bước và Trạng thái.
                 </div>
             </div>
             <div class="modal-actions">
@@ -291,6 +292,7 @@ function showCreateWorkflowModal(module) {
     });
 }
 
+// ✅ Đã sửa: thay role bằng permissionKey
 function addWorkflowStepFieldWithStatus(containerId, module, stepData = null) {
     const container = document.getElementById(containerId);
     if (!container) return;
@@ -298,9 +300,10 @@ function addWorkflowStepFieldWithStatus(containerId, module, stepData = null) {
     stepCounter++;
     const stepNumber = container.querySelectorAll('.wf-step-row').length + 1;
 
-    const roles = getRoles();
-    const roleOpts = roles.map(r => 
-        `<option value="${r.value}" ${(stepData && stepData.role === r.value) ? 'selected' : ''}>${r.label}</option>`
+    // Lấy danh sách tất cả permission keys
+    const allPermissionKeys = getAllPermissionKeys();
+    const permOpts = allPermissionKeys.map(key => 
+        `<option value="${key}" ${(stepData && stepData.permissionKey === key) ? 'selected' : ''}>${key}</option>`
     ).join('');
 
     const departments = getDepartmentsData();
@@ -328,8 +331,9 @@ function addWorkflowStepFieldWithStatus(containerId, module, stepData = null) {
 
     row.innerHTML = `
         <span style="min-width:40px; font-weight:600; color:#1a3c6e;">#${stepNumber}</span>
-        <select class="wf-role-select" style="flex:1; min-width:120px; padding:6px; border:1px solid #ccc; border-radius:4px;">
-            ${roleOpts}
+        <select class="wf-permission-select" style="flex:1; min-width:180px; padding:6px; border:1px solid #ccc; border-radius:4px;">
+            <option value="">-- Chọn permission --</option>
+            ${permOpts}
         </select>
         <select class="wf-dept-select" style="flex:1; min-width:150px; padding:6px; border:1px solid #ccc; border-radius:4px;">
             ${deptOpts}
@@ -365,6 +369,7 @@ function updateStepNumbers(containerId) {
     });
 }
 
+// ✅ Đã sửa: lấy permissionKey thay vì role
 function collectWorkflowStepsWithStatus(containerId) {
     const container = document.getElementById(containerId);
     if (!container) return { steps: [], stepStatuses: [] };
@@ -372,13 +377,13 @@ function collectWorkflowStepsWithStatus(containerId) {
     const steps = [];
     const stepStatuses = [];
     rows.forEach((row, idx) => {
-        const role = row.querySelector('.wf-role-select')?.value || '';
+        const permissionKey = row.querySelector('.wf-permission-select')?.value || '';
         const deptId = row.querySelector('.wf-dept-select')?.value || '';
         const label = row.querySelector('.wf-label-input')?.value || `Bước ${idx + 1}`;
         const statusCode = row.querySelector('.wf-status-select')?.value || '';
         steps.push({
             step: idx + 1,
-            role: role,
+            permissionKey: permissionKey,
             label: label,
             departmentId: deptId ? parseInt(deptId) : null
         });
@@ -392,44 +397,45 @@ function collectWorkflowStepsWithStatus(containerId) {
     return { steps, stepStatuses };
 }
 
+// ✅ Đã sửa: dùng permissionKey thay vì role
 function loadDefaultStepsWithStatus(containerId, module) {
     const defaults = {
-        mr: [{ step: 1, role: 'SITE_COMMANDER', label: 'Chỉ huy trưởng duyệt', departmentId: 5 }],
+        mr: [{ step: 1, permissionKey: 'mr.approve', label: 'Chỉ huy trưởng duyệt', departmentId: 5 }],
         pr: [
-            { step: 1, role: 'PLANNING', label: 'Kế hoạch duyệt', departmentId: 2 },
-            { step: 2, role: 'PROJECT', label: 'Dự án duyệt', departmentId: 3 },
-            { step: 3, role: 'CEO', label: 'Tổng Giám đốc duyệt', departmentId: 1 }
+            { step: 1, permissionKey: 'pr.approve', label: 'Kế hoạch duyệt', departmentId: 2 },
+            { step: 2, permissionKey: 'pr.approve', label: 'Dự án duyệt', departmentId: 3 },
+            { step: 3, permissionKey: 'pr.approve', label: 'Tổng Giám đốc duyệt', departmentId: 1 }
         ],
         po: [
-            { step: 1, role: 'PLANNING', label: 'Kế hoạch duyệt', departmentId: 2 },
-            { step: 2, role: 'PROJECT', label: 'Dự án duyệt', departmentId: 3 },
-            { step: 3, role: 'CEO', label: 'Tổng Giám đốc duyệt', departmentId: 1 }
+            { step: 1, permissionKey: 'po.approve', label: 'Kế hoạch duyệt', departmentId: 2 },
+            { step: 2, permissionKey: 'po.approve', label: 'Dự án duyệt', departmentId: 3 },
+            { step: 3, permissionKey: 'po.approve', label: 'Tổng Giám đốc duyệt', departmentId: 1 }
         ],
         grn: [
-            { step: 1, role: 'PURCHASING', label: 'Lập phiếu', departmentId: 4 },
-            { step: 2, role: 'WAREHOUSE', label: 'Thủ kho nhận', departmentId: null },
-            { step: 3, role: 'QC', label: 'QC kiểm tra', departmentId: 6 },
-            { step: 4, role: 'PURCHASING', label: 'Hoàn thành', departmentId: 4 }
+            { step: 1, permissionKey: 'grn.create', label: 'Lập phiếu', departmentId: 4 },
+            { step: 2, permissionKey: 'grn.receive', label: 'Thủ kho nhận', departmentId: null },
+            { step: 3, permissionKey: 'grn.qc', label: 'QC kiểm tra', departmentId: 6 },
+            { step: 4, permissionKey: 'grn.complete', label: 'Hoàn thành', departmentId: 4 }
         ],
         sto: [
-            { step: 1, role: 'PURCHASING', label: 'Lập phiếu', departmentId: 4 },
-            { step: 2, role: 'PURCHASING', label: 'Duyệt', departmentId: 4 },
-            { step: 3, role: 'PURCHASING', label: 'Xuất kho', departmentId: 4 }
+            { step: 1, permissionKey: 'sto.create', label: 'Lập phiếu', departmentId: 4 },
+            { step: 2, permissionKey: 'sto.approve', label: 'Duyệt', departmentId: 4 },
+            { step: 3, permissionKey: 'sto.complete', label: 'Xuất kho', departmentId: 4 }
         ],
         issue: [
-            { step: 1, role: 'SITE_COMMANDER', label: 'Tạo phiếu', departmentId: 5 },
-            { step: 2, role: 'SITE_COMMANDER', label: 'Duyệt', departmentId: 5 },
-            { step: 3, role: 'PURCHASING', label: 'Cấp phát', departmentId: 4 },
-            { step: 4, role: 'SITE_COMMANDER', label: 'Xác nhận', departmentId: 5 }
+            { step: 1, permissionKey: 'issue.create', label: 'Tạo phiếu', departmentId: 5 },
+            { step: 2, permissionKey: 'issue.approve', label: 'Duyệt', departmentId: 5 },
+            { step: 3, permissionKey: 'issue.complete', label: 'Cấp phát', departmentId: 4 },
+            { step: 4, permissionKey: 'issue.confirm', label: 'Xác nhận', departmentId: 5 }
         ],
         materialreturn: [
-            { step: 1, role: 'SITE_COMMANDER', label: 'Tạo phiếu', departmentId: 5 },
-            { step: 2, role: 'PURCHASING', label: 'Thủ kho nhận', departmentId: 4 },
-            { step: 3, role: 'SITE_COMMANDER', label: 'Xác nhận', departmentId: 5 }
+            { step: 1, permissionKey: 'materialreturn.create', label: 'Tạo phiếu', departmentId: 5 },
+            { step: 2, permissionKey: 'materialreturn.approve', label: 'Thủ kho nhận', departmentId: 4 },
+            { step: 3, permissionKey: 'materialreturn.confirm', label: 'Xác nhận', departmentId: 5 }
         ]
     };
 
-    const steps = defaults[module] || [{ step: 1, role: 'ADMIN', label: 'Bước 1', departmentId: null }];
+    const steps = defaults[module] || [{ step: 1, permissionKey: 'admin.view', label: 'Bước 1', departmentId: null }];
     const container = document.getElementById(containerId);
     if (container) {
         container.innerHTML = '';
@@ -450,8 +456,8 @@ async function saveNewWorkflow() {
         return;
     }
     for (const step of steps) {
-        if (!step.role) {
-            showError(`Bước ${step.step} chưa chọn vai trò (role)`);
+        if (!step.permissionKey) {
+            showError(`Bước ${step.step} chưa chọn permission key`);
             return;
         }
         if (!step.label) {
@@ -526,7 +532,7 @@ async function editWorkflow(id) {
                 <div id="wf-edit-steps-container" style="max-height:300px; overflow-y:auto; padding:4px; border:1px solid #e2e8f0; border-radius:6px; background:white;">
                 </div>
                 <div style="font-size:12px; color:#888; margin-top:4px;">
-                    <i class="fas fa-info-circle"></i> Mỗi bước gồm: Vai trò (role), Phòng ban (tùy chọn), Tên bước và Trạng thái.
+                    <i class="fas fa-info-circle"></i> Mỗi bước gồm: Permission Key, Phòng ban (tùy chọn), Tên bước và Trạng thái.
                 </div>
             </div>
             <div class="modal-actions">
@@ -559,8 +565,8 @@ async function updateWorkflow(id) {
         return;
     }
     for (const step of steps) {
-        if (!step.role) {
-            showError(`Bước ${step.step} chưa chọn vai trò (role)`);
+        if (!step.permissionKey) {
+            showError(`Bước ${step.step} chưa chọn permission key`);
             return;
         }
         if (!step.label) {
@@ -591,38 +597,38 @@ async function createDefaultWorkflows() {
     if (!confirm('Tạo các workflow mặc định cho tất cả module? (sẽ không ghi đè nếu đã có)')) return;
     try {
         const defaults = {
-            mr: [{ step: 1, role: 'SITE_COMMANDER', label: 'Chỉ huy trưởng duyệt', departmentId: 5 }],
+            mr: [{ step: 1, permissionKey: 'mr.approve', label: 'Chỉ huy trưởng duyệt', departmentId: 5 }],
             pr: [
-                { step: 1, role: 'PLANNING', label: 'Kế hoạch duyệt', departmentId: 2 },
-                { step: 2, role: 'PROJECT', label: 'Dự án duyệt', departmentId: 3 },
-                { step: 3, role: 'CEO', label: 'Tổng Giám đốc duyệt', departmentId: 1 }
+                { step: 1, permissionKey: 'pr.approve', label: 'Kế hoạch duyệt', departmentId: 2 },
+                { step: 2, permissionKey: 'pr.approve', label: 'Dự án duyệt', departmentId: 3 },
+                { step: 3, permissionKey: 'pr.approve', label: 'Tổng Giám đốc duyệt', departmentId: 1 }
             ],
             po: [
-                { step: 1, role: 'PLANNING', label: 'Kế hoạch duyệt', departmentId: 2 },
-                { step: 2, role: 'PROJECT', label: 'Dự án duyệt', departmentId: 3 },
-                { step: 3, role: 'CEO', label: 'Tổng Giám đốc duyệt', departmentId: 1 }
+                { step: 1, permissionKey: 'po.approve', label: 'Kế hoạch duyệt', departmentId: 2 },
+                { step: 2, permissionKey: 'po.approve', label: 'Dự án duyệt', departmentId: 3 },
+                { step: 3, permissionKey: 'po.approve', label: 'Tổng Giám đốc duyệt', departmentId: 1 }
             ],
             grn: [
-                { step: 1, role: 'PURCHASING', label: 'Lập phiếu', departmentId: 4 },
-                { step: 2, role: 'WAREHOUSE', label: 'Thủ kho nhận', departmentId: null },
-                { step: 3, role: 'QC', label: 'QC kiểm tra', departmentId: 6 },
-                { step: 4, role: 'PURCHASING', label: 'Hoàn thành', departmentId: 4 }
+                { step: 1, permissionKey: 'grn.create', label: 'Lập phiếu', departmentId: 4 },
+                { step: 2, permissionKey: 'grn.receive', label: 'Thủ kho nhận', departmentId: null },
+                { step: 3, permissionKey: 'grn.qc', label: 'QC kiểm tra', departmentId: 6 },
+                { step: 4, permissionKey: 'grn.complete', label: 'Hoàn thành', departmentId: 4 }
             ],
             sto: [
-                { step: 1, role: 'PURCHASING', label: 'Lập phiếu', departmentId: 4 },
-                { step: 2, role: 'PURCHASING', label: 'Duyệt', departmentId: 4 },
-                { step: 3, role: 'PURCHASING', label: 'Xuất kho', departmentId: 4 }
+                { step: 1, permissionKey: 'sto.create', label: 'Lập phiếu', departmentId: 4 },
+                { step: 2, permissionKey: 'sto.approve', label: 'Duyệt', departmentId: 4 },
+                { step: 3, permissionKey: 'sto.complete', label: 'Xuất kho', departmentId: 4 }
             ],
             issue: [
-                { step: 1, role: 'SITE_COMMANDER', label: 'Tạo phiếu', departmentId: 5 },
-                { step: 2, role: 'SITE_COMMANDER', label: 'Duyệt', departmentId: 5 },
-                { step: 3, role: 'PURCHASING', label: 'Cấp phát', departmentId: 4 },
-                { step: 4, role: 'SITE_COMMANDER', label: 'Xác nhận', departmentId: 5 }
+                { step: 1, permissionKey: 'issue.create', label: 'Tạo phiếu', departmentId: 5 },
+                { step: 2, permissionKey: 'issue.approve', label: 'Duyệt', departmentId: 5 },
+                { step: 3, permissionKey: 'issue.complete', label: 'Cấp phát', departmentId: 4 },
+                { step: 4, permissionKey: 'issue.confirm', label: 'Xác nhận', departmentId: 5 }
             ],
             materialreturn: [
-                { step: 1, role: 'SITE_COMMANDER', label: 'Tạo phiếu', departmentId: 5 },
-                { step: 2, role: 'PURCHASING', label: 'Thủ kho nhận', departmentId: 4 },
-                { step: 3, role: 'SITE_COMMANDER', label: 'Xác nhận', departmentId: 5 }
+                { step: 1, permissionKey: 'materialreturn.create', label: 'Tạo phiếu', departmentId: 5 },
+                { step: 2, permissionKey: 'materialreturn.approve', label: 'Thủ kho nhận', departmentId: 4 },
+                { step: 3, permissionKey: 'materialreturn.confirm', label: 'Xác nhận', departmentId: 5 }
             ]
         };
 

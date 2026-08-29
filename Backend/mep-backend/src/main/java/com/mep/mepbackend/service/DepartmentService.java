@@ -15,6 +15,7 @@ import java.util.List;
 public class DepartmentService {
 
     private final DepartmentRepository departmentRepository;
+    private final AuditLogService auditLogService;
 
     public List<Department> getAll() {
         return departmentRepository.findAll();
@@ -36,7 +37,10 @@ public class DepartmentService {
             throw new RuntimeException("Mã phòng ban đã tồn tại");
         }
         department.setCreatedAt(LocalDate.now());
-        return departmentRepository.save(department);
+        Department saved = departmentRepository.save(department);
+        auditLogService.log("CREATE", "DEPARTMENT", String.valueOf(saved.getId()),
+                "Tạo phòng ban " + saved.getName() + " (" + saved.getCode() + ")", null);
+        return saved;
     }
 
     @Transactional
@@ -46,13 +50,28 @@ public class DepartmentService {
         dept.setName(details.getName());
         dept.setManagerId(details.getManagerId());
         dept.setManagerName(details.getManagerName());
+        dept.setParentId(details.getParentId());
         dept.setUpdatedAt(LocalDate.now());
-        return departmentRepository.save(dept);
+        Department saved = departmentRepository.save(dept);
+        auditLogService.log("UPDATE", "DEPARTMENT", String.valueOf(id),
+                "Cập nhật phòng ban " + saved.getName(), null);
+        return saved;
+    }
+
+    public List<Department> getSubDepartments(Long id) {
+        return departmentRepository.findByParentId(id);
     }
 
     @Transactional
     public void delete(Long id) {
         Department dept = getById(id);
+        long subCount = departmentRepository.countByParentId(id);
+        if (subCount > 0) {
+            throw new RuntimeException("Không thể xóa phòng ban đang có phòng ban con");
+        }
         departmentRepository.delete(dept);
+        auditLogService.log("DELETE", "DEPARTMENT", String.valueOf(id),
+                "Xóa phòng ban " + dept.getName(), null);
     }
 }
+

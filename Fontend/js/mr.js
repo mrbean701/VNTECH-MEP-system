@@ -1,48 +1,90 @@
 // ================================================================
-// MR (Material Request) - SỬ DỤNG API - ĐÃ SỬA LỖI NULL
+// MR (Material Request) - SỬ DỤNG API - HỖ TRỢ WORKFLOW ĐỘNG
 // ================================================================
+let mrPageState = { page: 1, perPage: 10 };
+
 
 // ====== HÀM LẤY ACTION ======
 function getMRActions(mr) {
     const user = getUser();
     let actions = '';
-    const canEdit = (user.role === 'ADMIN') || (user.id === mr.createdBy && (mr.status === 'PENDING' || mr.status === 'DRAFT'));
+
     actions += `<button class="btn btn-info btn-sm" onclick="viewMR(${mr.id})"><i class="fas fa-eye"></i></button>`;
+
+    // Quyền sửa: DRAFT hoặc PENDING chưa có lịch sử duyệt
+    const canEdit = hasPermission('mr.edit') && 
+                   (mr.status === 'DRAFT' || mr.status === 'PENDING') && 
+                   (user?.role === 'ADMIN' || user?.id === mr.createdBy);
     if (canEdit) {
         actions += ` <button class="btn btn-warning btn-sm" onclick="editMR(${mr.id})"><i class="fas fa-edit"></i></button>`;
     }
-    if (user.role === 'ADMIN') {
+
+    // Quyền xóa: chỉ DRAFT
+    const canDelete = hasPermission('mr.delete') && 
+                     (user?.role === 'ADMIN' || user?.id === mr.createdBy) && 
+                     mr.status === 'DRAFT';
+    if (canDelete) {
         actions += ` <button class="btn btn-danger btn-sm" onclick="deleteMR(${mr.id})"><i class="fas fa-trash"></i></button>`;
     }
-    
-    if (mr.status === 'DRAFT' && (user.role === 'ADMIN' || user.id === mr.createdBy)) {
+
+    // ✅ Gửi duyệt: chỉ cần có quyền submit và status DRAFT (không cần là người tạo)
+    const canSubmit = hasPermission('mr.submit') && mr.status === 'DRAFT';
+    if (canSubmit) {
         actions += ` <button class="btn btn-success btn-sm" onclick="submitMR(${mr.id})">Gửi duyệt</button>`;
     }
-    
-    if (mr.status === 'PENDING' && user.role === 'SITE_COMMANDER') {
-        actions += ` <button class="btn btn-success btn-sm" onclick="approveMR(${mr.id})">Duyệt</button> <button class="btn btn-danger btn-sm" onclick="rejectMR(${mr.id})">Từ chối</button>`;
+
+    // Duyệt: PENDING và có quyền approve (backend sẽ kiểm tra workflow)
+    if (hasPermission('mr.approve') && mr.status === 'PENDING') {
+        actions += ` <button class="btn btn-success btn-sm" onclick="approveMR(${mr.id})">Duyệt</button>`;
+        actions += ` <button class="btn btn-danger btn-sm" onclick="rejectMR(${mr.id})">Từ chối</button>`;
     }
-    if (mr.status === 'APPROVED' && user.role === 'PURCHASING') {
+
+    // Tạo PR từ MR: chỉ APPROVED
+    const canCreatePR = hasPermission('pr.create') && mr.status === 'APPROVED';
+    if (canCreatePR) {
         actions += ` <button class="btn btn-warning btn-sm" onclick="createPRFromMR(${mr.id})">Tạo PR</button>`;
     }
+
     return actions || '-';
 }
 
 // ====== RENDER DANH SÁCH MR ======
-async function renderMR() {
+async function renderMR(page = null) {
     try {
         const mrs = await api.getMRs();
         const filter = document.getElementById('mr-filter')?.value?.toLowerCase() || '';
         const statusFilter = document.getElementById('mr-status-filter')?.value || '';
-        
+
         const filtered = mrs.filter(m => {
             const matchCode = (m.code || '').toLowerCase().includes(filter);
             const matchProject = (m.projectName || m.projectCode || '').toLowerCase().includes(filter);
             const matchStatus = statusFilter ? m.status === statusFilter : true;
             return (matchCode || matchProject) && matchStatus;
         });
-        
+
+        if (page) mrPageState.page = page;
+        const perPage = getPageSize('mr');
+        mrPageState.perPage = perPage;
+        const paging = paginate(filtered, mrPageState.page, perPage);
+
+        const canCreate = hasPermission('mr.create');
+        const btnCreate = document.getElementById('btn-create-mr');
+        if (btnCreate) {
+            btnCreate.style.display = canCreate ? 'inline-block' : 'none';
+        }
+
         let html = `
+            <div class="filter-bar">
+                <input type="text" id="mr-filter" placeholder="Tìm theo mã hoặc dự án..." style="flex:1;" />
+                <select id="mr-status-filter">
+                    <option value="">Tất cả</option>
+                    <option value="DRAFT">DRAFT</option>
+                    <option value="PENDING">PENDING</option>
+                    <option value="APPROVED">APPROVED</option>
+                    <option value="REJECTED">REJECTED</option>
+                </select>
+                <button class="btn btn-sm" onclick="renderMR()"><i class="fas fa-search"></i></button>
+            </div>
             <div class="table-responsive">
                 <table>
                     <thead>
@@ -55,10 +97,14 @@ async function renderMR() {
                             <th>Hành động</th>
                         </tr>
                     </thead>
-                    <tbody>`;
-        if (!filtered.length) html += `<tr><td colspan="6" style="text-align:center; color:#999;">Không có dữ liệu</td></tr>`;
-        
-        for (const m of filtered) {
+                    <tbody>
+        `;
+
+        if (!paging.items.length) {
+            html += `<tr><td colspan="6" style="text-align:center; color:#999;">Không có dữ liệu</td></tr>`;
+        }
+
+        for (const m of paging.items) {
             let itemsStr = '';
             try {
                 if (m.items) {
@@ -66,82 +112,46 @@ async function renderMR() {
                     itemsStr = items.map(it => `${getItemCode(it.itemId)} (${it.quantity})`).join(', ');
                 }
             } catch (e) { itemsStr = 'Lỗi parse'; }
-            
+
             const statusBadge = getStatusBadge(m.status);
             const actions = getMRActions(m);
             const projectId = getProjectIdByCode(m.projectCode);
+            const projectLink = projectId ?
+                `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="viewProject(${projectId})">${m.projectName || m.projectCode || '--'}</span>` :
+                (m.projectName || m.projectCode || '--');
+
             html += `<tr>
                 <td style="cursor:pointer; color:#1a3c6e; font-weight:500;" onclick="viewMR(${m.id})">${m.code || '--'}</td>
-                <td style="cursor:pointer; color:#1a3c6e;" onclick="${projectId ? `viewProject(${projectId})` : 'alert("Không tìm thấy dự án")'}">${m.projectName || m.projectCode || '--'}</td>
+                <td>${projectLink}</td>
                 <td>${itemsStr}</td>
                 <td>${m.needDate || ''}</td>
                 <td>${statusBadge}</td>
                 <td>${actions}</td>
             </tr>`;
         }
+
         html += `</tbody></table></div>`;
+        html += buildPaginationHTML(paging, 'renderMR', 'mr');
         document.getElementById('mr-container').innerHTML = html;
+
+        const filterInput = document.getElementById('mr-filter');
+        const statusSelect = document.getElementById('mr-status-filter');
+        if (filterInput) {
+            filterInput.removeEventListener('input', renderMR);
+            filterInput.addEventListener('input', () => { mrPageState.page = 1; renderMR(); });
+        }
+        if (statusSelect) {
+            statusSelect.removeEventListener('change', renderMR);
+            statusSelect.addEventListener('change', () => { mrPageState.page = 1; renderMR(); });
+        }
+
     } catch (error) {
         showError('Không thể tải danh sách MR: ' + error.message);
         console.error('renderMR error:', error);
     }
 }
 
-// ====== XEM CHI TIẾT MR ======
-async function viewMR(id) {
-    try {
-        let mr = await api.getMRById ? await api.getMRById(id) : null;
-        if (!mr) {
-            const mrs = await api.getMRs();
-            mr = mrs.find(m => m.id === id);
-            if (!mr) {
-                showError('Không tìm thấy MR!');
-                return;
-            }
-        }
-        
-        let items = [];
-        try {
-            if (mr.items) {
-                items = typeof mr.items === 'string' ? JSON.parse(mr.items) : mr.items;
-            }
-        } catch (e) { items = []; }
-        
-        const itemsHtml = buildItemsTable(items);
-        const mrSteps = [{ id: 1, label: 'Chỉ huy trưởng' }];
-        const approvalHtml = renderApprovalProgress(mr.status, mr.status === 'APPROVED' ? 1 : 1, mrSteps);
-        const projectId = getProjectIdByCode(mr.projectCode);
-        const projectLink = projectId ? 
-            `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="closeModal(); viewProject(${projectId});">${mr.projectName || mr.projectCode || '--'}</span>` :
-            (mr.projectName || mr.projectCode || '--');
-        
-        showModal('Chi tiết MR', `
-            <div class="detail-grid">
-                <div><span class="label">Mã MR:</span> <span class="value">${mr.code || '--'}</span></div>
-                <div><span class="label">Ngày tạo:</span> <span class="value">${mr.createdAt || ''}</span></div>
-                <div><span class="label">Dự án:</span> <span class="value">${projectLink}</span></div>
-                <div><span class="label">Người yêu cầu:</span> <span class="value">${mr.requester || mr.createdByName || '--'}</span></div>
-                <div><span class="label">Ngày cần:</span> <span class="value">${mr.needDate || ''}</span></div>
-                <div><span class="label">Mục đích/Khu vực:</span> <span class="value">${mr.purpose || ''}</span></div>
-                <div style="grid-column:1/-1;"><span class="label">Tiến độ duyệt:</span><br>${approvalHtml}</div>
-                <div style="grid-column:1/-1;"><span class="label">Danh sách vật tư:</span><br>${itemsHtml}</div>
-                <div style="grid-column:1/-1;"><span class="label">Ghi chú:</span> <span class="value">${mr.note || ''}</span></div>
-            </div>
-            <div class="modal-actions">
-                <button class="btn btn-info" onclick="printMR(${mr.id}); closeModal();"><i class="fas fa-print"></i> In phiếu</button>
-                <button class="btn btn-danger" onclick="closeModal()">Đóng</button>
-            </div>
-        `);
-    } catch (error) {
-        showError('Lỗi khi tải chi tiết MR: ' + error.message);
-    }
-}
-
 // ====== TẠO MR MỚI (MODAL) ======
-document.getElementById('btn-create-mr')?.addEventListener('click', function() {
-    showCreateMRModal();
-});
-
 function showCreateMRModal() {
     api.getProjects().then(projects => {
         const projectOpts = projects.map(p => `<option value="${p.code}">${p.code} - ${p.name}</option>`).join('');
@@ -166,23 +176,28 @@ function showCreateMRModal() {
 
 // ====== LƯU MR ======
 async function saveMR() {
+    if (!hasPermission('mr.create')) {
+        showWarning('Bạn không có quyền tạo MR!');
+        return;
+    }
+
     const projectCode = document.getElementById('f-mr-project').value;
     const needDate = document.getElementById('f-mr-needdate').value;
     const purpose = document.getElementById('f-mr-purpose').value.trim();
     const requester = document.getElementById('f-mr-requester').value.trim();
     const container = document.getElementById('mr-items-container');
     const items = collectItemsFromForm(container);
-    
+
     if (!projectCode || items.length === 0) {
         showError('Vui lòng chọn dự án và ít nhất một vật tư');
         return;
     }
-    
+
     try {
         const projects = await api.getProjects();
         const proj = projects.find(p => p.code === projectCode);
         const user = getUser();
-        
+
         const newMR = {
             projectCode,
             projectName: proj ? proj.name : '',
@@ -192,7 +207,7 @@ async function saveMR() {
             requester: requester || user.name,
             note: document.getElementById('f-mr-note').value.trim(),
         };
-        
+
         await api.createMR(newMR);
         closeModal();
         await renderMR();
@@ -202,27 +217,118 @@ async function saveMR() {
     }
 }
 
+// ====== XEM CHI TIẾT MR ======
+async function viewMR(id) {
+    try {
+        let mr = null;
+        const mrs = await api.getMRs();
+        mr = mrs.find(m => m.id === id);
+        if (!mr) {
+            showError('Không tìm thấy MR!');
+            return;
+        }
+
+        let items = [];
+        try {
+            if (mr.items) {
+                items = typeof mr.items === 'string' ? JSON.parse(mr.items) : mr.items;
+            }
+        } catch (e) { items = []; }
+
+        const itemsHtml = buildItemsTable(items);
+        
+        // Lấy workflow steps từ workflowId của MR
+        let stepsConfig = [{ id: 1, label: 'Chỉ huy trưởng' }];
+        if (mr.workflowId) {
+            try {
+                const wf = await api.getWorkflowById ? await api.getWorkflowById(mr.workflowId) : null;
+                if (wf && wf.steps) {
+                    const steps = JSON.parse(wf.steps);
+                    stepsConfig = steps.map(s => ({
+                        id: s.step || s.id,
+                        label: s.label || `Bước ${s.step || s.id}`
+                    }));
+                }
+            } catch (e) {
+                console.warn('Không lấy được workflow steps:', e);
+                // Fallback: lấy steps từ module
+                try {
+                    const workflowSteps = await api.getStepsWithStatus('mr');
+                    if (workflowSteps && workflowSteps.length > 0) {
+                        stepsConfig = workflowSteps.map(s => ({
+                            id: s.step,
+                            label: s.label || `Bước ${s.step}`
+                        }));
+                    }
+                } catch (e2) {}
+            }
+        } else {
+            // Fallback: lấy steps từ module
+            try {
+                const workflowSteps = await api.getStepsWithStatus('mr');
+                if (workflowSteps && workflowSteps.length > 0) {
+                    stepsConfig = workflowSteps.map(s => ({
+                        id: s.step,
+                        label: s.label || `Bước ${s.step}`
+                    }));
+                }
+            } catch (e) {}
+        }
+
+        const approvalHtml = renderApprovalProgress(mr.status, mr.approvalStep || 1, stepsConfig);
+
+        const projectId = getProjectIdByCode(mr.projectCode);
+        const projectLink = projectId ?
+            `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="closeModal(); viewProject(${projectId});">${mr.projectName || mr.projectCode || '--'}</span>` :
+            (mr.projectName || mr.projectCode || '--');
+
+        showModal('Chi tiết MR', `
+            <div class="detail-grid">
+                <div><span class="label">Mã MR:</span> <span class="value">${mr.code || '--'}</span></div>
+                <div><span class="label">Ngày tạo:</span> <span class="value">${mr.createdAt || ''}</span></div>
+                <div><span class="label">Dự án:</span> <span class="value">${projectLink}</span></div>
+                <div><span class="label">Người yêu cầu:</span> <span class="value">${mr.requester || mr.createdByName || '--'}</span></div>
+                <div><span class="label">Ngày cần:</span> <span class="value">${mr.needDate || ''}</span></div>
+                <div><span class="label">Mục đích/Khu vực:</span> <span class="value">${mr.purpose || ''}</span></div>
+                <div><span class="label">Trạng thái:</span> <span class="value">${getStatusBadge(mr.status)}</span></div>
+                <div style="grid-column:1/-1;"><span class="label">Tiến độ duyệt:</span><br>${approvalHtml}</div>
+                <div style="grid-column:1/-1;"><span class="label">Danh sách vật tư:</span><br>${itemsHtml}</div>
+                <div style="grid-column:1/-1;"><span class="label">Ghi chú:</span> <span class="value">${mr.note || ''}</span></div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-info" onclick="printMR(${mr.id}); closeModal();"><i class="fas fa-print"></i> In phiếu</button>
+                <button class="btn btn-danger" onclick="closeModal()">Đóng</button>
+            </div>
+        `);
+    } catch (error) {
+        showError('Lỗi khi tải chi tiết MR: ' + error.message);
+    }
+}
+
 // ====== SỬA MR ======
 async function editMR(id) {
+    if (!hasPermission('mr.edit')) {
+        showWarning('Bạn không có quyền sửa MR!');
+        return;
+    }
+
     try {
-        let mr = await api.getMRById ? await api.getMRById(id) : null;
+        let mr = null;
+        const mrs = await api.getMRs();
+        mr = mrs.find(m => m.id === id);
         if (!mr) {
-            const mrs = await api.getMRs();
-            mr = mrs.find(m => m.id === id);
-            if (!mr) {
-                showError('Không tìm thấy MR!');
-                return;
-            }
+            showError('Không tìm thấy MR!');
+            return;
         }
         if (mr.status !== 'DRAFT' && mr.status !== 'PENDING') {
             showWarning('Chỉ có thể sửa MR ở trạng thái DRAFT hoặc PENDING');
             return;
         }
-        
+
         const projects = await api.getProjects();
         const projectOpts = projects.map(p =>
             `<option value="${p.code}" ${p.code === mr.projectCode ? 'selected' : ''}>${p.code} - ${p.name}</option>`).join('');
-        
+
         let itemsData = [{ itemId: '', quantity: '' }];
         try {
             if (mr.items) {
@@ -230,7 +336,7 @@ async function editMR(id) {
                 if (!itemsData.length) itemsData = [{ itemId: '', quantity: '' }];
             }
         } catch (e) { itemsData = [{ itemId: '', quantity: '' }]; }
-        
+
         showModal('Sửa Material Request', `
             <div class="form-group"><label>Dự án</label>
                 <select id="f-mr-project">${projectOpts}</select>
@@ -260,16 +366,16 @@ async function updateMR(id) {
     const requester = document.getElementById('f-mr-requester').value.trim();
     const container = document.getElementById('mr-items-container');
     const items = collectItemsFromForm(container);
-    
+
     if (!projectCode || items.length === 0) {
         showError('Vui lòng chọn dự án và ít nhất một vật tư');
         return;
     }
-    
+
     try {
         const projects = await api.getProjects();
         const proj = projects.find(p => p.code === projectCode);
-        
+
         const updatedMR = {
             projectCode,
             projectName: proj ? proj.name : '',
@@ -279,7 +385,7 @@ async function updateMR(id) {
             requester: requester,
             note: document.getElementById('f-mr-note').value.trim(),
         };
-        
+
         await api.updateMR(id, updatedMR);
         closeModal();
         await renderMR();
@@ -291,6 +397,10 @@ async function updateMR(id) {
 
 // ====== GỬI DUYỆT ======
 async function submitMR(id) {
+    if (!hasPermission('mr.submit')) {
+        showWarning('Bạn không có quyền gửi duyệt MR!');
+        return;
+    }
     try {
         await api.submitMR(id);
         await renderMR();
@@ -302,6 +412,10 @@ async function submitMR(id) {
 
 // ====== DUYỆT MR ======
 async function approveMR(id) {
+    if (!hasPermission('mr.approve')) {
+        showWarning('Bạn không có quyền duyệt MR!');
+        return;
+    }
     try {
         await api.approveMR(id);
         await renderMR();
@@ -313,6 +427,10 @@ async function approveMR(id) {
 
 // ====== TỪ CHỐI MR ======
 async function rejectMR(id) {
+    if (!hasPermission('mr.reject')) {
+        showWarning('Bạn không có quyền từ chối MR!');
+        return;
+    }
     try {
         await api.rejectMR(id);
         await renderMR();
@@ -324,6 +442,10 @@ async function rejectMR(id) {
 
 // ====== XÓA MR ======
 async function deleteMR(id) {
+    if (!hasPermission('mr.delete')) {
+        showWarning('Bạn không có quyền xóa MR!');
+        return;
+    }
     if (!confirm('Xóa MR này?')) return;
     try {
         await api.deleteMR(id);
@@ -336,6 +458,10 @@ async function deleteMR(id) {
 
 // ====== TẠO PR TỪ MR ======
 function createPRFromMR(mrId) {
+    if (!hasPermission('pr.create')) {
+        showWarning('Bạn không có quyền tạo PR!');
+        return;
+    }
     window.navigateTo('pr');
     setTimeout(() => {
         if (typeof showCreatePRFromMRModal === 'function') {
@@ -364,5 +490,6 @@ window.rejectMR = rejectMR;
 window.createPRFromMR = createPRFromMR;
 window.printMR = printMR;
 window.getMRActions = getMRActions;
+window.showCreateMRModal = showCreateMRModal;
 
-console.log('✅ MR module updated to use API (fixed null display).');
+console.log('✅ MR module updated with dynamic workflow support.');

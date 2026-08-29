@@ -26,20 +26,33 @@ public class User {
     private String name;
 
     @Column(nullable = false, length = 50)
-    private String role; // ADMIN, CEO, PLANNING, PROJECT, PURCHASING, SITE_COMMANDER, QC
+    private String role;
 
     @Column(name = "department_id")
-    private Long departmentId; // ✅ Đã có - liên kết với bảng departments
+    private Long departmentId;
 
     @Column(length = 100)
-    private String department; // Tên phòng ban (denormalized)
+    private String department;
 
     @Column(length = 100)
     private String position;
+
+    @Column(length = 255)
+    private String address;
+
+    @Column(length = 20)
+    private String phone;
+
+    @Column(length = 100)
+    private String education;
 
     @Column(name = "created_at")
     private LocalDate createdAt;
 
     @Column(name = "updated_at")
     private LocalDate updatedAt;
+
+    // ✅ Trường tạm thời (không lưu database)
+    @Transient
+    private Boolean grantAllDeptPermissions;
 }

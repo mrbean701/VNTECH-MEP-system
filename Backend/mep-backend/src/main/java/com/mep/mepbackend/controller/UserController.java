@@ -2,6 +2,7 @@ package com.mep.mepbackend.controller;
 
 import com.mep.mepbackend.entity.User;
 import com.mep.mepbackend.service.UserService;
+import com.mep.mepbackend.util.CurrentUserUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
@@ -14,6 +15,7 @@ import java.util.List;
 public class UserController {
 
     private final UserService userService;
+    private final CurrentUserUtil currentUserUtil;
 
     @GetMapping
     public List<User> getAll() {
@@ -30,13 +32,11 @@ public class UserController {
         return userService.getByEmail(email);
     }
 
-    // ✅ Lấy user theo role
     @GetMapping("/role/{role}")
     public List<User> getByRole(@PathVariable String role) {
         return userService.getByRole(role);
     }
 
-    // ✅ Lấy user theo departmentId
     @GetMapping("/department/{departmentId}")
     public List<User> getByDepartment(@PathVariable Long departmentId) {
         return userService.getByDepartmentId(departmentId);
@@ -51,6 +51,17 @@ public class UserController {
     @PutMapping("/{id}")
     public User update(@PathVariable Long id, @RequestBody User user) {
         return userService.update(id, user);
+    }
+
+    // ===== PHƯƠNG THỨC MỚI: Cập nhật hồ sơ cá nhân =====
+    @PatchMapping("/{id}/profile")
+    public User updateProfile(@PathVariable Long id, @RequestBody User user) {
+        User currentUser = currentUserUtil.getCurrentUser();
+        // Chỉ cho phép user tự sửa hồ sơ của mình, hoặc ADMIN sửa cho bất kỳ ai
+        if (!currentUser.getId().equals(id) && !"ADMIN".equals(currentUser.getRole())) {
+            throw new RuntimeException("Bạn chỉ có thể cập nhật hồ sơ của chính mình");
+        }
+        return userService.updateProfile(id, user);
     }
 
     @DeleteMapping("/{id}")

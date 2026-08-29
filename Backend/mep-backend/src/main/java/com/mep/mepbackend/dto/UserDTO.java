@@ -15,4 +15,6 @@ public class UserDTO {
     private LocalDate createdAt;
     private LocalDate updatedAt;
     // Không bao gồm password
+    private Boolean grantAllDeptPermissions; // Gán toàn bộ quyền phòng ban cho user
+
 }

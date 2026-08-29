@@ -1,9 +1,10 @@
 // ================================================================
-// VENDORS - QUẢN LÝ NHÀ CUNG CẤP (SỬ DỤNG API) - ĐÃ SỬA LỖI NULL
+// VENDORS - QUẢN LÝ NHÀ CUNG CẤP (SỬ DỤNG API) - ĐÃ TÍCH HỢP PHÂN QUYỀN
 // ================================================================
+let vendorsPageState = { page: 1, perPage: 10 };
 
 // ====== RENDER DANH SÁCH NHÀ CUNG CẤP ======
-async function renderVendors() {
+async function renderVendors(page = null) {
     try {
         const vendors = await api.getVendors();
         const filter = document.getElementById('vendor-filter')?.value?.toLowerCase() || '';
@@ -11,10 +12,31 @@ async function renderVendors() {
             (v.code || '').toLowerCase().includes(filter) ||
             (v.name || '').toLowerCase().includes(filter)
         );
-        const user = getUser();
-        const canEdit = ['ADMIN', 'PURCHASING'].includes(user?.role || '');
 
+        if (page) vendorsPageState.page = page;
+        const perPage = getPageSize('vendors');
+        vendorsPageState.perPage = perPage;
+        const paging = paginate(filtered, vendorsPageState.page, perPage);
+
+        const user = getUser();
+
+        // Kiểm tra quyền
+        const canCreate = hasPermission('vendors.create');
+        const canEdit = hasPermission('vendors.edit');
+        const canDelete = hasPermission('vendors.delete');
+
+        // Ẩn/hiện nút Thêm NCC
+        const btnCreate = document.getElementById('btn-create-vendor');
+        if (btnCreate) {
+            btnCreate.style.display = canCreate ? 'inline-block' : 'none';
+        }
+
+        // Tạo HTML (không có header)
         let html = `
+            <div class="filter-bar">
+                <input type="text" id="vendor-filter" placeholder="Tìm theo mã hoặc tên..." style="flex:1;" />
+                <button class="btn btn-sm" onclick="renderVendors()"><i class="fas fa-search"></i></button>
+            </div>
             <div class="table-responsive">
                 <table>
                     <thead>
@@ -31,17 +53,17 @@ async function renderVendors() {
                     <tbody>
         `;
 
-        if (!filtered.length) {
+                if (!paging.items.length) {
             html += `<tr><td colspan="7" style="text-align:center; color:#999;">Không có dữ liệu</td></tr>`;
         }
 
-        for (const v of filtered) {
+        for (const v of paging.items) {
             let actions = `<button class="btn btn-info btn-sm" onclick="viewVendor(${v.id})"><i class="fas fa-eye"></i></button>`;
             if (canEdit) {
                 actions += ` <button class="btn btn-warning btn-sm" onclick="editVendor(${v.id})"><i class="fas fa-edit"></i></button>`;
-                if (user?.role === 'ADMIN') {
-                    actions += ` <button class="btn btn-danger btn-sm" onclick="deleteVendor(${v.id})"><i class="fas fa-trash"></i></button>`;
-                }
+            }
+            if (canDelete && (user?.role === 'ADMIN' || user?.role === 'PURCHASING')) {
+                actions += ` <button class="btn btn-danger btn-sm" onclick="deleteVendor(${v.id})"><i class="fas fa-trash"></i></button>`;
             }
             html += `<tr>
                 <td><strong>${v.code || '--'}</strong></td>
@@ -54,20 +76,64 @@ async function renderVendors() {
             </tr>`;
         }
 
-        html += `
-                    </tbody>
-                </table>
-            </div>
-        `;
+                html += `</tbody></table></div>`;
+        html += buildPaginationHTML(paging, 'renderVendors', 'vendors');
         document.getElementById('vendors-container').innerHTML = html;
 
-        const btnCreate = document.getElementById('btn-create-vendor');
-        if (btnCreate) {
-            btnCreate.style.display = canEdit ? 'inline-block' : 'none';
-        }
+        // Gắn sự kiện filter
+        document.getElementById('vendor-filter')?.addEventListener('input', () => { vendorsPageState.page = 1; renderVendors(); });
+
     } catch (error) {
         showError('Không thể tải danh sách nhà cung cấp: ' + error.message);
         console.error('renderVendors error:', error);
+    }
+}
+
+// ====== HIỂN THỊ MODAL THÊM NCC ======
+function showAddVendorModal() {
+    showModal('Thêm nhà cung cấp', `
+        <div class="form-group"><label>Mã NCC</label><input id="f-vendor-code" placeholder="NCCxxx" required></div>
+        <div class="form-group"><label>Tên NCC</label><input id="f-vendor-name" required></div>
+        <div class="form-group"><label>Nhóm hàng</label><input id="f-vendor-group" placeholder="Ví dụ: Thép, Điện, VLXD..."></div>
+        <div class="form-group"><label>Người liên hệ</label><input id="f-vendor-contact" placeholder="Tên người liên hệ"></div>
+        <div class="form-group"><label>Số điện thoại</label><input id="f-vendor-phone" placeholder="Số điện thoại"></div>
+        <div class="form-group"><label>Email</label><input id="f-vendor-email" type="email" placeholder="email@domain.com"></div>
+        <div class="form-group"><label>Điều khoản TT</label><input id="f-vendor-payment" placeholder="Ví dụ: 30 ngày, 45 ngày..."></div>
+        <div class="form-group"><label>Ghi chú</label><textarea id="f-vendor-note" rows="2"></textarea></div>
+        <div class="modal-actions">
+            <button class="btn" onclick="saveVendor()"><i class="fas fa-save"></i> Lưu</button>
+            <button class="btn btn-danger" onclick="closeModal()">Hủy</button>
+        </div>
+    `);
+}
+
+// ====== LƯU NCC MỚI ======
+async function saveVendor() {
+    const code = document.getElementById('f-vendor-code').value.trim().toUpperCase();
+    const name = document.getElementById('f-vendor-name').value.trim();
+    if (!code || !name) {
+        showError('Vui lòng nhập mã và tên nhà cung cấp');
+        return;
+    }
+
+    try {
+        const newVendor = {
+            code,
+            name,
+            vendorGroup: document.getElementById('f-vendor-group').value.trim(),
+            contact: document.getElementById('f-vendor-contact').value.trim(),
+            phone: document.getElementById('f-vendor-phone').value.trim(),
+            email: document.getElementById('f-vendor-email').value.trim(),
+            paymentTerm: document.getElementById('f-vendor-payment').value.trim(),
+            note: document.getElementById('f-vendor-note').value.trim(),
+        };
+
+        await api.createVendor(newVendor);
+        closeModal();
+        await renderVendors();
+        showSuccess(`Thêm nhà cung cấp ${code} - ${name} thành công!`);
+    } catch (error) {
+        showError('Lỗi khi thêm nhà cung cấp: ' + error.message);
     }
 }
 
@@ -105,49 +171,18 @@ async function viewVendor(id) {
     }
 }
 
-// ====== THÊM NCC MỚI ======
-async function saveVendor() {
-    const code = document.getElementById('f-vendor-code').value.trim().toUpperCase();
-    const name = document.getElementById('f-vendor-name').value.trim();
-    if (!code || !name) {
-        showError('Vui lòng nhập mã và tên nhà cung cấp');
+// ====== SỬA NCC ======
+async function editVendor(id) {
+    if (!hasPermission('vendors.edit')) {
+        showWarning('Bạn không có quyền sửa nhà cung cấp!');
         return;
     }
 
-    try {
-        const newVendor = {
-            code,
-            name,
-            vendorGroup: document.getElementById('f-vendor-group').value.trim(),
-            contact: document.getElementById('f-vendor-contact').value.trim(),
-            phone: document.getElementById('f-vendor-phone').value.trim(),
-            email: document.getElementById('f-vendor-email').value.trim(),
-            paymentTerm: document.getElementById('f-vendor-payment').value.trim(),
-            note: document.getElementById('f-vendor-note').value.trim(),
-        };
-
-        await api.createVendor(newVendor);
-        closeModal();
-        await renderVendors();
-        showSuccess(`Thêm nhà cung cấp ${code} - ${name} thành công!`);
-    } catch (error) {
-        showError('Lỗi khi thêm nhà cung cấp: ' + error.message);
-    }
-}
-
-// ====== SỬA NCC ======
-async function editVendor(id) {
     try {
         const vendors = await api.getVendors();
         const v = vendors.find(item => item.id === id);
         if (!v) {
             showError('Không tìm thấy nhà cung cấp!');
-            return;
-        }
-
-        const user = getUser();
-        if (!['ADMIN', 'PURCHASING'].includes(user?.role || '')) {
-            showWarning('Bạn không có quyền sửa nhà cung cấp!');
             return;
         }
 
@@ -202,8 +237,7 @@ async function updateVendor(id) {
 
 // ====== XÓA NCC ======
 async function deleteVendor(id) {
-    const user = getUser();
-    if (!['ADMIN', 'PURCHASING'].includes(user?.role || '')) {
+    if (!hasPermission('vendors.delete')) {
         showWarning('Bạn không có quyền xóa nhà cung cấp!');
         return;
     }
@@ -230,53 +264,6 @@ async function deleteVendor(id) {
     }
 }
 
-// ====== GẮN SỰ KIỆN CHO NÚT THÊM NCC ======
-document.getElementById('btn-create-vendor')?.addEventListener('click', function() {
-    const user = getUser();
-    if (!['ADMIN', 'PURCHASING'].includes(user?.role || '')) {
-        showWarning('Bạn không có quyền thêm nhà cung cấp!');
-        return;
-    }
-    showModal('Thêm nhà cung cấp', `
-        <div class="form-group">
-            <label>Mã NCC</label>
-            <input id="f-vendor-code" placeholder="NCCxxx" required>
-        </div>
-        <div class="form-group">
-            <label>Tên NCC</label>
-            <input id="f-vendor-name" required>
-        </div>
-        <div class="form-group">
-            <label>Nhóm hàng</label>
-            <input id="f-vendor-group" placeholder="Ví dụ: Thép, Điện, VLXD...">
-        </div>
-        <div class="form-group">
-            <label>Người liên hệ</label>
-            <input id="f-vendor-contact" placeholder="Tên người liên hệ">
-        </div>
-        <div class="form-group">
-            <label>Số điện thoại</label>
-            <input id="f-vendor-phone" placeholder="Số điện thoại">
-        </div>
-        <div class="form-group">
-            <label>Email</label>
-            <input id="f-vendor-email" type="email" placeholder="email@domain.com">
-        </div>
-        <div class="form-group">
-            <label>Điều khoản TT</label>
-            <input id="f-vendor-payment" placeholder="Ví dụ: 30 ngày, 45 ngày...">
-        </div>
-        <div class="form-group">
-            <label>Ghi chú</label>
-            <textarea id="f-vendor-note" rows="2"></textarea>
-        </div>
-        <div class="modal-actions">
-            <button class="btn" onclick="saveVendor()"><i class="fas fa-save"></i> Lưu</button>
-            <button class="btn btn-danger" onclick="closeModal()">Hủy</button>
-        </div>
-    `);
-});
-
 // ====== EXPORT ======
 window.renderVendors = renderVendors;
 window.viewVendor = viewVendor;
@@ -284,5 +271,6 @@ window.editVendor = editVendor;
 window.updateVendor = updateVendor;
 window.deleteVendor = deleteVendor;
 window.saveVendor = saveVendor;
+window.showAddVendorModal = showAddVendorModal;
 
-console.log('✅ Vendors module updated to use API (fixed null display).');
+console.log('✅ Vendors module updated with permission checks.');

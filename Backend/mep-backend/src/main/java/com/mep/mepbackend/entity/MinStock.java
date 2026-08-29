@@ -27,6 +27,13 @@ public class MinStock {
     @Column(name = "min_quantity", precision = 15, scale = 2)
     private BigDecimal minQuantity;
 
+    // === Các trường mới (Giai đoạn 1) ===
+    @Column(name = "safe_quantity", precision = 15, scale = 2)
+    private BigDecimal safeQuantity;
+
+    @Column(name = "alert_percent", precision = 5, scale = 2)
+    private BigDecimal alertPercent;
+
     @Column(name = "updated_at")
     private LocalDate updatedAt;
 }

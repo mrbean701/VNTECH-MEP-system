@@ -4,10 +4,15 @@
 
 function renderStatusesTab() {
     const statuses = _adminStatuses || [];
-    const entityTypes = ['mr', 'pr', 'po', 'grn', 'sto', 'issue', 'materialreturn'];
+    
+    // ✅ Mở rộng entity types
+    const entityTypes = ['mr', 'pr', 'po', 'grn', 'sto', 'issue', 'materialreturn', 'user', 'department', 'vendor', 'project', 'warehouse', 'workflow'];
+
+    // ✅ Lấy danh sách group từ statuses
+    const groups = getStatusGroups(statuses);
 
     let html = `
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
             <h3 style="margin:0;">📊 Quản lý trạng thái</h3>
             <button class="btn" onclick="showCreateStatusModal()"><i class="fas fa-plus"></i> Thêm trạng thái</button>
         </div>
@@ -19,13 +24,26 @@ function renderStatusesTab() {
                 <span class="badge badge-approved">🟢 Mặc định</span>
                 <span class="badge badge-draft">🔵 Không mặc định</span>
                 <span class="badge badge-info">🏁 Kết thúc (is_final)</span>
+                ${groups.length > 0 ? `<span class="badge badge-info">📁 Nhóm: ${groups.join(', ')}</span>` : ''}
             </span>
         </div>
     `;
 
+    // ✅ Hiển thị theo entity type, nhóm theo group
     for (const entityType of entityTypes) {
         const list = statuses.filter(s => s.entityType === entityType);
         const defaultStatus = list.find(s => s.isDefault === true);
+        
+        // Nhóm theo group
+        const grouped = {};
+        list.forEach(s => {
+            const group = s.group || 'Khác';
+            if (!grouped[group]) grouped[group] = [];
+            grouped[group].push(s);
+        });
+
+        // Sắp xếp group
+        const groupNames = Object.keys(grouped).sort();
 
         html += `
             <div style="background:white; border-radius:8px; padding:16px; margin-bottom:16px; border:1px solid #e2e8f0;">
@@ -39,30 +57,38 @@ function renderStatusesTab() {
                         ${defaultStatus ? `<span class="badge badge-approved" style="font-size:13px;">✅ Mặc định: ${defaultStatus.name}</span>` : '<span class="badge badge-draft" style="font-size:13px;">⚠️ Chưa có trạng thái mặc định</span>'}
                     </div>
                 </div>
-                <div style="max-height:400px; overflow-y:auto;">
-                    ${list.length === 0 ? '<div style="color:#999; padding:12px; text-align:center;">Chưa có trạng thái nào</div>' : ''}
-                    ${list.map(s => `
-                        <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; margin-bottom:6px; background:${s.isDefault ? '#f0fdf4' : '#f8fafc'}; border-radius:6px; border-left:4px solid ${s.isDefault ? '#22c55e' : '#94a3b8'};">
-                            <div style="flex:1; min-width:0;">
-                                <div style="font-weight:600; font-size:14px; display:flex; align-items:center; gap:8px;">
-                                    ${s.name}
-                                    <span style="display:inline-block; width:12px; height:12px; border-radius:3px; background:${s.color || '#6b7280'};"></span>
-                                </div>
-                                <div style="font-size:12px; color:#888; flex-wrap:wrap; display:flex; gap:6px; margin-top:2px;">
-                                    <span class="badge badge-info">${s.code}</span>
-                                    ${s.isDefault ? '<span class="badge badge-approved">🟢 Mặc định</span>' : ''}
-                                    ${s.isFinal ? '<span class="badge badge-info">🏁 Kết thúc</span>' : ''}
-                                    ${s.description ? `<span style="color:#94a3b8;">${s.description}</span>` : ''}
-                                    <span style="color:#94a3b8;">| Thứ tự: ${s.sortOrder || 0}</span>
-                                </div>
-                            </div>
-                            <div style="display:flex; gap:4px; flex-wrap:wrap; margin-left:8px;">
-                                <button class="btn btn-info btn-sm" onclick="editStatus(${s.id})" title="Sửa"><i class="fas fa-edit"></i></button>
-                                ${!s.isDefault ? `<button class="btn btn-danger btn-sm" onclick="deleteStatus(${s.id})" title="Xóa"><i class="fas fa-trash"></i></button>` : ''}
-                            </div>
+                
+                ${groupNames.length === 0 ? '<div style="color:#999; padding:12px; text-align:center;">Chưa có trạng thái nào</div>' : ''}
+                
+                ${groupNames.map(group => `
+                    <div style="margin-bottom:8px;">
+                        <div style="font-size:12px; font-weight:600; color:#888; margin-bottom:4px; padding:4px 8px; background:#f0f0f0; border-radius:4px;">
+                            📁 ${group}
                         </div>
-                    `).join('')}
-                </div>
+                        ${grouped[group].map(s => `
+                            <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 14px; margin-bottom:4px; background:${s.isDefault ? '#f0fdf4' : '#f8fafc'}; border-radius:6px; border-left:4px solid ${s.isDefault ? '#22c55e' : '#94a3b8'};">
+                                <div style="flex:1; min-width:0;">
+                                    <div style="font-weight:600; font-size:14px; display:flex; align-items:center; gap:8px;">
+                                        ${s.name}
+                                        <span style="display:inline-block; width:14px; height:14px; border-radius:3px; background:${s.color || '#6b7280'}; border:1px solid #ddd;"></span>
+                                    </div>
+                                    <div style="font-size:12px; color:#888; flex-wrap:wrap; display:flex; gap:6px; margin-top:2px;">
+                                        <span class="badge badge-info">${s.code}</span>
+                                        ${s.isDefault ? '<span class="badge badge-approved">🟢 Mặc định</span>' : ''}
+                                        ${s.isFinal ? '<span class="badge badge-info">🏁 Kết thúc</span>' : ''}
+                                        ${s.description ? `<span style="color:#94a3b8;">${s.description}</span>` : ''}
+                                        <span style="color:#94a3b8;">| Thứ tự: ${s.sortOrder || 0}</span>
+                                        ${s.group ? `<span style="color:#94a3b8;">| Nhóm: ${s.group}</span>` : ''}
+                                    </div>
+                                </div>
+                                <div style="display:flex; gap:4px; flex-wrap:wrap; margin-left:8px;">
+                                    <button class="btn btn-info btn-sm" onclick="editStatus(${s.id})" title="Sửa"><i class="fas fa-edit"></i></button>
+                                    ${!s.isDefault ? `<button class="btn btn-danger btn-sm" onclick="deleteStatus(${s.id})" title="Xóa"><i class="fas fa-trash"></i></button>` : ''}
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `).join('')}
             </div>
         `;
     }
@@ -70,8 +96,18 @@ function renderStatusesTab() {
     return html;
 }
 
+// ✅ Hàm lấy danh sách group từ statuses
+function getStatusGroups(statuses) {
+    const groups = new Set();
+    statuses.forEach(s => {
+        if (s.group) groups.add(s.group);
+    });
+    return Array.from(groups);
+}
+
+// ===== SHOW CREATE STATUS MODAL (cập nhật thêm group) =====
 function showCreateStatusModal(entityType = null) {
-    const entityTypes = ['mr', 'pr', 'po', 'grn', 'sto', 'issue', 'materialreturn'];
+    const entityTypes = ['mr', 'pr', 'po', 'grn', 'sto', 'issue', 'materialreturn', 'user', 'department', 'vendor', 'project', 'warehouse', 'workflow'];
     const entityOpts = entityTypes.map(e => 
         `<option value="${e}" ${e === entityType ? 'selected' : ''}>${e.toUpperCase()}</option>`
     ).join('');
@@ -97,6 +133,11 @@ function showCreateStatusModal(entityType = null) {
         <div class="form-group">
             <label>Màu sắc (hex)</label>
             <input id="f-status-color" placeholder="#22c55e" class="form-control" value="#6b7280">
+        </div>
+        <div class="form-group">
+            <label>Nhóm <span style="color:red;">*</span></label>
+            <input id="f-status-group" placeholder="Ví dụ: order, warehouse, user..." class="form-control">
+            <div style="font-size:12px; color:#888; margin-top:4px;">Nhóm để phân loại trạng thái (VD: order, warehouse, user).</div>
         </div>
         <div class="form-group">
             <label>Thứ tự sắp xếp</label>
@@ -125,12 +166,17 @@ async function saveStatus() {
     const code = document.getElementById('f-status-code').value.trim().toUpperCase();
     const description = document.getElementById('f-status-desc').value.trim();
     const color = document.getElementById('f-status-color').value.trim();
+    const group = document.getElementById('f-status-group').value.trim();
     const sortOrder = parseInt(document.getElementById('f-status-sort').value) || 0;
     const isDefault = document.getElementById('f-status-default').checked;
     const isFinal = document.getElementById('f-status-final').checked;
 
     if (!name || !code) {
         showError('Vui lòng nhập tên và mã code');
+        return;
+    }
+    if (!group) {
+        showError('Vui lòng nhập nhóm trạng thái');
         return;
     }
 
@@ -141,6 +187,7 @@ async function saveStatus() {
             code,
             description,
             color: color || '#6b7280',
+            group,
             sortOrder,
             isDefault,
             isFinal
@@ -154,12 +201,13 @@ async function saveStatus() {
     }
 }
 
+// ===== EDIT STATUS (cập nhật thêm group) =====
 async function editStatus(id) {
     try {
         const status = _adminStatuses.find(s => s.id === id);
         if (!status) { showError('Không tìm thấy trạng thái'); return; }
 
-        const entityTypes = ['mr', 'pr', 'po', 'grn', 'sto', 'issue', 'materialreturn'];
+        const entityTypes = ['mr', 'pr', 'po', 'grn', 'sto', 'issue', 'materialreturn', 'user', 'department', 'vendor', 'project', 'warehouse', 'workflow'];
         const entityOpts = entityTypes.map(e => 
             `<option value="${e}" ${e === status.entityType ? 'selected' : ''}>${e.toUpperCase()}</option>`
         ).join('');
@@ -184,6 +232,10 @@ async function editStatus(id) {
             <div class="form-group">
                 <label>Màu sắc (hex)</label>
                 <input id="f-status-color" value="${status.color || '#6b7280'}" class="form-control">
+            </div>
+            <div class="form-group">
+                <label>Nhóm <span style="color:red;">*</span></label>
+                <input id="f-status-group" value="${status.group || ''}" class="form-control">
             </div>
             <div class="form-group">
                 <label>Thứ tự sắp xếp</label>
@@ -215,12 +267,17 @@ async function updateStatus(id) {
     const code = document.getElementById('f-status-code').value.trim().toUpperCase();
     const description = document.getElementById('f-status-desc').value.trim();
     const color = document.getElementById('f-status-color').value.trim();
+    const group = document.getElementById('f-status-group').value.trim();
     const sortOrder = parseInt(document.getElementById('f-status-sort').value) || 0;
     const isDefault = document.getElementById('f-status-default').checked;
     const isFinal = document.getElementById('f-status-final').checked;
 
     if (!name || !code) {
         showError('Vui lòng nhập tên và mã code');
+        return;
+    }
+    if (!group) {
+        showError('Vui lòng nhập nhóm trạng thái');
         return;
     }
 
@@ -231,6 +288,7 @@ async function updateStatus(id) {
             code,
             description,
             color: color || '#6b7280',
+            group,
             sortOrder,
             isDefault,
             isFinal
@@ -263,3 +321,4 @@ window.saveStatus = saveStatus;
 window.editStatus = editStatus;
 window.updateStatus = updateStatus;
 window.deleteStatus = deleteStatus;
+window.getStatusGroups = getStatusGroups;

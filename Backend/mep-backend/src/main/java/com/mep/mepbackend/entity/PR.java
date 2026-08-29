@@ -20,6 +20,9 @@ public class PR {
     @Column(unique = true, nullable = false)
     private String code;
 
+    @Column(name = "workflow_id")
+    private Long workflowId;
+
     private Long mrId;
     private String projectCode;
     private String projectName;

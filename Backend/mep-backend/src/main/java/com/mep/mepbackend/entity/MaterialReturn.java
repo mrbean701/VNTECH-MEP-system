@@ -67,4 +67,10 @@ public class MaterialReturn {
 
     @Column(columnDefinition = "TEXT")
     private String note;
+
+    @Column(name = "workflow_id")
+    private Long workflowId;
+
+    @Column(name = "approval_step")
+    private Integer approvalStep; // ✅ Thêm trường này
 }

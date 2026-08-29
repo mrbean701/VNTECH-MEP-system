@@ -46,6 +46,19 @@ public class WorkflowService {
                         "Không tìm thấy workflow active cho module: " + module));
     }
 
+    // Lấy danh sách steps của một workflow cụ thể (dùng khi hiển thị tiến trình)
+    public List<Map<String, Object>> getStepsByWorkflowId(Long workflowId) {
+        Workflow wf = getById(workflowId);
+        return parseSteps(wf.getSteps());
+    }
+
+    // Lấy status code của một bước trong workflow cụ thể
+    public String getStatusForStep(Long workflowId, Integer step) {
+        return stepStatusRepository.findByWorkflowIdAndStep(workflowId, step)
+                .map(WorkflowStepStatus::getStatusCode)
+                .orElse(null);
+    }
+
     public List<Map<String, Object>> getStepsByModule(String module) {
         Workflow wf = getActiveWorkflow(module);
         return parseSteps(wf.getSteps());

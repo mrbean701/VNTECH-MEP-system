@@ -63,7 +63,6 @@
                 <!-- Dashboard -->
                 <div class="page active" id="page-dashboard">
                     <div id="stats-container"></div>
-                    <!-- Containers cho top warehouses và items (tránh lỗi null) -->
                     <div id="top-warehouses-list" style="display:none;"></div>
                     <div id="top-items-list" style="display:none;"></div>
                 </div>
@@ -72,14 +71,10 @@
                 <div class="page" id="page-projects">
                     <div class="page-header">
                         <h2>Quản lý Dự án</h2>
-                        <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                            <button class="btn" id="btn-create-project"><i class="fas fa-plus"></i> Thêm dự án</button>
+                                                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                            <button class="btn" id="btn-create-project" onclick="showCreateProjectModal()"><i class="fas fa-plus"></i> Thêm dự án</button>
                             <button class="btn btn-success" onclick="exportProjects()"><i class="fas fa-file-excel"></i> Xuất Excel</button>
                         </div>
-                    </div>
-                    <div class="filter-bar">
-                        <input type="text" id="project-filter" placeholder="Tìm theo mã hoặc tên..." style="flex:1;" />
-                        <button class="btn btn-sm" onclick="renderProjects()"><i class="fas fa-search"></i></button>
                     </div>
                     <div id="projects-container"></div>
                 </div>
@@ -88,14 +83,10 @@
                 <div class="page" id="page-vendors">
                     <div class="page-header">
                         <h2>Quản lý Nhà cung cấp</h2>
-                        <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                            <button class="btn" id="btn-create-vendor"><i class="fas fa-plus"></i> Thêm NCC</button>
+                                                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                            <button class="btn" id="btn-create-vendor" onclick="showAddVendorModal()"><i class="fas fa-plus"></i> Thêm NCC</button>
                             <button class="btn btn-success" onclick="exportVendors()"><i class="fas fa-file-excel"></i> Xuất Excel</button>
                         </div>
-                    </div>
-                    <div class="filter-bar">
-                        <input type="text" id="vendor-filter" placeholder="Tìm theo mã hoặc tên..." style="flex:1;" />
-                        <button class="btn btn-sm" onclick="renderVendors()"><i class="fas fa-search"></i></button>
                     </div>
                     <div id="vendors-container"></div>
                 </div>
@@ -104,14 +95,10 @@
                 <div class="page" id="page-items">
                     <div class="page-header">
                         <h2>Danh mục Vật tư</h2>
-                        <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                            <button class="btn" id="btn-add-item" style="display:none;"><i class="fas fa-plus"></i> Thêm mới</button>
-                            <button class="btn btn-success" id="btn-export-items" style="display:none;" onclick="exportItems()"><i class="fas fa-file-excel"></i> Xuất Excel</button>
+                                                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                            <button class="btn" id="btn-add-item" onclick="showAddItemModal()"><i class="fas fa-plus"></i> Thêm mới</button>
+                            <button class="btn btn-success" id="btn-export-items" onclick="exportItems()"><i class="fas fa-file-excel"></i> Xuất Excel</button>
                         </div>
-                    </div>
-                    <div class="filter-bar">
-                        <input type="text" id="item-filter" placeholder="Tìm theo mã hoặc tên..." style="flex:1;" />
-                        <button class="btn btn-sm" onclick="renderItems()"><i class="fas fa-search"></i></button>
                     </div>
                     <div id="items-container"></div>
                 </div>
@@ -120,21 +107,10 @@
                 <div class="page" id="page-mr">
                     <div class="page-header">
                         <h2>Material Request (MR)</h2>
-                        <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                            <button class="btn" id="btn-create-mr"><i class="fas fa-plus"></i> Tạo MR</button>
+                                                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                            <button class="btn" id="btn-create-mr" onclick="showCreateMRModal()"><i class="fas fa-plus"></i> Tạo MR</button>
                             <button class="btn btn-success" onclick="exportMRs()"><i class="fas fa-file-excel"></i> Xuất Excel</button>
                         </div>
-                    </div>
-                    <div class="filter-bar">
-                        <input type="text" id="mr-filter" placeholder="Tìm theo mã hoặc dự án..." style="flex:1;" />
-                        <select id="mr-status-filter">
-                            <option value="">Tất cả</option>
-                            <option value="DRAFT">DRAFT</option>
-                            <option value="PENDING">PENDING</option>
-                            <option value="APPROVED">APPROVED</option>
-                            <option value="REJECTED">REJECTED</option>
-                        </select>
-                        <button class="btn btn-sm" onclick="renderMR()"><i class="fas fa-search"></i></button>
                     </div>
                     <div id="mr-container"></div>
                 </div>
@@ -143,21 +119,10 @@
                 <div class="page" id="page-pr">
                     <div class="page-header">
                         <h2>Purchase Request (PR)</h2>
-                        <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                            <button class="btn" id="btn-create-pr"><i class="fas fa-plus"></i> Tạo PR</button>
+                                                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                            <button class="btn" id="btn-create-pr" onclick="showCreatePRModal()"><i class="fas fa-plus"></i> Tạo PR</button>
                             <button class="btn btn-success" onclick="exportPRs()"><i class="fas fa-file-excel"></i> Xuất Excel</button>
                         </div>
-                    </div>
-                    <div class="filter-bar">
-                        <input type="text" id="pr-filter" placeholder="Tìm theo mã hoặc dự án..." style="flex:1;" />
-                        <select id="pr-status-filter">
-                            <option value="">Tất cả</option>
-                            <option value="DRAFT">DRAFT</option>
-                            <option value="PENDING">PENDING</option>
-                            <option value="APPROVED">APPROVED</option>
-                            <option value="REJECTED">REJECTED</option>
-                        </select>
-                        <button class="btn btn-sm" onclick="renderPR()"><i class="fas fa-search"></i></button>
                     </div>
                     <div id="pr-container"></div>
                 </div>
@@ -166,31 +131,66 @@
                 <div class="page" id="page-po">
                     <div class="page-header">
                         <h2>Purchase Order (PO)</h2>
-                        <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                            <button class="btn" id="btn-create-po"><i class="fas fa-plus"></i> Tạo PO</button>
+                                                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                            <button class="btn" id="btn-create-po" onclick="showCreatePOModal()"><i class="fas fa-plus"></i> Tạo PO</button>
                             <button class="btn btn-success" onclick="exportPOs()"><i class="fas fa-file-excel"></i> Xuất Excel</button>
                         </div>
-                    </div>
-                    <div class="filter-bar">
-                        <input type="text" id="po-filter" placeholder="Tìm theo mã hoặc dự án..." style="flex:1;" />
-                        <select id="po-status-filter">
-                            <option value="">Tất cả</option>
-                            <option value="DRAFT">DRAFT</option>
-                            <option value="PENDING">PENDING</option>
-                            <option value="APPROVED">APPROVED</option>
-                            <option value="REJECTED">REJECTED</option>
-                        </select>
-                        <button class="btn btn-sm" onclick="renderPO()"><i class="fas fa-search"></i></button>
                     </div>
                     <div id="po-container"></div>
                 </div>
 
-                <!-- Kho -->
-                <div class="page" id="page-inventory">
-                    <div id="inventory-content"></div>
+                                <!-- Kho -->
+                                <div class="page" id="page-inventory">
+                                    <div class="page-header">
+                                        <h2>Quản lý Kho</h2>
+                                        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                                            <button class="btn" onclick="showAddWarehouse()"><i class="fas fa-plus"></i> Thêm kho</button>
+                                            <button class="btn btn-success" onclick="showAddGRN()"><i class="fas fa-arrow-down"></i> Tạo GRN</button>
+                                            <button class="btn btn-info" onclick="showAddSTO()"><i class="fas fa-arrow-right"></i> Tạo STO</button>
+                                            <button class="btn btn-success" onclick="exportWarehouseData()"><i class="fas fa-file-excel"></i> Xuất Excel</button>
+                                        </div>
+                                    </div>
+                                    <div id="inventory-content"></div>
+                                </div>
+
+                <!-- Issue -->
+                <div class="page" id="page-issue">
+                    <div class="page-header">
+                                                <h2>📤 Cấp phát vật tư</h2>
+                        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                            <button class="btn" id="btn-create-issue" onclick="showCreateIssueModal()"><i class="fas fa-plus"></i> Tạo phiếu</button>
+                            <button class="btn btn-success" onclick="exportIssues()"><i class="fas fa-file-excel"></i> Xuất Excel</button>
+                        </div>
+                    </div>
+                    <div id="issue-container"></div>
                 </div>
 
-                <!-- Các trang khác sẽ được tạo động -->
+                <!-- Material Return -->
+                <div class="page" id="page-material-return">
+                    <div class="page-header">
+                        <h2>🔄 Hoàn trả vật tư</h2>
+                        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                            <button class="btn" id="btn-create-return" onclick="showCreateMaterialReturnModal()"><i class="fas fa-plus"></i> Tạo phiếu</button>
+                            <button class="btn btn-success" onclick="exportMaterialReturns()"><i class="fas fa-file-excel"></i> Xuất Excel</button>
+                        </div>
+                    </div>
+                    <div id="material-return-container"></div>
+                </div>
+
+                <!-- Min Stock -->
+                <div class="page" id="page-min-stock">
+                    <div id="min-stock-container"></div>
+                </div>
+
+                <!-- Auto Reorder -->
+                <div class="page" id="page-auto-reorder">
+                    <div id="auto-reorder-container"></div>
+                </div>
+
+                <!-- Admin -->
+                <div class="page" id="page-admin">
+                    <div id="admin-container"></div>
+                </div>
             </div>
         </div>
     </div>
@@ -220,7 +220,7 @@
     <script src="js/material-return.js"></script>
     <script src="js/min-stock.js"></script>
     <script src="js/auto-reorder.js"></script>
-   <!-- Admin modules -->
+    <!-- Admin modules -->
     <script src="js/admin/admin-helpers.js"></script>
     <script src="js/admin/admin-core.js"></script>
     <script src="js/admin/admin-users.js"></script>
@@ -229,7 +229,7 @@
     <script src="js/admin/admin-workflows.js"></script>
     <script src="js/admin/admin-department-permissions.js"></script>
     <script src="js/admin/admin-user-permissions.js"></script>
-    
+
     <script src="js/dashboard.js"></script>
     <script src="js/export.js"></script>
 

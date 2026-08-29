@@ -1,5 +1,5 @@
 // ================================================================
-// WAREHOUSE - GRN & STO (SỬ DỤNG API) - ĐÃ SỬA LỖI NULL
+// WAREHOUSE - GRN & STO (SỬ DỤNG API) - ĐÃ TÍCH HỢP PHÂN QUYỀN
 // ================================================================
 
 let currentWhTab = 'wh-list';
@@ -10,23 +10,33 @@ let currentWhTab = 'wh-list';
 async function renderWarehousePage(tab) {
     currentWhTab = tab || 'wh-list';
     const container = document.getElementById('inventory-content');
-    const user = getUser();
-    const isAdmin = user?.role === 'ADMIN';
-    const isPurchasing = user?.role === 'PURCHASING' || isAdmin;
-    const isQC = user?.role === 'QC' || isAdmin;
+    
+    // Kiểm tra quyền view inventory
+    if (!hasPermission('inventory.view')) {
+        container.innerHTML = `
+            <div style="padding:20px; text-align:center; color:#e74c3c;">
+                <i class="fas fa-lock" style="font-size:24px; display:block; margin-bottom:10px;"></i>
+                Bạn không có quyền xem kho
+            </div>
+        `;
+        return;
+    }
+
+    const canEditInventory = hasPermission('inventory.edit');
+    const canCreateGRN = hasPermission('grn.create');
+    const canCreateSTO = hasPermission('sto.create');
+
+    // Ẩn/hiện các nút trong header
+    const btnAddWH = document.querySelector('#page-inventory .page-header .btn[onclick*="showAddWarehouse"]');
+    if (btnAddWH) btnAddWH.style.display = (tab === 'wh-list' && canEditInventory) ? 'inline-block' : 'none';
+
+    const btnAddGRN = document.querySelector('#page-inventory .page-header .btn[onclick*="showAddGRN"]');
+    if (btnAddGRN) btnAddGRN.style.display = (tab === 'wh-grn' && canCreateGRN) ? 'inline-block' : 'none';
+
+    const btnAddSTO = document.querySelector('#page-inventory .page-header .btn[onclick*="showAddSTO"]');
+    if (btnAddSTO) btnAddSTO.style.display = (tab === 'wh-sto' && canCreateSTO) ? 'inline-block' : 'none';
 
     let html = `
-        <div class="page-header">
-            <h2><i class="fas fa-warehouse"></i> Quản lý kho</h2>
-            <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                ${tab === 'wh-list' && isAdmin ? `<button class="btn" onclick="showAddWarehouse()"><i class="fas fa-plus"></i> Thêm kho</button>` : ''}
-                ${tab === 'wh-list' ? `<button class="btn btn-success" onclick="exportInventory()"><i class="fas fa-file-excel"></i> Xuất Excel</button>` : ''}
-                ${tab === 'wh-grn' && isPurchasing ? `<button class="btn" onclick="showAddGRN()"><i class="fas fa-plus"></i> Tạo phiếu nhập</button>` : ''}
-                ${tab === 'wh-grn' ? `<button class="btn btn-success" onclick="exportGRNs()"><i class="fas fa-file-excel"></i> Xuất Excel</button>` : ''}
-                ${tab === 'wh-sto' && isPurchasing ? `<button class="btn" onclick="showAddSTO()"><i class="fas fa-plus"></i> Tạo phiếu chuyển</button>` : ''}
-                ${tab === 'wh-sto' ? `<button class="btn btn-success" onclick="exportSTOs()"><i class="fas fa-file-excel"></i> Xuất Excel</button>` : ''}
-            </div>
-        </div>
         <div class="tab-bar">
             <div class="tab ${tab === 'wh-list' ? 'active' : ''}" onclick="switchWarehouseTab('wh-list')">📋 Danh sách kho</div>
             <div class="tab ${tab === 'wh-grn' ? 'active' : ''}" onclick="switchWarehouseTab('wh-grn')">📥 Nhập kho (GRN)</div>
@@ -34,6 +44,7 @@ async function renderWarehousePage(tab) {
         </div>
         <div id="wh-tab-content">
     `;
+
     if (tab === 'wh-list') {
         html += await renderWarehouseListHTML();
     } else if (tab === 'wh-grn') {
@@ -52,6 +63,8 @@ async function renderWarehouseListHTML() {
     try {
         const warehouses = await api.getWarehouses();
         const inventory = await api.getInventory();
+        const canEditInventory = hasPermission('inventory.edit');
+
         let html = `<div class="warehouse-grid">`;
         if (!warehouses || warehouses.length === 0) {
             html += `<p style="grid-column:1/-1;text-align:center;color:#999;">Chưa có kho nào</p>`;
@@ -64,6 +77,7 @@ async function renderWarehouseListHTML() {
                     '<span class="badge badge-status-active"><i class="fas fa-check-circle"></i> Đang hoạt động</span>' :
                     '<span class="badge badge-status-inactive"><i class="fas fa-times-circle"></i> Ngừng</span>';
                 const projectName = w.type === 'SITE' ? await getProjectNameById(w.projectId) : '';
+
                 html += `
                     <div class="warehouse-card" onclick="viewWarehouseDetail(${w.id})">
                         <div class="wh-status-badge">${statusBadge}</div>
@@ -79,6 +93,7 @@ async function renderWarehouseListHTML() {
                         </div>
                         <div style="font-size:13px;color:#888;margin-top:4px;"><i class="fas fa-map-marker-alt"></i> ${w.address || 'Chưa có địa chỉ'}</div>
                         <div style="font-size:13px;color:#888;margin-top:2px;"><i class="fas fa-user"></i> ${w.manager || 'Chưa có quản lý'}</div>
+                        ${canEditInventory ? `<div style="margin-top:8px;"><button class="btn btn-sm btn-warning" onclick="event.stopPropagation(); showEditWarehouse(${w.id})"><i class="fas fa-edit"></i> Sửa</button></div>` : ''}
                     </div>
                 `;
             }
@@ -104,6 +119,11 @@ async function getProjectNameById(projectId) {
 
 // ====== XEM CHI TIẾT KHO ======
 async function viewWarehouseDetail(whId) {
+    if (!hasPermission('inventory.view')) {
+        showWarning('Bạn không có quyền xem chi tiết kho');
+        return;
+    }
+
     try {
         const warehouses = await api.getWarehouses();
         const wh = warehouses.find(w => w.id === whId);
@@ -111,18 +131,17 @@ async function viewWarehouseDetail(whId) {
             showError('Không tìm thấy kho!');
             return;
         }
-        const inventory = await api.getInventoryByWarehouse(whId);
+        const inventory = await api.getInventoryByWarehouse ? await api.getInventoryByWarehouse(whId) : await api.getInventory();
         const items = await api.getItems();
-        const user = getUser();
-        const isAdmin = user?.role === 'ADMIN';
+        const canEditInventory = hasPermission('inventory.edit');
 
         let html = `
-            <div class="page-header">
-                <h2><i class="fas fa-arrow-left" style="cursor:pointer;color:#1a3c6e;" onclick="switchWarehouseTab('wh-list')"></i> ${wh.code || '--'} - ${wh.name || '--'}</h2>
-                <div>
-                    <button class="btn btn-outline" onclick="switchWarehouseTab('wh-list')"><i class="fas fa-arrow-left"></i> Quay lại</button>
-                    ${isAdmin ? `<button class="btn" onclick="showEditWarehouse(${wh.id})"><i class="fas fa-edit"></i> Sửa kho</button>` : ''}
-                    ${isAdmin ? `<button class="btn" onclick="showAddInventoryItem(${wh.id})"><i class="fas fa-plus"></i> Thêm tồn kho</button>` : ''}
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
+                <h3 style="margin:0;"><i class="fas fa-arrow-left" style="cursor:pointer; color:#1a3c6e; margin-right:12px;" onclick="switchWarehouseTab('wh-list')"></i> ${wh.code || '--'} - ${wh.name || '--'}</h3>
+                <div style="display:flex; gap:4px; flex-wrap:wrap;">
+                    <button class="btn btn-outline btn-sm" onclick="switchWarehouseTab('wh-list')"><i class="fas fa-arrow-left"></i> Quay lại</button>
+                    ${canEditInventory ? `<button class="btn btn-sm" onclick="showEditWarehouse(${wh.id})"><i class="fas fa-edit"></i> Sửa kho</button>` : ''}
+                    ${canEditInventory ? `<button class="btn btn-sm" onclick="showAddInventoryItem(${wh.id})"><i class="fas fa-plus"></i> Thêm tồn kho</button>` : ''}
                 </div>
             </div>
             <div class="inventory-view">
@@ -141,21 +160,27 @@ async function viewWarehouseDetail(whId) {
                 </div>
                 <div class="table-responsive">
                     <table>
-                        <thead><tr><th>Mã</th><th>Tên vật tư</th><th>ĐVT</th><th>Số lượng</th>${isAdmin ? '<th>HĐ</th>' : ''}</tr></thead>
+                        <thead><tr><th>Mã</th><th>Tên vật tư</th><th>ĐVT</th><th>Số lượng</th>${canEditInventory ? '<th>HĐ</th>' : ''}</tr></thead>
                         <tbody>
         `;
-        if (!inventory || inventory.length === 0) {
-            html += `<tr><td colspan="${isAdmin ? 5 : 4}" style="text-align:center;color:#999;">Kho này chưa có vật tư</td></tr>`;
+
+        const invList = (inventory || []).filter(i => i.warehouseId === whId || i.warehouse_id === whId);
+        if (!invList || invList.length === 0) {
+            html += `<tr><td colspan="${canEditInventory ? 5 : 4}" style="text-align:center;color:#999;">Kho này chưa có vật tư</td></tr>`;
         } else {
-            for (const inv of inventory) {
-                const item = items.find(i => i.id === inv.itemId);
+            for (const inv of invList) {
+                const item = items.find(i => i.id === (inv.itemId || inv.item_id));
                 if (!item) continue;
-                html += `<tr><td style="cursor:pointer;color:#1a3c6e;" onclick="closeModal(); viewItem(${item.id})">${item.code || '--'}</td>
-                         <td style="cursor:pointer;color:#1a3c6e;" onclick="closeModal(); viewItem(${item.id})">${item.name || '--'}</td>
-                         <td>${item.unit || ''}</td><td>${inv.quantity || 0}</td>`;
-                if (isAdmin) {
-                    html += `<td><button class="btn btn-warning btn-sm" onclick="editInventoryItem(${inv.id})"><i class="fas fa-edit"></i></button>
-                                <button class="btn btn-danger btn-sm" onclick="deleteInventoryItem(${inv.id})"><i class="fas fa-trash"></i></button></td>`;
+                html += `<tr>
+                    <td style="cursor:pointer;color:#1a3c6e;" onclick="closeModal(); viewItem(${item.id})">${item.code || '--'}</td>
+                    <td style="cursor:pointer;color:#1a3c6e;" onclick="closeModal(); viewItem(${item.id})">${item.name || '--'}</td>
+                    <td>${item.unit || ''}</td>
+                    <td>${inv.quantity || 0}</td>`;
+                if (canEditInventory) {
+                    html += `<td>
+                        <button class="btn btn-warning btn-sm" onclick="editInventoryItem(${inv.id})"><i class="fas fa-edit"></i></button>
+                        <button class="btn btn-danger btn-sm" onclick="deleteInventoryItem(${inv.id})"><i class="fas fa-trash"></i></button>
+                    </td>`;
                 }
                 html += `</tr>`;
             }
@@ -173,10 +198,16 @@ async function viewWarehouseDetail(whId) {
 async function renderGRNListHTML() {
     try {
         const grnList = await api.getGRNs();
-        const user = getUser();
-        const isAdmin = user?.role === 'ADMIN';
-        const isPurchasing = user?.role === 'PURCHASING' || isAdmin;
-        const isQC = user?.role === 'QC' || isAdmin;
+        const canCreateGRN = hasPermission('grn.create');
+        const canEditGRN = hasPermission('grn.edit');
+        const canDeleteGRN = hasPermission('grn.delete');
+        const canReceiveGRN = hasPermission('grn.receive');
+        const canQCGRN = hasPermission('grn.qc');
+        const canCompleteGRN = hasPermission('grn.complete');
+
+        // Ẩn/hiện nút Tạo phiếu nhập
+        const btnAddGRN = document.querySelector('#page-inventory .page-header .btn[onclick*="showAddGRN"]');
+        if (btnAddGRN) btnAddGRN.style.display = canCreateGRN ? 'inline-block' : 'none';
 
         let html = `
             <div class="filter-bar">
@@ -202,10 +233,10 @@ async function renderGRNListHTML() {
             for (const g of grnList) {
                 const po = await getPOById(g.poId);
                 const projectId = po ? getProjectIdByCode(po.projectCode) : null;
-                const projectLink = projectId ? 
+                const projectLink = projectId ?
                     `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="closeModal(); viewProject(${projectId});">${g.projectName || ''}</span>` :
                     (g.projectName || '');
-                const poLink = po ? 
+                const poLink = po ?
                     `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="viewPO(${po.id})">${po.code}</span>` :
                     `PO-${String(g.poId || '').padStart(3, '0')}`;
                 const whLink = `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="showWarehouseInfoModal(${g.warehouseId})">${getWarehouseCode(g.warehouseId)}</span>`;
@@ -213,20 +244,19 @@ async function renderGRNListHTML() {
 
                 let actions = `<button class="btn btn-info btn-sm" onclick="viewGRN(${g.id})"><i class="fas fa-eye"></i></button>`;
 
-                if (g.status === 'DRAFT' && (isPurchasing || isAdmin)) {
-                    actions += ` <button class="btn btn-warning btn-sm" onclick="receiveGRN(${g.id})">Nhận vật tư</button>`;
+                if (g.status === 'DRAFT' && canEditGRN) {
                     actions += ` <button class="btn btn-warning btn-sm" onclick="editGRN(${g.id})"><i class="fas fa-edit"></i></button>`;
                 }
-
-                if (g.status === 'RECEIVED' && (isQC || isAdmin)) {
+                if (g.status === 'DRAFT' && canReceiveGRN) {
+                    actions += ` <button class="btn btn-primary btn-sm" onclick="receiveGRN(${g.id})">Nhận vật tư</button>`;
+                }
+                if (g.status === 'RECEIVED' && canQCGRN) {
                     actions += ` <button class="btn btn-primary btn-sm" onclick="qcCheckGRN(${g.id})">QC kiểm tra</button>`;
                 }
-
-                if (g.status === 'QC_CHECKED' && (isPurchasing || isAdmin)) {
+                if (g.status === 'QC_CHECKED' && canCompleteGRN) {
                     actions += ` <button class="btn btn-success btn-sm" onclick="completeGRN(${g.id})">Hoàn thành</button>`;
                 }
-
-                if (isAdmin && g.status !== 'COMPLETED') {
+                if ((g.status === 'DRAFT' || g.status === 'RECEIVED') && canDeleteGRN) {
                     actions += ` <button class="btn btn-danger btn-sm" onclick="deleteGRN(${g.id})"><i class="fas fa-trash"></i></button>`;
                 }
 
@@ -279,12 +309,33 @@ async function viewGRN(id) {
                 items = typeof g.items === 'string' ? JSON.parse(g.items) : g.items;
             }
         } catch (e) { items = []; }
-        
+
         let itemsHtml = items.map(it =>
             `<tr><td>${getItemCode(it.itemId)}</td><td>${getItemName(it.itemId)}</td><td>${it.poQty || 0}</td><td>${it.actualQty || 0}</td><td>${it.diff || (it.actualQty - it.poQty)}</td><td>${it.serial || ''}</td><td>${it.condition || ''}</td></tr>`
         ).join('');
 
-        const progressHtml = renderGRNProgress(g.status);
+        // Lấy workflow steps từ workflowId của GRN
+        let stepsConfig = [
+            { id: 1, label: 'Lập phiếu' },
+            { id: 2, label: 'Thủ kho nhận' },
+            { id: 3, label: 'QC kiểm tra' },
+            { id: 4, label: 'Hoàn thành' }
+        ];
+        if (g.workflowId) {
+            try {
+                const wf = await api.getWorkflowById ? await api.getWorkflowById(g.workflowId) : null;
+                if (wf && wf.steps) {
+                    const steps = JSON.parse(wf.steps);
+                    stepsConfig = steps.map(s => ({
+                        id: s.step || s.id,
+                        label: s.label || `Bước ${s.step || s.id}`
+                    }));
+                }
+            } catch (e) {
+                console.warn('Không lấy được workflow steps:', e);
+            }
+        }
+        const progressHtml = renderApprovalProgress(g.status, g.approvalStep || 1, stepsConfig);
 
         showModal('Chi tiết phiếu nhập', `
             <div class="detail-grid">
@@ -321,6 +372,10 @@ async function viewGRN(id) {
 
 // ====== TẠO GRN ======
 function showAddGRN() {
+    if (!hasPermission('grn.create')) {
+        showWarning('Bạn không có quyền tạo GRN');
+        return;
+    }
     api.getPOs().then(pos => {
         const poList = pos.filter(p => p.status === 'APPROVED');
         if (!poList.length) {
@@ -391,6 +446,10 @@ async function loadGRNItemsFromPO(poId) {
 }
 
 async function saveGRN() {
+    if (!hasPermission('grn.create')) {
+        showWarning('Bạn không có quyền tạo GRN');
+        return;
+    }
     const poId = parseInt(document.getElementById('f-grn-po').value);
     const warehouseId = parseInt(document.getElementById('f-grn-wh').value);
     const receiptDate = document.getElementById('f-grn-date').value;
@@ -462,6 +521,10 @@ async function saveGRN() {
 
 // ====== SỬA GRN (DRAFT) ======
 async function editGRN(id) {
+    if (!hasPermission('grn.edit')) {
+        showWarning('Bạn không có quyền sửa GRN');
+        return;
+    }
     try {
         let grn = await api.getGRNById ? await api.getGRNById(id) : null;
         if (!grn) {
@@ -598,6 +661,10 @@ async function updateGRN(id) {
 
 // ====== THỦ KHO NHẬN ======
 async function receiveGRN(id) {
+    if (!hasPermission('grn.receive')) {
+        showWarning('Bạn không có quyền nhận GRN');
+        return;
+    }
     try {
         const grns = await api.getGRNs();
         const grn = grns.find(g => g.id === id);
@@ -728,6 +795,10 @@ async function confirmReceiveGRN(id) {
 
 // ====== QC KIỂM TRA ======
 async function qcCheckGRN(id) {
+    if (!hasPermission('grn.qc')) {
+        showWarning('Bạn không có quyền QC GRN');
+        return;
+    }
     try {
         const grns = await api.getGRNs();
         const grn = grns.find(g => g.id === id);
@@ -807,6 +878,10 @@ async function confirmQCCheckGRN(id) {
 
 // ====== HOÀN THÀNH GRN ======
 async function completeGRN(id) {
+    if (!hasPermission('grn.complete')) {
+        showWarning('Bạn không có quyền hoàn thành GRN');
+        return;
+    }
     try {
         const grns = await api.getGRNs();
         const grn = grns.find(g => g.id === id);
@@ -832,6 +907,10 @@ async function completeGRN(id) {
 
 // ====== XÓA GRN ======
 async function deleteGRN(id) {
+    if (!hasPermission('grn.delete')) {
+        showWarning('Bạn không có quyền xóa GRN');
+        return;
+    }
     if (!confirm('Xóa phiếu nhập này?')) return;
     try {
         const grns = await api.getGRNs();
@@ -854,9 +933,16 @@ async function deleteGRN(id) {
 async function renderSTOListHTML() {
     try {
         const stoList = await api.getSTOs();
-        const user = getUser();
-        const isAdmin = user?.role === 'ADMIN';
-        const isPurchasing = user?.role === 'PURCHASING' || isAdmin;
+        const canCreateSTO = hasPermission('sto.create');
+        const canEditSTO = hasPermission('sto.edit');
+        const canDeleteSTO = hasPermission('sto.delete');
+        const canSubmitSTO = hasPermission('sto.submit');
+        const canApproveSTO = hasPermission('sto.approve');
+        const canCompleteSTO = hasPermission('sto.complete');
+
+        // Ẩn/hiện nút Tạo phiếu chuyển
+        const btnAddSTO = document.querySelector('#page-inventory .page-header .btn[onclick*="showAddSTO"]');
+        if (btnAddSTO) btnAddSTO.style.display = canCreateSTO ? 'inline-block' : 'none';
 
         let html = `
             <div class="filter-bar">
@@ -881,7 +967,7 @@ async function renderSTOListHTML() {
         } else {
             for (const s of stoList) {
                 const projectId = getProjectIdByCode(s.projectCode);
-                const projectLink = projectId ? 
+                const projectLink = projectId ?
                     `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="closeModal(); viewProject(${projectId});">${s.projectName || ''}</span>` :
                     (s.projectName || '');
                 const fromWhLink = `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="showWarehouseInfoModal(${s.fromWarehouseId})">${getWarehouseCode(s.fromWarehouseId)}</span>`;
@@ -889,17 +975,19 @@ async function renderSTOListHTML() {
                 const statusBadge = getStatusBadge(s.status);
 
                 let actions = `<button class="btn btn-info btn-sm" onclick="viewSTO(${s.id})"><i class="fas fa-eye"></i></button>`;
-                if (s.status === 'DRAFT' && (isPurchasing || isAdmin)) {
+                if (s.status === 'DRAFT' && canEditSTO) {
                     actions += ` <button class="btn btn-warning btn-sm" onclick="editSTO(${s.id})"><i class="fas fa-edit"></i></button>`;
+                }
+                if (s.status === 'DRAFT' && canSubmitSTO) {
                     actions += ` <button class="btn btn-success btn-sm" onclick="submitSTO(${s.id})">Gửi duyệt</button>`;
                 }
-                if (s.status === 'PENDING' && (isPurchasing || isAdmin)) {
+                if (s.status === 'PENDING' && canApproveSTO) {
                     actions += ` <button class="btn btn-success btn-sm" onclick="approveSTO(${s.id})">Duyệt</button>`;
                 }
-                if (s.status === 'APPROVED' && (isPurchasing || isAdmin)) {
+                if (s.status === 'APPROVED' && canCompleteSTO) {
                     actions += ` <button class="btn btn-success btn-sm" onclick="completeSTO(${s.id})">Hoàn thành</button>`;
                 }
-                if (isAdmin) {
+                if ((s.status === 'DRAFT' || s.status === 'PENDING') && canDeleteSTO) {
                     actions += ` <button class="btn btn-danger btn-sm" onclick="deleteSTO(${s.id})"><i class="fas fa-trash"></i></button>`;
                 }
 
@@ -945,7 +1033,28 @@ async function viewSTO(id) {
         let itemsHtml = items.map(it =>
             `<tr><td>${getItemCode(it.itemId)}</td><td>${getItemName(it.itemId)}</td><td>${it.requestedQty || 0}</td><td>${it.actualQty || 0}</td></tr>`
         ).join('');
-        const progressHtml = renderSTOProgress(s.status, s);
+
+        // Lấy workflow steps từ workflowId của STO
+        let stepsConfig = [
+            { id: 1, label: 'Lập phiếu' },
+            { id: 2, label: 'Duyệt' },
+            { id: 3, label: 'Xuất kho' }
+        ];
+        if (s.workflowId) {
+            try {
+                const wf = await api.getWorkflowById ? await api.getWorkflowById(s.workflowId) : null;
+                if (wf && wf.steps) {
+                    const steps = JSON.parse(wf.steps);
+                    stepsConfig = steps.map(s => ({
+                        id: s.step || s.id,
+                        label: s.label || `Bước ${s.step || s.id}`
+                    }));
+                }
+            } catch (e) {
+                console.warn('Không lấy được workflow steps:', e);
+            }
+        }
+        const progressHtml = renderApprovalProgress(s.status, s.approvalStep || 1, stepsConfig);
         const noteHtml = s.status === 'COMPLETED' 
             ? `<div style="padding:8px; background:#f0fdf4; border-radius:4px; color:#15803d; font-weight:500;">${s.note || ''}</div>`
             : `<div style="padding:8px; background:#f8fafc; border-radius:4px; border:1px solid #e2e8f0;">${s.note || ''}</div>`;
@@ -987,6 +1096,10 @@ async function viewSTO(id) {
 
 // ====== TẠO STO ======
 function showAddSTO() {
+    if (!hasPermission('sto.create')) {
+        showWarning('Bạn không có quyền tạo STO');
+        return;
+    }
     api.getWarehouses().then(warehouses => {
         const whOpts = warehouses.map(w => `<option value="${w.id}">${w.code} - ${w.name}</option>`).join('');
         api.getProjects().then(projects => {
@@ -1015,7 +1128,6 @@ function showAddSTO() {
     }).catch(err => showError('Không thể tải kho: ' + err.message));
 }
 
-// Hàm collectItemsFromModal (tương tự collectItemsFromForm nhưng dùng cho modal)
 function collectItemsFromModal(container) {
     const rows = container.querySelectorAll('.item-row');
     const items = [];
@@ -1051,11 +1163,12 @@ async function saveSTO() {
         return;
     }
     try {
-        const inventory = await api.getInventoryByWarehouse(fromWH);
+        const inventory = await api.getInventoryByWarehouse(fromWH) || await api.getInventory();
+        const invList = (inventory || []).filter(i => i.warehouseId === fromWH || i.warehouse_id === fromWH);
         let hasError = false;
         items.forEach(it => {
-            const inv = inventory.find(i => i.itemId === it.itemId);
-            const currentQty = inv ? inv.quantity : 0;
+            const inv = invList.find(i => (i.itemId || i.item_id) === it.itemId);
+            const currentQty = inv ? (inv.quantity || 0) : 0;
             if (it.quantity > currentQty) {
                 showError(`Tồn kho của ${getItemName(it.itemId)} trong kho đi là ${currentQty}, không đủ để xuất ${it.quantity}. Vui lòng giảm số lượng.`);
                 hasError = true;
@@ -1090,6 +1203,10 @@ async function saveSTO() {
 
 // ====== SỬA STO ======
 async function editSTO(id) {
+    if (!hasPermission('sto.edit')) {
+        showWarning('Bạn không có quyền sửa STO');
+        return;
+    }
     try {
         let sto = await api.getSTOById ? await api.getSTOById(id) : null;
         if (!sto) {
@@ -1171,7 +1288,8 @@ async function updateSTO(id) {
             }
         } catch (e) { items = []; }
         const fromWhId = sto.fromWarehouseId;
-        const inventory = await api.getInventoryByWarehouse(fromWhId);
+        const inventory = await api.getInventoryByWarehouse(fromWhId) || await api.getInventory();
+        const invList = (inventory || []).filter(i => i.warehouseId === fromWhId || i.warehouse_id === fromWhId);
         const rows = document.querySelectorAll('#sto-edit-items-container .item-row');
         let hasError = false;
         rows.forEach(row => {
@@ -1189,8 +1307,8 @@ async function updateSTO(id) {
                 hasError = true;
                 return;
             }
-            const currentInv = inventory.find(inv => inv.itemId === itemId);
-            const currentQty = currentInv ? currentInv.quantity : 0;
+            const currentInv = invList.find(inv => (inv.itemId || inv.item_id) === itemId);
+            const currentQty = currentInv ? (currentInv.quantity || 0) : 0;
             if (actualQty > currentQty) {
                 showError(`Tồn kho của ${getItemName(itemId)} trong kho đi là ${currentQty}, không đủ để xuất ${actualQty}.`);
                 hasError = true;
@@ -1219,6 +1337,10 @@ async function updateSTO(id) {
 
 // ====== SUBMIT, APPROVE, COMPLETE, DELETE STO ======
 async function submitSTO(id) {
+    if (!hasPermission('sto.submit')) {
+        showWarning('Bạn không có quyền gửi duyệt STO');
+        return;
+    }
     try {
         await api.submitSTO(id);
         switchWarehouseTab('wh-sto');
@@ -1229,6 +1351,10 @@ async function submitSTO(id) {
 }
 
 async function approveSTO(id) {
+    if (!hasPermission('sto.approve')) {
+        showWarning('Bạn không có quyền duyệt STO');
+        return;
+    }
     try {
         await api.approveSTO(id);
         switchWarehouseTab('wh-sto');
@@ -1239,6 +1365,10 @@ async function approveSTO(id) {
 }
 
 async function completeSTO(id) {
+    if (!hasPermission('sto.complete')) {
+        showWarning('Bạn không có quyền hoàn thành STO');
+        return;
+    }
     if (!confirm('Xác nhận hoàn thành chuyển kho? Hàng sẽ được cập nhật tồn kho.')) return;
     try {
         withLoading(async () => {
@@ -1252,6 +1382,10 @@ async function completeSTO(id) {
 }
 
 async function deleteSTO(id) {
+    if (!hasPermission('sto.delete')) {
+        showWarning('Bạn không có quyền xóa STO');
+        return;
+    }
     if (!confirm('Xóa phiếu chuyển kho này?')) return;
     try {
         await api.deleteSTO(id);
@@ -1263,9 +1397,13 @@ async function deleteSTO(id) {
 }
 
 // ================================================================
-// CRUD KHO & INVENTORY (GIỮ NGUYÊN NHƯNG DÙNG API)
+// CRUD KHO & INVENTORY (GIỮ NGUYÊN NHƯNG DÙNG API + PERMISSION)
 // ================================================================
 async function showAddWarehouse() {
+    if (!hasPermission('inventory.edit')) {
+        showWarning('Bạn không có quyền thêm kho');
+        return;
+    }
     const projects = await api.getProjects();
     const projectOpts = projects.map(p => `<option value="${p.id}">${p.code} - ${p.name}</option>`).join('');
     showModal('Thêm kho mới', `
@@ -1329,6 +1467,10 @@ async function saveWarehouse() {
 }
 
 async function showEditWarehouse(whId) {
+    if (!hasPermission('inventory.edit')) {
+        showWarning('Bạn không có quyền sửa kho');
+        return;
+    }
     try {
         const warehouses = await api.getWarehouses();
         const wh = warehouses.find(w => w.id === whId);
@@ -1398,6 +1540,10 @@ async function updateWarehouse(whId) {
 }
 
 async function showAddInventoryItem(whId) {
+    if (!hasPermission('inventory.edit')) {
+        showWarning('Bạn không có quyền thêm tồn kho');
+        return;
+    }
     const items = await api.getItems();
     const itemOpts = items.map(i => `<option value="${i.id}">${i.code} - ${i.name}</option>`).join('');
     showModal('Thêm tồn kho', `
@@ -1430,6 +1576,10 @@ async function saveInventoryItem(whId) {
 }
 
 async function editInventoryItem(invId) {
+    if (!hasPermission('inventory.edit')) {
+        showWarning('Bạn không có quyền sửa tồn kho');
+        return;
+    }
     try {
         const inventory = await api.getInventory();
         const inv = inventory.find(i => i.id === invId);
@@ -1479,6 +1629,10 @@ async function updateInventoryItem(invId) {
 }
 
 async function deleteInventoryItem(invId) {
+    if (!hasPermission('inventory.edit')) {
+        showWarning('Bạn không có quyền xóa tồn kho');
+        return;
+    }
     if (!confirm('Xóa tồn kho này?')) return;
     try {
         const inventory = await api.getInventory();
@@ -1509,6 +1663,7 @@ window.printSTO = function(id) {
 // ================================================================
 window.renderWarehousePage = renderWarehousePage;
 window.renderWarehouseListHTML = renderWarehouseListHTML;
+Object.defineProperty(window, 'currentWhTab', { get: () => currentWhTab });
 window.viewWarehouseDetail = viewWarehouseDetail;
 window.renderGRN = renderGRN;
 window.viewGRN = viewGRN;
@@ -1547,4 +1702,4 @@ window.renderSTOProgress = renderSTOProgress;
 window.printGRN = printGRN;
 window.printSTO = printSTO;
 
-console.log('✅ Warehouse module updated to use API (fixed null display).');
+console.log('✅ Warehouse module updated with full permission checks.');

@@ -62,19 +62,19 @@ function getStatusBadge(status) {
     const map = {
         'DRAFT': 'badge-draft',
         'PENDING': 'badge-pending',
+        'PENDING_PLANNING': 'badge-pending',
+        'PENDING_PROJECT': 'badge-pending',
+        'PENDING_CEO': 'badge-pending',
+        'PLANNING_APPROVED': 'badge-approved',
+        'PROJECT_APPROVED': 'badge-approved',
         'APPROVED': 'badge-approved',
         'REJECTED': 'badge-rejected',
         'COMPLETED': 'badge-completed',
         'CANCELLED': 'badge-cancelled',
         'CANCEL': 'badge-cancelled',
         'CONFIRMED': 'badge-completed',
-        'RECEIVED': 'badge-received',
-        'QC_CHECKED': 'badge-qc-checked',
-        'PENDING_PLANNING': 'badge-pending',
-        'PLANNING_APPROVED': 'badge-approved',
-        'PENDING_PROJECT': 'badge-pending',
-        'PROJECT_APPROVED': 'badge-approved',
-        'PENDING_CEO': 'badge-pending'
+        'RECEIVED': 'badge-info',
+        'QC_CHECKED': 'badge-info'
     };
     return `<span class="badge ${map[status] || 'badge-draft'}">${status}</span>`;
 }
@@ -161,22 +161,6 @@ function handleBlur(e) {
     }
 }
 
-/**
- * Danh sách roles dùng trong admin
- */
-function getRoles() {
-    return [
-        { value: 'ADMIN', label: 'Admin' },
-        { value: 'CEO', label: 'CEO' },
-        { value: 'PLANNING', label: 'Kế hoạch' },
-        { value: 'PROJECT', label: 'Dự án' },
-        { value: 'PURCHASING', label: 'Mua hàng' },
-        { value: 'SITE_COMMANDER', label: 'Chỉ huy' },
-        { value: 'QC', label: 'QC' }
-    ];
-}
-window.getRoles = getRoles;
-
 function closeModal() {
     const modal = document.getElementById('modal');
     modal.classList.remove('active');
@@ -188,18 +172,51 @@ document.getElementById('modal')?.addEventListener('click', function(e) {
 });
 
 // ================================================================
-// RENDER PROGRESS (DÙNG CHO MR, PR, PO, GRN, STO, ISSUE, RETURN)
+// RENDER PROGRESS (HỖ TRỢ WORKFLOW ĐỘNG)
 // ================================================================
 function renderApprovalProgress(status, step, stepsConfig) {
+    // Nếu không có stepsConfig, fallback về 3 bước mặc định
     const defaultSteps = [
         { id: 1, label: 'Phòng Kế hoạch' },
         { id: 2, label: 'Phòng Dự án' },
         { id: 3, label: 'Tổng Giám đốc' }
     ];
-    const steps = stepsConfig || defaultSteps;
-    const currentStep = step || 1;
+    const steps = stepsConfig && stepsConfig.length > 0 ? stepsConfig : defaultSteps;
 
-    if (status === 'APPROVED' || status === 'COMPLETED' || status === 'CONFIRMED') {
+    // Xác định bước hiện tại
+    let currentStep = step || 1;
+    
+    // Map trạng thái sang bước (cho các workflow mặc định)
+    const statusMap = {
+        'PENDING': 1,
+        'PENDING_PLANNING': 1,
+        'PLANNING_APPROVED': 1,
+        'PENDING_PROJECT': 2,
+        'PROJECT_APPROVED': 2,
+        'PENDING_CEO': 3,
+        // GRN
+        'RECEIVED': 2,
+        'QC_CHECKED': 3,
+        // Issue
+        'COMPLETED': 3,
+        'CONFIRMED': 4,
+        // Material Return
+        'APPROVED': 2,
+        'CONFIRMED': 3,
+        // STO
+        'APPROVED': 2,
+        'COMPLETED': 3
+    };
+    if (statusMap[status] !== undefined) {
+        currentStep = statusMap[status];
+    }
+
+    // Đảm bảo currentStep không vượt quá số bước
+    currentStep = Math.min(currentStep, steps.length);
+
+    // Hoàn thành
+    const finalStatuses = ['APPROVED', 'COMPLETED', 'CONFIRMED'];
+    if (finalStatuses.includes(status)) {
         let progressHtml = `<div style="display:flex; align-items:center; justify-content:space-between; width:100%; margin:8px 0;">`;
         steps.forEach((s, idx) => {
             progressHtml += `
@@ -225,7 +242,8 @@ function renderApprovalProgress(status, step, stepsConfig) {
         `;
     }
 
-    if (status === 'REJECTED') {
+    // Từ chối
+    if (status === 'REJECTED' || status === 'CANCELLED') {
         return `
             <div style="background:#fef2f2; border:1px solid #fecaca; padding:10px 14px; border-radius:8px; display:flex; align-items:center; gap:8px; color:#b91c1c;">
                 <span style="font-weight:600;">❌ Đã bị từ chối</span>
@@ -235,80 +253,123 @@ function renderApprovalProgress(status, step, stepsConfig) {
         `;
     }
 
-    if (status === 'PENDING' || status === 'RECEIVED' || status === 'QC_CHECKED') {
-        let progressHtml = `<div style="display:flex; align-items:center; justify-content:space-between; width:100%; margin:8px 0;">`;
-        steps.forEach((s, idx) => {
-            let circleBg = '';
-            let lineColor = '';
-            if (s.id < currentStep) {
-                circleBg = 'background:#22c55e; color:white;';
-                lineColor = '#22c55e';
-            } else if (s.id === currentStep) {
-                circleBg = 'background:#f59e0b; color:white; box-shadow:0 0 0 4px #fef3c7;';
-                lineColor = '#e5e7eb';
-            } else {
-                circleBg = 'background:#e5e7eb; color:#9ca3af;';
-                lineColor = '#e5e7eb';
-            }
-            progressHtml += `
-                <div style="display:flex; flex-direction:column; align-items:center; flex:1; position:relative;">
-                    <div style="width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; ${circleBg} z-index:2;">
-                        ${s.id < currentStep ? '✓' : s.id}
-                    </div>
-                    ${idx < steps.length - 1 ? `<div style="flex:1; height:3px; background:${lineColor}; position:absolute; left:calc(50% + 14px); right:calc(-50% + 14px); top:14px; z-index:1;"></div>` : ''}
+    // Đang xử lý
+    let progressHtml = `<div style="display:flex; align-items:center; justify-content:space-between; width:100%; margin:8px 0;">`;
+    steps.forEach((s, idx) => {
+        let circleBg = '';
+        let lineColor = '';
+        const stepNum = s.id || (idx + 1);
+        if (stepNum < currentStep) {
+            circleBg = 'background:#22c55e; color:white;';
+            lineColor = '#22c55e';
+        } else if (stepNum === currentStep) {
+            circleBg = 'background:#f59e0b; color:white; box-shadow:0 0 0 4px #fef3c7;';
+            lineColor = '#e5e7eb';
+        } else {
+            circleBg = 'background:#e5e7eb; color:#9ca3af;';
+            lineColor = '#e5e7eb';
+        }
+        progressHtml += `
+            <div style="display:flex; flex-direction:column; align-items:center; flex:1; position:relative;">
+                <div style="width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; ${circleBg} z-index:2;">
+                    ${stepNum < currentStep ? '✓' : stepNum}
                 </div>
-            `;
-        });
-        progressHtml += `</div>`;
-        let labelsHtml = `<div style="display:flex; justify-content:space-between; width:100%; margin-top:4px;">`;
-        steps.forEach(s => {
-            let color = s.id < currentStep ? '#15803d' : (s.id === currentStep ? '#d97706' : '#9ca3af');
-            let weight = s.id === currentStep ? '600' : '400';
-            labelsHtml += `<span style="text-align:center; flex:1; font-size:12px; color:${color}; font-weight:${weight};">${s.label}</span>`;
-        });
-        labelsHtml += `</div>`;
-        const stepName = steps.find(s => s.id === currentStep)?.label || `Bước ${currentStep}`;
-        return `
-            <div style="background:#f8fafc; border:1px solid #e2e8f0; padding:12px 16px; border-radius:8px;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                    <span style="font-size:14px; font-weight:500; color:#334155;">⏳ Đang thực hiện bước ${currentStep}</span>
-                    <span style="font-size:13px; background:#fef3c7; padding:2px 12px; border-radius:12px; color:#b45309;">${stepName}</span>
-                </div>
-                ${progressHtml}
-                ${labelsHtml}
+                ${idx < steps.length - 1 ? `<div style="flex:1; height:3px; background:${lineColor}; position:absolute; left:calc(50% + 14px); right:calc(-50% + 14px); top:14px; z-index:1;"></div>` : ''}
             </div>
         `;
+    });
+    progressHtml += `</div>`;
+
+    let labelsHtml = `<div style="display:flex; justify-content:space-between; width:100%; margin-top:4px;">`;
+    steps.forEach((s, idx) => {
+        const stepNum = s.id || (idx + 1);
+        let color = stepNum < currentStep ? '#15803d' : (stepNum === currentStep ? '#d97706' : '#9ca3af');
+        let weight = stepNum === currentStep ? '600' : '400';
+        labelsHtml += `<span style="text-align:center; flex:1; font-size:12px; color:${color}; font-weight:${weight};">${s.label}</span>`;
+    });
+    labelsHtml += `</div>`;
+
+    const stepName = steps.find(s => (s.id || s.step) === currentStep)?.label || `Bước ${currentStep}`;
+    return `
+        <div style="background:#f8fafc; border:1px solid #e2e8f0; padding:12px 16px; border-radius:8px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                <span style="font-size:14px; font-weight:500; color:#334155;">⏳ Đang thực hiện</span>
+                <span style="font-size:13px; background:#fef3c7; padding:2px 12px; border-radius:12px; color:#b45309;">${stepName}</span>
+            </div>
+            ${progressHtml}
+            ${labelsHtml}
+        </div>
+    `;
+}
+
+
+// ================================================================
+// PHÂN TRANG (CLIENT-SIDE) - DÙNG CHUNG CHO MỌI MENU
+// ================================================================
+const DEFAULT_PAGE_SIZE = 10;
+const PAGE_SIZE_OPTIONS = [10, 20, 30, 50];
+
+function getPageSize(storageKey = 'default') {
+    try {
+        const map = getData('page_size_map') || {};
+        const val = parseInt(map[storageKey]);
+        return PAGE_SIZE_OPTIONS.includes(val) ? val : DEFAULT_PAGE_SIZE;
+    } catch (e) { return DEFAULT_PAGE_SIZE; }
+}
+
+function setPageSize(storageKey, size) {
+    try {
+        const map = getData('page_size_map') || {};
+        map[storageKey] = parseInt(size);
+        saveData('page_size_map', map);
+    } catch (e) {}
+}
+
+function paginate(list, page, perPage) {
+    const arr = list || [];
+    const totalItems = arr.length;
+    const totalPages = Math.max(1, Math.ceil(totalItems / perPage));
+    const safePage = Math.min(Math.max(1, page), totalPages);
+    const start = (safePage - 1) * perPage;
+    return {
+        items: arr.slice(start, start + perPage),
+        page: safePage,
+        perPage,
+        totalItems,
+        totalPages
+    };
+}
+
+function buildPaginationHTML(paging, targetFn, storageKey = 'default') {
+    if (!paging || paging.totalItems <= DEFAULT_PAGE_SIZE) return '';
+    let html = `<div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:12px; justify-content:flex-end;">`;
+    html += `<span style="font-size:13px; color:#666; margin-right:8px;">${paging.totalItems} dòng</span>`;
+    html += `<button class="btn btn-sm" onclick="${targetFn}(${paging.page - 1})" ${paging.page <= 1 ? 'disabled' : ''}><i class="fas fa-chevron-left"></i></button>`;
+    const startPage = Math.max(1, paging.page - 2);
+    const endPage = Math.min(paging.totalPages, paging.page + 2);
+    for (let i = startPage; i <= endPage; i++) {
+        html += `<button class="btn btn-sm ${i === paging.page ? 'btn-primary' : ''}" onclick="${targetFn}(${i})">${i}</button>`;
     }
-    return '';
+    html += `<button class="btn btn-sm" onclick="${targetFn}(${paging.page + 1})" ${paging.page >= paging.totalPages ? 'disabled' : ''}><i class="fas fa-chevron-right"></i></button>`;
+    html += ` <select class="btn btn-sm" onchange="window._changePageSize('${storageKey}', this.value, '${targetFn}')" style="width:auto;">`;
+    PAGE_SIZE_OPTIONS.forEach(sz => {
+        html += `<option value="${sz}" ${sz === paging.perPage ? 'selected' : ''}>${sz} dòng/trang</option>`;
+    });
+    html += `</select>`;
+    html += `</div>`;
+    return html;
 }
 
-function renderSTOProgress(status, sto) {
-    const steps = [
-        { id: 1, label: 'Lập phiếu', actor: sto?.requestedBy || 'Chưa có' },
-        { id: 2, label: 'Duyệt', actor: sto?.approvedBy || 'Chưa duyệt' },
-        { id: 3, label: 'Xuất kho', actor: sto?.warehouseStaff || 'Chưa xuất' }
-    ];
-    let currentStep = 1;
-    if (status === 'PENDING') currentStep = 2;
-    else if (status === 'APPROVED' || status === 'COMPLETED') currentStep = 3;
-    return renderApprovalProgress(status, currentStep, steps);
-}
+window._changePageSize = function(storageKey, size, targetFn) {
+    setPageSize(storageKey, size);
+    try {
+        if (typeof window[targetFn] === 'function') window[targetFn](1);
+    } catch (e) {}
+};
 
-function renderGRNProgress(status) {
-    const steps = [
-        { id: 1, label: 'Tạo phiếu' },
-        { id: 2, label: 'Thủ kho nhận' },
-        { id: 3, label: 'QC kiểm tra' },
-        { id: 4, label: 'Hoàn thành' }
-    ];
-    let currentStep = 1;
-    if (status === 'RECEIVED') currentStep = 2;
-    else if (status === 'QC_CHECKED') currentStep = 3;
-    else if (status === 'COMPLETED') currentStep = 4;
-    return renderApprovalProgress(status, currentStep, steps);
-}
-
-// ====== SHOW WAREHOUSE INFO MODAL ======
+// ================================================================
+// SHOW WAREHOUSE INFO MODAL
+// ================================================================
 function showWarehouseInfoModal(whId) {
     const wh = (window._warehousesCache || []).find(w => w.id === whId);
     if (!wh) {
@@ -356,8 +417,12 @@ window.formatDate = formatDate;
 window.showModal = showModal;
 window.closeModal = closeModal;
 window.renderApprovalProgress = renderApprovalProgress;
-window.renderSTOProgress = renderSTOProgress;
-window.renderGRNProgress = renderGRNProgress;
 window.showWarehouseInfoModal = showWarehouseInfoModal;
+window.paginate = paginate;
+window.buildPaginationHTML = buildPaginationHTML;
+window.getPageSize = getPageSize;
+window.setPageSize = setPageSize;
+window.DEFAULT_PAGE_SIZE = DEFAULT_PAGE_SIZE;
+window.PAGE_SIZE_OPTIONS = PAGE_SIZE_OPTIONS;
 
-console.log('✅ Utils module (using API cache) loaded successfully.');
+console.log('✅ Utils module loaded successfully.');

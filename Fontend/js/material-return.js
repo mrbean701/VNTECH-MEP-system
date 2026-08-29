@@ -1,6 +1,7 @@
 // ================================================================
-// MATERIAL RETURN - Hoàn trả vật tư (SỬ DỤNG API)
+// MATERIAL RETURN - Hoàn trả vật tư - ĐÃ TÍCH HỢP PHÂN QUYỀN
 // ================================================================
+let returnPageState = { page: 1, perPage: 10 };
 
 // ====== HÀM TẠO MÃ TỰ ĐỘNG ======
 function generateReturnCode() {
@@ -36,11 +37,23 @@ async function renderMaterialReturnPage() {
 
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     page.classList.add('active');
+
+    // Kiểm tra quyền xem
+    if (!hasPermission('materialreturn.view')) {
+        document.getElementById('material-return-container').innerHTML = `
+            <div style="padding:20px; text-align:center; color:#e74c3c;">
+                <i class="fas fa-lock" style="font-size:24px; display:block; margin-bottom:10px;"></i>
+                Bạn không có quyền xem danh sách hoàn trả
+            </div>
+        `;
+        return;
+    }
+
     await renderMaterialReturns();
 }
 
 // ====== RENDER DANH SÁCH ======
-async function renderMaterialReturns() {
+async function renderMaterialReturns(page = null) {
     const container = document.getElementById('material-return-container');
     if (!container) {
         console.error('❌ Không tìm thấy container');
@@ -53,20 +66,28 @@ async function renderMaterialReturns() {
         const statusFilter = document.getElementById('return-status-filter')?.value || '';
 
         const filtered = returns.filter(item => {
-            const matchCode = item.code.toLowerCase().includes(filter);
+            const matchCode = (item.code || '').toLowerCase().includes(filter);
             const matchProject = (item.projectName || '').toLowerCase().includes(filter);
             const matchStatus = statusFilter ? item.status === statusFilter : true;
             return (matchCode || matchProject) && matchStatus;
         });
 
+        if (page) returnPageState.page = page;
+        const perPage = getPageSize('return');
+        returnPageState.perPage = perPage;
+        const paging = paginate(filtered, returnPageState.page, perPage);
+
+        // Kiểm tra quyền
+        const canCreate = hasPermission('materialreturn.create');
+
+        // Ẩn/hiện nút Tạo phiếu
+        const btnCreate = document.getElementById('btn-create-return');
+        if (btnCreate) {
+            btnCreate.style.display = canCreate ? 'inline-block' : 'none';
+        }
+
+        // Tạo HTML (không có header)
         let html = `
-            <div class="page-header">
-                <h2>🔄 Hoàn trả vật tư (Material Return)</h2>
-                <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                    <button class="btn" id="btn-create-return"><i class="fas fa-plus"></i> Tạo phiếu</button>
-                    <button class="btn btn-success" onclick="exportMaterialReturns()"><i class="fas fa-file-excel"></i> Xuất Excel</button>
-                </div>
-            </div>
             <div class="filter-bar">
                 <input type="text" id="return-filter" placeholder="Tìm theo mã hoặc dự án..." style="flex:1;" />
                 <select id="return-status-filter">
@@ -96,11 +117,11 @@ async function renderMaterialReturns() {
                     <tbody>
         `;
 
-        if (!filtered.length) {
+        if (!paging.items.length) {
             html += `<tr><td colspan="8" style="text-align:center; color:#999;">Không có dữ liệu</td></tr>`;
         }
 
-        for (const item of filtered) {
+        for (const item of paging.items) {
             const statusBadge = getStatusBadge(item.status);
             const projectId = getProjectIdByCode(item.projectCode);
             const projectDisplay = projectId ?
@@ -122,20 +143,26 @@ async function renderMaterialReturns() {
             </tr>`;
         }
 
-        html += `
+                html += `
                     </tbody>
                 </table>
             </div>
         `;
+        html += buildPaginationHTML(paging, 'renderMaterialReturns', 'return');
 
         container.innerHTML = html;
 
-        document.getElementById('btn-create-return')?.addEventListener('click', function() {
-            showCreateMaterialReturnModal();
-        });
-
-        document.getElementById('return-filter')?.addEventListener('input', renderMaterialReturns);
-        document.getElementById('return-status-filter')?.addEventListener('change', renderMaterialReturns);
+        // Gắn sự kiện cho filter
+        const filterInput = document.getElementById('return-filter');
+        const statusSelect = document.getElementById('return-status-filter');
+        if (filterInput) {
+            filterInput.removeEventListener('input', renderMaterialReturns);
+            filterInput.addEventListener('input', () => { returnPageState.page = 1; renderMaterialReturns(); });
+        }
+        if (statusSelect) {
+            statusSelect.removeEventListener('change', renderMaterialReturns);
+            statusSelect.addEventListener('change', () => { returnPageState.page = 1; renderMaterialReturns(); });
+        }
 
     } catch (error) {
         showError('Không thể tải danh sách hoàn trả: ' + error.message);
@@ -146,33 +173,46 @@ async function renderMaterialReturns() {
 // ====== HÀM LẤY ACTION ======
 function getReturnActions(item) {
     const user = getUser();
-    const isAdmin = user?.role === 'ADMIN';
-    const isCommander = user?.role === 'SITE_COMMANDER';
-    const isPurchasing = user?.role === 'PURCHASING' || isAdmin;
-    const isCreator = user?.id === item.createdBy;
     let actions = '';
 
+    // Xem luôn hiển thị
     actions += `<button class="btn btn-info btn-sm" onclick="viewMaterialReturn(${item.id})"><i class="fas fa-eye"></i></button>`;
 
-    if (item.status === 'DRAFT' && (isAdmin || isCreator)) {
+    // Quyền sửa: DRAFT và có quyền edit + (admin hoặc người tạo)
+    const canEdit = hasPermission('materialreturn.edit') && 
+                   (item.status === 'DRAFT' || item.status === 'PENDING') && 
+                   (user?.role === 'ADMIN' || user?.id === item.createdBy);
+    if (canEdit) {
         actions += ` <button class="btn btn-warning btn-sm" onclick="editMaterialReturn(${item.id})"><i class="fas fa-edit"></i></button>`;
     }
 
-    if (item.status === 'DRAFT' && (isAdmin || isCreator)) {
+    // Quyền xóa: DRAFT và có quyền delete + (admin hoặc người tạo)
+    const canDelete = hasPermission('materialreturn.delete') && 
+                     item.status === 'DRAFT' && 
+                     (user?.role === 'ADMIN' || user?.id === item.createdBy);
+    if (canDelete) {
+        actions += ` <button class="btn btn-danger btn-sm" onclick="deleteMaterialReturn(${item.id})"><i class="fas fa-trash"></i></button>`;
+    }
+
+    // Gửi duyệt: DRAFT và có quyền submit + (admin hoặc người tạo)
+    const canSubmit = hasPermission('materialreturn.submit') && 
+                     item.status === 'DRAFT' && 
+                     (user?.role === 'ADMIN' || user?.id === item.createdBy);
+    if (canSubmit) {
         actions += ` <button class="btn btn-success btn-sm" onclick="submitMaterialReturn(${item.id})">Gửi duyệt</button>`;
     }
 
-    if (item.status === 'PENDING' && (isPurchasing || isAdmin)) {
+    // Duyệt: PENDING và có quyền approve
+    const canApprove = hasPermission('materialreturn.approve') && item.status === 'PENDING';
+    if (canApprove) {
         actions += ` <button class="btn btn-success btn-sm" onclick="approveMaterialReturn(${item.id})">Nhận vật tư</button>`;
         actions += ` <button class="btn btn-danger btn-sm" onclick="rejectMaterialReturn(${item.id})">Từ chối</button>`;
     }
 
-    if (item.status === 'APPROVED' && (isCommander || isAdmin)) {
+    // Xác nhận hoàn tất: APPROVED và có quyền confirm
+    const canConfirm = hasPermission('materialreturn.confirm') && item.status === 'APPROVED';
+    if (canConfirm) {
         actions += ` <button class="btn btn-success btn-sm" onclick="confirmMaterialReturn(${item.id})">Xác nhận hoàn tất</button>`;
-    }
-
-    if ((isAdmin || (isCreator && item.status === 'DRAFT'))) {
-        actions += ` <button class="btn btn-danger btn-sm" onclick="deleteMaterialReturn(${item.id})"><i class="fas fa-trash"></i></button>`;
     }
 
     return actions || '-';
@@ -181,6 +221,9 @@ function getReturnActions(item) {
 // ====== TẠO PHIẾU (MODAL) ======
 function showCreateMaterialReturnModal() {
     Promise.all([api.getProjects(), api.getWarehouses(), api.getItems()]).then(([projects, warehouses, items]) => {
+        // Cache items cho dropdown
+        window._itemsCache = items;
+
         const projectOpts = projects.map(p => `<option value="${p.code}">${p.code} - ${p.name}</option>`).join('');
         const whOpts = warehouses.map(w => `<option value="${w.id}">${w.code} - ${w.name}</option>`).join('');
         const itemOpts = items.map(i => `<option value="${i.id}">${i.code} - ${i.name}</option>`).join('');
@@ -304,6 +347,11 @@ function collectReturnItemsFromForm(container) {
 
 // ====== LƯU PHIẾU ======
 async function saveMaterialReturn() {
+    if (!hasPermission('materialreturn.create')) {
+        showWarning('Bạn không có quyền tạo phiếu hoàn trả!');
+        return;
+    }
+
     const projectCode = document.getElementById('f-return-project').value;
     const returnDate = document.getElementById('f-return-date').value;
     const warehouseId = parseInt(document.getElementById('f-return-warehouse').value);
@@ -343,7 +391,7 @@ async function saveMaterialReturn() {
     }
 }
 
-// ====== XEM CHI TIẾT ======
+// ====== XEM CHI TIẾT PHIẾU ======
 async function viewMaterialReturn(id) {
     try {
         let item = await api.getMaterialReturnById ? await api.getMaterialReturnById(id) : null;
@@ -369,12 +417,31 @@ async function viewMaterialReturn(id) {
             </tr>
         `).join('');
 
-        const progressHtml = renderReturnProgress(item.status);
+        // Lấy workflow steps từ workflowId của Material Return
+        let stepsConfig = [
+            { id: 1, label: 'Tạo phiếu' },
+            { id: 2, label: 'Thủ kho nhận' },
+            { id: 3, label: 'Xác nhận hoàn tất' }
+        ];
+        if (item.workflowId) {
+            try {
+                const wf = await api.getWorkflowById ? await api.getWorkflowById(item.workflowId) : null;
+                if (wf && wf.steps) {
+                    const steps = JSON.parse(wf.steps);
+                    stepsConfig = steps.map(s => ({
+                        id: s.step || s.id,
+                        label: s.label || `Bước ${s.step || s.id}`
+                    }));
+                }
+            } catch (e) {
+                console.warn('Không lấy được workflow steps:', e);
+            }
+        }
+        const progressHtml = renderApprovalProgress(item.status, item.approvalStep || 1, stepsConfig);
         const projectId = getProjectIdByCode(item.projectCode);
         const projectDisplay = projectId ?
             `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="closeModal(); viewProject(${projectId})">${item.projectName || item.projectCode}</span>` :
             (item.projectName || item.projectCode || '');
-
         const whName = getWarehouseName(item.warehouseId);
 
         showModal('Chi tiết phiếu hoàn trả', `
@@ -411,6 +478,11 @@ async function viewMaterialReturn(id) {
 
 // ====== SỬA PHIẾU (DRAFT) ======
 async function editMaterialReturn(id) {
+    if (!hasPermission('materialreturn.edit')) {
+        showWarning('Bạn không có quyền sửa phiếu hoàn trả!');
+        return;
+    }
+
     try {
         const returns = await api.getMaterialReturns();
         const item = returns.find(i => i.id === id);
@@ -516,6 +588,10 @@ async function updateMaterialReturn(id) {
 
 // ====== GỬI DUYỆT ======
 async function submitMaterialReturn(id) {
+    if (!hasPermission('materialreturn.submit')) {
+        showWarning('Bạn không có quyền gửi duyệt phiếu hoàn trả!');
+        return;
+    }
     try {
         await api.submitMaterialReturn(id);
         await renderMaterialReturns();
@@ -527,6 +603,11 @@ async function submitMaterialReturn(id) {
 
 // ====== THỦ KHO NHẬN (APPROVED) ======
 async function approveMaterialReturn(id) {
+    if (!hasPermission('materialreturn.approve')) {
+        showWarning('Bạn không có quyền xác nhận nhập kho hoàn trả!');
+        return;
+    }
+
     try {
         const returns = await api.getMaterialReturns();
         const item = returns.find(i => i.id === id);
@@ -592,7 +673,6 @@ async function updateMaterialReturnApproval(id) {
             hasError = true;
             return;
         }
-        // Lưu ý: cần lấy requestedQty từ dữ liệu gốc, backend sẽ kiểm tra.
         newItems.push({ itemId, actualQty, condition, note });
     });
 
@@ -611,6 +691,10 @@ async function updateMaterialReturnApproval(id) {
 
 // ====== CHỈ HUY TRƯỞNG XÁC NHẬN HOÀN TẤT ======
 async function confirmMaterialReturn(id) {
+    if (!hasPermission('materialreturn.confirm')) {
+        showWarning('Bạn không có quyền xác nhận hoàn tất phiếu hoàn trả!');
+        return;
+    }
     if (!confirm('Xác nhận hoàn tất phiếu hoàn trả?')) return;
     try {
         await api.confirmMaterialReturn(id);
@@ -623,6 +707,10 @@ async function confirmMaterialReturn(id) {
 
 // ====== TỪ CHỐI ======
 async function rejectMaterialReturn(id) {
+    if (!hasPermission('materialreturn.reject')) {
+        showWarning('Bạn không có quyền từ chối phiếu hoàn trả!');
+        return;
+    }
     if (!confirm('Từ chối phiếu hoàn trả này?')) return;
     try {
         await api.rejectMaterialReturn(id);
@@ -635,6 +723,10 @@ async function rejectMaterialReturn(id) {
 
 // ====== XÓA PHIẾU ======
 async function deleteMaterialReturn(id) {
+    if (!hasPermission('materialreturn.delete')) {
+        showWarning('Bạn không có quyền xóa phiếu hoàn trả!');
+        return;
+    }
     if (!confirm('Xóa phiếu hoàn trả này?')) return;
     try {
         await api.deleteMaterialReturn(id);
@@ -663,39 +755,31 @@ function renderReturnProgress(status) {
 
 // ====== EXPORT EXCEL ======
 function exportMaterialReturns() {
-    // Giữ nguyên từ file cũ (không liên quan API)
-    const returns = getMaterialReturns(); // vẫn dùng localStorage tạm
-    if (!returns.length) {
-        showWarning('Không có dữ liệu để xuất!');
-        return;
-    }
-    const data = returns.map(item => ({
-        'Mã phiếu': item.code,
-        'Dự án': item.projectName || item.projectCode || '',
-        'Ngày trả': item.returnDate || '',
-        'Kho nhận': getWarehouseName(item.warehouseId),
-        'Trả từ': item.returnFrom || '',
-        'Người trả': item.returner || '',
-        'Trạng thái': item.status,
-        'Số lượng vật tư': item.items ? item.items.reduce((sum, it) => sum + it.actualQty, 0) : 0,
-        'Ghi chú': item.note || ''
-    }));
-    exportToExcel(data, 'Danh_sach_hoan_tra', Object.keys(data[0]));
+    api.getMaterialReturns().then(returns => {
+        if (!returns || !returns.length) {
+            showWarning('Không có dữ liệu để xuất!');
+            return;
+        }
+        const data = returns.map(item => ({
+            'Mã phiếu': item.code,
+            'Dự án': item.projectName || item.projectCode || '',
+            'Ngày trả': item.returnDate || '',
+            'Kho nhận': getWarehouseName(item.warehouseId),
+            'Trả từ': item.returnFrom || '',
+            'Người trả': item.returner || '',
+            'Trạng thái': item.status,
+            'Số lượng vật tư': item.items ? JSON.parse(item.items).reduce((sum, it) => sum + it.actualQty, 0) : 0,
+            'Ghi chú': item.note || ''
+        }));
+        exportToExcel(data, 'Danh_sach_hoan_tra', Object.keys(data[0]));
+    }).catch(err => {
+        showError('Lỗi lấy dữ liệu xuất: ' + err.message);
+    });
 }
 
 // ====== IN PHIẾU ======
 function printMaterialReturn(id) {
     showInfo('Chức năng in đang được phát triển.');
-}
-
-// ====== THÊM MENU ======
-function addMaterialReturnMenu() {
-    // Đã có trong HTML
-}
-
-// ====== KHỞI TẠO DỮ LIỆU MẪU ======
-function initMaterialReturnData() {
-    // Không cần vì đã có dữ liệu từ database
 }
 
 // ====== EXPORT RA WINDOW ======
@@ -711,4 +795,4 @@ window.rejectMaterialReturn = rejectMaterialReturn;
 window.deleteMaterialReturn = deleteMaterialReturn;
 window.printMaterialReturn = printMaterialReturn;
 
-console.log('✅ Material Return module updated to use API.');
+console.log('✅ Material Return module updated with full permission checks.');

@@ -2,12 +2,15 @@ package com.mep.mepbackend.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.mep.mepbackend.entity.MaterialReturn;
+import com.mep.mepbackend.entity.ApprovalHistory;
 import com.mep.mepbackend.entity.Inventory;
+import com.mep.mepbackend.entity.MaterialReturn;
 import com.mep.mepbackend.entity.User;
+import com.mep.mepbackend.entity.Workflow;
 import com.mep.mepbackend.exception.ResourceNotFoundException;
-import com.mep.mepbackend.repository.MaterialReturnRepository;
+import com.mep.mepbackend.repository.ApprovalHistoryRepository;
 import com.mep.mepbackend.repository.InventoryRepository;
+import com.mep.mepbackend.repository.MaterialReturnRepository;
 import com.mep.mepbackend.util.CurrentUserUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -15,6 +18,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -24,13 +29,30 @@ public class MaterialReturnService {
 
     private final MaterialReturnRepository returnRepository;
     private final InventoryRepository inventoryRepository;
+    private final ApprovalHistoryRepository approvalHistoryRepository;
     private final ObjectMapper objectMapper;
     private final WorkflowService workflowService;
     private final StatusService statusService;
     private final CurrentUserUtil currentUserUtil;
 
-    // ===== GETTERS =====
+    private static final List<String> PENDING_STATUSES = Arrays.asList("PENDING");
 
+    // ===== HELPERS =====
+    private String generateCode(String prefix) {
+        long count = returnRepository.count() + 1;
+        String code = prefix + "-" + String.format("%03d", count);
+        while (returnRepository.existsByCode(code)) {
+            count++;
+            code = prefix + "-" + String.format("%03d", count);
+        }
+        return code;
+    }
+
+    private boolean isPendingStatus(String status) {
+        return PENDING_STATUSES.contains(status);
+    }
+
+    // ===== GETTERS =====
     public List<MaterialReturn> getAll() {
         return returnRepository.findAll();
     }
@@ -40,53 +62,47 @@ public class MaterialReturnService {
                 .orElseThrow(() -> new ResourceNotFoundException("MaterialReturn not found with id: " + id));
     }
 
-    public MaterialReturn getByCode(String code) {
-        return returnRepository.findByCode(code)
-                .orElseThrow(() -> new ResourceNotFoundException("MaterialReturn not found with code: " + code));
-    }
-
-    public List<MaterialReturn> getByProjectCode(String projectCode) {
-        return returnRepository.findByProjectCode(projectCode);
-    }
-
-    public List<MaterialReturn> getByStatus(String status) {
-        return returnRepository.findByStatus(status);
-    }
-
     // ===== CREATE =====
-
     @Transactional
     public MaterialReturn create(MaterialReturn materialReturn) {
         if (!currentUserUtil.hasPermission("materialreturn.create")) {
             throw new RuntimeException("Bạn không có quyền tạo phiếu hoàn trả");
         }
 
-        long count = returnRepository.count();
-        String nextCode = "MRET-" + String.format("%03d", count + 1);
-        if (returnRepository.existsByCode(nextCode)) {
-            long i = count + 2;
-            while (returnRepository.existsByCode("MRET-" + String.format("%03d", i))) i++;
-            nextCode = "MRET-" + String.format("%03d", i);
-        }
+        materialReturn.setCode(generateCode("MRET"));
+        Workflow activeWorkflow = workflowService.getActiveWorkflow("materialreturn");
+        materialReturn.setWorkflowId(activeWorkflow.getId());
 
         String defaultStatus = statusService.getDefaultStatus("materialreturn").getCode();
-        materialReturn.setCode(nextCode);
         materialReturn.setStatus(defaultStatus);
+        materialReturn.setApprovalStep(1);
+
+        User currentUser = currentUserUtil.getCurrentUser();
+        materialReturn.setCreatedBy(currentUser.getId());
+        materialReturn.setCreatedByName(currentUser.getName());
+
         materialReturn.setCreatedAt(LocalDate.now());
         return returnRepository.save(materialReturn);
     }
 
     // ===== UPDATE =====
-
     @Transactional
     public MaterialReturn update(Long id, MaterialReturn details) {
         MaterialReturn mr = getById(id);
         if (!currentUserUtil.hasPermission("materialreturn.edit")) {
             throw new RuntimeException("Bạn không có quyền sửa phiếu hoàn trả");
         }
+
         if (!"DRAFT".equals(mr.getStatus())) {
-            throw new RuntimeException("Chỉ có thể sửa phiếu ở trạng thái DRAFT");
+            if (isPendingStatus(mr.getStatus())) {
+                if (approvalHistoryRepository.existsByEntityTypeAndEntityId("MATERIAL_RETURN", id)) {
+                    throw new RuntimeException("Không thể sửa phiếu vì đã được duyệt bước 1");
+                }
+            } else {
+                throw new RuntimeException("Chỉ có thể sửa phiếu ở trạng thái DRAFT hoặc PENDING chưa duyệt");
+            }
         }
+
         mr.setProjectCode(details.getProjectCode());
         mr.setProjectName(details.getProjectName());
         mr.setReturnDate(details.getReturnDate());
@@ -100,7 +116,6 @@ public class MaterialReturnService {
     }
 
     // ===== SUBMIT =====
-
     @Transactional
     public void submit(Long id) {
         MaterialReturn mr = getById(id);
@@ -110,31 +125,61 @@ public class MaterialReturnService {
         if (!"DRAFT".equals(mr.getStatus())) {
             throw new RuntimeException("Chỉ có thể gửi duyệt phiếu ở trạng thái DRAFT");
         }
-        mr.setStatus("PENDING");
+
+        Workflow wf = workflowService.getById(mr.getWorkflowId());
+        List<Map<String, Object>> steps = workflowService.getStepsByWorkflowId(wf.getId());
+        if (steps.isEmpty()) {
+            throw new RuntimeException("Workflow không có bước duyệt nào");
+        }
+
+        if (steps.size() == 1) {
+            if (!currentUserUtil.hasPermission("materialreturn.approve")) {
+                throw new RuntimeException("Bạn không có quyền duyệt phiếu hoàn trả");
+            }
+            approve(id);
+            return;
+        }
+
+        Map<String, Object> firstStep = steps.get(0);
+        String statusCode = (String) firstStep.get("statusCode");
+        mr.setStatus(statusCode != null && !statusCode.isEmpty() ? statusCode : "PENDING");
+        mr.setApprovalStep(1);
         mr.setUpdatedAt(LocalDate.now());
         returnRepository.save(mr);
     }
 
     // ===== APPROVE =====
-
     @Transactional
     public void approve(Long id, String itemsUpdateJson) {
         MaterialReturn mr = getById(id);
-        if (!currentUserUtil.hasPermission("materialreturn.approve")) {
-            throw new RuntimeException("Bạn không có quyền xác nhận nhập kho hoàn trả");
-        }
-        if (!"PENDING".equals(mr.getStatus())) {
+        if (!isPendingStatus(mr.getStatus())) {
             throw new RuntimeException("Phiếu không ở trạng thái chờ duyệt");
         }
 
-        String statusCode = workflowService.getStatusForStep("materialreturn", 2);
+        Workflow wf = workflowService.getById(mr.getWorkflowId());
+        List<Map<String, Object>> steps = workflowService.getStepsByWorkflowId(wf.getId());
+        int currentStep = mr.getApprovalStep() != null ? mr.getApprovalStep() : 1;
 
+        Map<String, Object> step = steps.stream()
+                .filter(s -> (int) s.get("step") == currentStep)
+                .findFirst()
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy bước duyệt " + currentStep));
+
+        String permissionKey = (String) step.get("permissionKey");
+        Long requiredDeptId = step.get("departmentId") != null ? ((Number) step.get("departmentId")).longValue() : null;
+        if (!currentUserUtil.hasPermissionAndDepartment(permissionKey, requiredDeptId)) {
+            throw new RuntimeException("Bạn không có quyền duyệt bước này");
+        }
+
+        User currentUser = currentUserUtil.getCurrentUser();
+        if (steps.size() > 1 && currentUser.getId().equals(mr.getCreatedBy())) {
+            throw new RuntimeException("Bạn không thể tự duyệt phiếu hoàn trả do chính mình tạo");
+        }
+
+        // Cập nhật tồn kho
         try {
             ArrayNode itemsArray = (ArrayNode) objectMapper.readTree(itemsUpdateJson);
             mr.setItems(itemsUpdateJson);
-            mr.setStatus(statusCode != null ? statusCode : "APPROVED");
-            mr.setApprovedBy(currentUserUtil.getCurrentUser().getName());
-            mr.setUpdatedAt(LocalDate.now());
 
             for (var item : itemsArray) {
                 Long itemId = item.get("itemId").asLong();
@@ -155,14 +200,35 @@ public class MaterialReturnService {
                     inventoryRepository.save(newInv);
                 }
             }
-            returnRepository.save(mr);
         } catch (Exception e) {
             throw new RuntimeException("Lỗi cập nhật tồn kho: " + e.getMessage());
         }
+
+        ApprovalHistory history = new ApprovalHistory();
+        history.setEntityType("MATERIAL_RETURN");
+        history.setEntityId(mr.getId());
+        history.setWorkflowId(wf.getId());
+        history.setStep(currentStep);
+        history.setApproverId(currentUser.getId());
+        history.setApproverName(currentUser.getName());
+        history.setStatusBefore(mr.getStatus());
+
+        if (currentStep == steps.size()) {
+            mr.setStatus("APPROVED");
+        } else {
+            mr.setApprovalStep(currentStep + 1);
+            String nextStatusCode = workflowService.getStatusForStep(wf.getId(), currentStep + 1);
+            mr.setStatus(nextStatusCode != null && !nextStatusCode.isEmpty() ? nextStatusCode : "APPROVED");
+        }
+        history.setStatusAfter(mr.getStatus());
+
+        approvalHistoryRepository.save(history);
+        mr.setApprovedBy(currentUser.getName());
+        mr.setUpdatedAt(LocalDate.now());
+        returnRepository.save(mr);
     }
 
     // ===== CONFIRM =====
-
     @Transactional
     public void confirm(Long id) {
         MaterialReturn mr = getById(id);
@@ -173,33 +239,68 @@ public class MaterialReturnService {
             throw new RuntimeException("Phiếu chưa được thủ kho xác nhận");
         }
 
-        String statusCode = workflowService.getStatusForStep("materialreturn", 3);
+        Workflow wf = workflowService.getById(mr.getWorkflowId());
+        List<Map<String, Object>> steps = workflowService.getStepsByWorkflowId(wf.getId());
+        int currentStep = 3;
+        Map<String, Object> step = steps.stream()
+                .filter(s -> (int) s.get("step") == currentStep)
+                .findFirst()
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy bước xác nhận"));
+
+        String permissionKey = (String) step.get("permissionKey");
+        Long requiredDeptId = step.get("departmentId") != null ? ((Number) step.get("departmentId")).longValue() : null;
+        if (!currentUserUtil.hasPermissionAndDepartment(permissionKey, requiredDeptId)) {
+            throw new RuntimeException("Bạn không có quyền xác nhận");
+        }
+
+        User currentUser = currentUserUtil.getCurrentUser();
+        if (currentUser.getId().equals(mr.getCreatedBy())) {
+            throw new RuntimeException("Bạn không thể tự xác nhận phiếu hoàn trả do chính mình tạo");
+        }
+
+        String statusCode = (String) step.get("statusCode");
+
+        ApprovalHistory history = new ApprovalHistory();
+        history.setEntityType("MATERIAL_RETURN");
+        history.setEntityId(mr.getId());
+        history.setWorkflowId(wf.getId());
+        history.setStep(currentStep);
+        history.setApproverId(currentUser.getId());
+        history.setApproverName(currentUser.getName());
+        history.setStatusBefore(mr.getStatus());
 
         mr.setStatus(statusCode != null ? statusCode : "CONFIRMED");
-        mr.setConfirmedBy(currentUserUtil.getCurrentUser().getName());
+        mr.setConfirmedBy(currentUser.getName());
         mr.setCompletionDate(LocalDate.now());
+        history.setStatusAfter(mr.getStatus());
+
+        approvalHistoryRepository.save(history);
         mr.setUpdatedAt(LocalDate.now());
         returnRepository.save(mr);
     }
 
     // ===== REJECT =====
-
     @Transactional
     public void reject(Long id) {
         MaterialReturn mr = getById(id);
+        if (!isPendingStatus(mr.getStatus())) {
+            throw new RuntimeException("Phiếu không ở trạng thái chờ duyệt");
+        }
         if (!currentUserUtil.hasPermission("materialreturn.reject")) {
             throw new RuntimeException("Bạn không có quyền từ chối phiếu hoàn trả");
         }
-        if (!"PENDING".equals(mr.getStatus())) {
-            throw new RuntimeException("Chỉ có thể từ chối phiếu ở trạng thái PENDING");
+
+        User currentUser = currentUserUtil.getCurrentUser();
+        if (currentUser.getId().equals(mr.getCreatedBy())) {
+            throw new RuntimeException("Bạn không thể tự từ chối phiếu hoàn trả do chính mình tạo");
         }
+
         mr.setStatus("REJECTED");
         mr.setUpdatedAt(LocalDate.now());
         returnRepository.save(mr);
     }
 
     // ===== DELETE =====
-
     @Transactional
     public void delete(Long id) {
         MaterialReturn mr = getById(id);
@@ -210,5 +311,13 @@ public class MaterialReturnService {
             throw new RuntimeException("Chỉ có thể xóa phiếu ở trạng thái DRAFT");
         }
         returnRepository.delete(mr);
+    }
+
+    // ===== OVERLOAD APPROVE (cho workflow 1 bước) =====
+    @Transactional
+    public void approve(Long id) {
+        MaterialReturn mr = getById(id);
+        String itemsJson = mr.getItems();
+        approve(id, itemsJson);
     }
 }

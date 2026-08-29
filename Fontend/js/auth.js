@@ -22,13 +22,9 @@ function clearUser() {
 }
 
 // ================================================================
-// PERMISSION HELPERS (KHÔNG FALLBACK CỨNG)
+// PERMISSION HELPERS (CẬP NHẬT GIAI ĐOẠN 3)
 // ================================================================
 
-/**
- * Lấy user permissions từ localStorage
- * Cấu trúc: { userId: { permissionKey: true/false } }
- */
 function getUserPermissionsCache() {
     try {
         const data = getData('user_permissions');
@@ -38,10 +34,6 @@ function getUserPermissionsCache() {
     }
 }
 
-/**
- * Lấy department permissions từ localStorage (_adminPermissions)
- * Cấu trúc: [ { departmentId, permissionKey, enabled } ] hoặc object
- */
 function getAdminPermissions() {
     try {
         const data = getData('permissions');
@@ -51,17 +43,10 @@ function getAdminPermissions() {
     }
 }
 
-/**
- * Xây dựng map quyền của department từ dữ liệu _adminPermissions
- * Trả về object: { permissionKey: true/false }
- */
 function getDepartmentPermissionMap(deptId) {
     if (!deptId) return {};
-
     const perms = getAdminPermissions();
     const result = {};
-
-    // Nếu perms là mảng (từ API mới)
     if (Array.isArray(perms)) {
         perms.forEach(p => {
             if (p.departmentId === deptId && p.enabled) {
@@ -70,55 +55,52 @@ function getDepartmentPermissionMap(deptId) {
         });
         return result;
     }
-
-    // Nếu perms là object (từ localStorage cũ)
     Object.keys(perms).forEach(role => {
         const roleData = perms[role];
         if (typeof roleData === 'object') {
             Object.keys(roleData).forEach(key => {
-                // Nếu key là departmentId
                 if (!isNaN(key) && parseInt(key) === deptId) {
                     const deptPerms = roleData[key];
                     if (typeof deptPerms === 'object') {
                         Object.keys(deptPerms).forEach(pk => {
-                            if (deptPerms[pk]) {
-                                result[pk] = true;
-                            }
+                            if (deptPerms[pk]) result[pk] = true;
                         });
                     }
                 }
             });
         }
     });
-
     return result;
 }
 
 /**
- * Kiểm tra quyền – KHÔNG CÓ FALLBACK CỨNG
- * Ưu tiên: UserPermission (ghi đè) > DepartmentPermission
+ * Kiểm tra quyền dựa trên:
+ * 1. ADMIN -> true
+ * 2. UserPermission (nếu có) -> theo enabled
+ * 3. DepartmentPermission (nếu user có departmentId) -> theo enabled
+ * 4. Mặc định -> false
  */
 function hasPermission(permissionKey) {
     const user = getUser();
     if (!user) return false;
 
-    // Admin luôn có toàn quyền
+    // ADMIN luôn có toàn quyền
     if (user.role === 'ADMIN') return true;
 
-    // Bước 1: User permission (ghi đè)
+    // Kiểm tra user_permissions (ghi đè)
     const userPerms = getUserPermissionsCache();
     const userPermObj = userPerms[user.id] || {};
     if (userPermObj[permissionKey] === true) return true;
     if (userPermObj[permissionKey] === false) return false;
 
-    // Bước 2: Department permission (nếu có)
+    // Kiểm tra department_permissions
     if (user.departmentId) {
         const deptPermMap = getDepartmentPermissionMap(user.departmentId);
         if (deptPermMap[permissionKey] === true) return true;
         if (deptPermMap[permissionKey] === false) return false;
     }
 
-    // Bước 3: Không có quyền
+    // Không có quyền
     return false;
 }
 
@@ -133,14 +115,13 @@ function hasAllPermissions(permissionKeys) {
 }
 
 // ================================================================
-// LOGIN – GỌI API VÀ LƯU PERMISSIONS
+// LOGIN
 // ================================================================
 
 document.addEventListener('DOMContentLoaded', function() {
     const loginForm = document.getElementById('login-form');
     if (!loginForm) return;
 
-    // Xóa listener cũ (clone để tránh trùng lặp)
     const newLoginForm = loginForm.cloneNode(true);
     loginForm.parentNode.replaceChild(newLoginForm, loginForm);
 
@@ -169,18 +150,15 @@ document.addEventListener('DOMContentLoaded', function() {
             });
             errorEl.textContent = '';
 
-            // Lấy permissions từ API và lưu vào localStorage
             try {
                 const perms = await api.getPermissions();
                 if (perms && typeof perms === 'object') {
                     saveData('permissions', perms);
                 }
-                // Lấy user permissions riêng (nếu API có)
                 if (response.user && response.user.id) {
                     const userPerms = await api.getUserPermissions(response.user.id);
                     if (userPerms && typeof userPerms === 'object') {
                         const allUserPerms = getData('user_permissions') || {};
-                        // Chuyển đổi thành map { permissionKey: enabled }
                         const map = {};
                         if (Array.isArray(userPerms)) {
                             userPerms.forEach(p => {
@@ -209,6 +187,7 @@ document.addEventListener('DOMContentLoaded', function() {
 // ================================================================
 // HIỂN THỊ APP SAU LOGIN
 // ================================================================
+
 function showApp() {
     document.getElementById('login-page').style.display = 'none';
     document.getElementById('app').style.display = 'block';
@@ -219,7 +198,19 @@ function showApp() {
     document.getElementById('user-name').textContent = user.name || 'User';
     document.getElementById('user-role').textContent = user.role || '--';
 
-    // Ẩn/hiện menu dựa trên quyền (không fallback)
+    // Click tên user để mở hồ sơ cá nhân
+    const userNameEl = document.getElementById('user-name');
+    if (userNameEl) {
+        userNameEl.style.cursor = 'pointer';
+        userNameEl.title = 'Xem hồ sơ của tôi';
+        userNameEl.onclick = function() {
+            if (typeof showUserProfileModal === 'function') {
+                showUserProfileModal();
+            }
+        };
+    }
+
+    // ======== QUẢN LÝ MENU ========
     const menuMap = {
         'mr': 'mr.view',
         'pr': 'pr.view',
@@ -229,8 +220,12 @@ function showApp() {
         'material-return': 'materialreturn.view',
         'min-stock': 'inventory.view',
         'auto-reorder': 'po.view',
-        'admin': 'admin.view'
+        'admin': 'admin.view',
+        'projects': 'projects.view',
+        'vendors': 'vendors.view',
+        'items': 'items.view'
     };
+
     Object.keys(menuMap).forEach(page => {
         const menuItem = document.querySelector(`#menu > li[data-page="${page}"]`);
         if (menuItem) {
@@ -238,7 +233,7 @@ function showApp() {
         }
     });
 
-    // Ẩn/hiện nút chức năng
+    // ======== ẨN/HIỆN NÚT CHỨC NĂNG (các nút trong header) ========
     const btnAddItem = document.getElementById('btn-add-item');
     if (btnAddItem) btnAddItem.style.display = hasPermission('items.create') ? 'inline-block' : 'none';
 
@@ -248,7 +243,22 @@ function showApp() {
     const btnCreateVendor = document.getElementById('btn-create-vendor');
     if (btnCreateVendor) btnCreateVendor.style.display = hasPermission('vendors.create') ? 'inline-block' : 'none';
 
-    // Render all (nếu có)
+    const btnCreateMR = document.getElementById('btn-create-mr');
+    if (btnCreateMR) btnCreateMR.style.display = hasPermission('mr.create') ? 'inline-block' : 'none';
+
+    const btnCreatePR = document.getElementById('btn-create-pr');
+    if (btnCreatePR) btnCreatePR.style.display = hasPermission('pr.create') ? 'inline-block' : 'none';
+
+    const btnCreatePO = document.getElementById('btn-create-po');
+    if (btnCreatePO) btnCreatePO.style.display = hasPermission('po.create') ? 'inline-block' : 'none';
+
+    const btnCreateIssue = document.getElementById('btn-create-issue');
+    if (btnCreateIssue) btnCreateIssue.style.display = hasPermission('issue.create') ? 'inline-block' : 'none';
+
+    const btnCreateReturn = document.getElementById('btn-create-return');
+    if (btnCreateReturn) btnCreateReturn.style.display = hasPermission('materialreturn.create') ? 'inline-block' : 'none';
+
+    // Render tất cả
     if (typeof renderAll === 'function') {
         try { renderAll(); } catch(e) { console.error('renderAll error:', e); }
     }
@@ -286,4 +296,4 @@ window.getUserPermissionsCache = getUserPermissionsCache;
 window.getDepartmentPermissionMap = getDepartmentPermissionMap;
 window.getAdminPermissions = getAdminPermissions;
 
-console.log('✅ Auth module loaded – no hardcoded fallback, only DB permissions');
+console.log('✅ Auth module updated – role-based permission removed (only ADMIN).');

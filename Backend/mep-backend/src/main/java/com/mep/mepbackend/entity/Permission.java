@@ -20,7 +20,7 @@ public class Permission {
     private String role;
 
     @Column(name = "department_id")
-    private Long departmentId;  // ✅ Thêm trường này – có thể null (nếu null thì áp dụng cho toàn bộ role, không giới hạn phòng ban)
+    private Long departmentId;
 
     @Column(name = "permission_key", nullable = false, length = 100)
     private String permissionKey;
@@ -34,8 +34,5 @@ public class Permission {
         this.departmentId = departmentId;
         this.permissionKey = permissionKey;
         this.enabled = enabled != null ? enabled : true;
-    }
-
-    public Permission(String role, String ceo, String permissionKey, boolean enabled) {
     }
 }

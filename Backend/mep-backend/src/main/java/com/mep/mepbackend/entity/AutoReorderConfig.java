@@ -27,6 +27,16 @@ public class AutoReorderConfig {
     @Column(name = "default_vendor_code", length = 50)
     private String defaultVendorCode;
 
+    // === Các trường mới (Giai đoạn 1) ===
+    @Column(length = 100)
+    private String schedule; // Lưu cron expression hoặc ngày giờ cụ thể
+
+    @Column(columnDefinition = "TEXT")
+    private String note; // Ghi chú tùy chỉnh của người dùng
+
+    @Column(name = "created_by")
+    private Long createdBy; // ID của người cấu hình
+
     @Column(name = "updated_at")
     private LocalDate updatedAt;
 }
