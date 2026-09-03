@@ -136,6 +136,30 @@ function removeItemRow(btn) {
     });
 }
 
+
+// ================================================================
+// HÀM TIỆN ÍCH MỚI: Mở modal chọn vật tư
+// ================================================================
+
+/**
+ * Mở modal chọn vật tư (gọi từ MR, PR, PO)
+ * @param {Array} selectedItems - [{itemId, quantity}]
+ * @param {Function} callback - nhận danh sách đã chọn
+ * @param {string} mode - 'mr', 'pr', 'po'
+ */
+function openItemSelectorHelper(selectedItems, callback, mode = 'mr') {
+    if (typeof openItemSelector === 'function') {
+        openItemSelector({ selectedItems, callback, mode });
+    } else {
+        showError('Chức năng chọn vật tư chưa sẵn sàng. Vui lòng tải lại trang.');
+    }
+}
+
+// Export
+window.openItemSelectorHelper = openItemSelectorHelper;
+
+console.log('✅ Render helpers updated (added openItemSelectorHelper).');
+
 // Export ra window
 window.renderApprovalList = renderApprovalList;
 window.renderApprovalDetail = renderApprovalDetail;
@@ -144,5 +168,7 @@ window.buildItemRowsForForm = buildItemRowsForForm;
 window.collectItemsFromForm = collectItemsFromForm;
 window.addItemRow = addItemRow;
 window.removeItemRow = removeItemRow;
+window.openItemSelectorHelper = openItemSelectorHelper;
+window.renderSelectedItemsHtml = renderSelectedItemsHtml;
 
 console.log('✅ Render helpers loaded successfully.');

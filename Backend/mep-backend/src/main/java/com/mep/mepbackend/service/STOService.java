@@ -131,14 +131,25 @@ public class STOService {
             throw new RuntimeException("Workflow không có bước duyệt nào");
         }
 
+        // Nếu workflow có 1 bước → tự động duyệt luôn
         if (steps.size() == 1) {
             if (!currentUserUtil.hasPermission("sto.approve")) {
                 throw new RuntimeException("Bạn không có quyền duyệt STO");
             }
+
+            // ✅ Quan trọng: Set status thành PENDING trước khi gọi approve()
+            Map<String, Object> firstStep = steps.get(0);
+            String statusCode = (String) firstStep.get("statusCode");
+            sto.setStatus(statusCode != null && !statusCode.isEmpty() ? statusCode : "PENDING");
+            sto.setApprovalStep(1);
+            sto.setUpdatedAt(LocalDate.now());
+            stoRepository.save(sto);
+
             approve(id);
             return;
         }
 
+        // Nhiều bước → chuyển sang PENDING bước 1
         Map<String, Object> firstStep = steps.get(0);
         String statusCode = (String) firstStep.get("statusCode");
         sto.setStatus(statusCode != null && !statusCode.isEmpty() ? statusCode : "PENDING");
@@ -186,6 +197,7 @@ public class STOService {
 
         if (currentStep == steps.size()) {
             sto.setStatus("APPROVED");
+            sto.setApprovalStep(currentStep);
         } else {
             sto.setApprovalStep(currentStep + 1);
             String nextStatusCode = workflowService.getStatusForStep(wf.getId(), currentStep + 1);
@@ -284,6 +296,7 @@ public class STOService {
         history.setStatusBefore(sto.getStatus());
 
         sto.setStatus(statusCode != null ? statusCode : "COMPLETED");
+        sto.setApprovalStep(currentStep);
         history.setStatusAfter(sto.getStatus());
 
         approvalHistoryRepository.save(history);

@@ -2,6 +2,9 @@
 // PO (Purchase Order) - SỬ DỤNG API - ĐÃ TÍCH HỢP PHÂN QUYỀN
 // ================================================================
 let poPageState = { page: 1, perPage: 10 };
+let _poSelectedItems = [];
+let _poMode = 'create';
+let _poEditId = null;
 
 // ====== HÀM LẤY ACTION ======
 function getPOActions(po) {
@@ -10,7 +13,6 @@ function getPOActions(po) {
 
     actions += `<button class="btn btn-info btn-sm" onclick="viewPO(${po.id})"><i class="fas fa-eye"></i></button>`;
 
-    // Quyền sửa: DRAFT hoặc PENDING chưa có lịch sử duyệt
     const canEdit = hasPermission('po.edit') && 
                    (po.status === 'DRAFT' || po.status === 'PENDING') && 
                    (user?.role === 'ADMIN' || user?.id === po.createdBy);
@@ -18,7 +20,6 @@ function getPOActions(po) {
         actions += ` <button class="btn btn-warning btn-sm" onclick="editPO(${po.id})"><i class="fas fa-edit"></i></button>`;
     }
 
-    // Quyền xóa: chỉ DRAFT
     const canDelete = hasPermission('po.delete') && 
                      (user?.role === 'ADMIN' || user?.id === po.createdBy) && 
                      po.status === 'DRAFT';
@@ -26,15 +27,14 @@ function getPOActions(po) {
         actions += ` <button class="btn btn-danger btn-sm" onclick="deletePO(${po.id})"><i class="fas fa-trash"></i></button>`;
     }
 
-    // Gửi duyệt: chỉ DRAFT và người tạo hoặc ADMIN
+    // ✅ SỬA: Gửi duyệt → Xác nhận
     const canSubmit = hasPermission('po.submit') && 
                      po.status === 'DRAFT' && 
                      (user?.role === 'ADMIN' || user?.id === po.createdBy);
     if (canSubmit) {
-        actions += ` <button class="btn btn-success btn-sm" onclick="submitPO(${po.id})">Gửi duyệt</button>`;
+        actions += ` <button class="btn btn-success btn-sm" onclick="submitPO(${po.id})">Xác nhận</button>`;
     }
 
-    // Duyệt / Từ chối
     const canApprove = hasPermission('po.approve') && po.status === 'PENDING';
     if (canApprove) {
         actions += ` <button class="btn btn-success btn-sm" onclick="approvePO(${po.id})">Duyệt</button>`;
@@ -139,8 +139,12 @@ async function renderPO(page = null) {
         const statusSelect = document.getElementById('po-status-filter');
         if (filterInput) {
             filterInput.removeEventListener('input', renderPO);
-            filterInput.addEventListener('input', () => { poPageState.page = 1; renderPO(); });
-        }
+const debouncedPOFilter = debounce(() => {
+    poPageState.page = 1;
+    renderPO();
+}, 300);
+
+filterInput?.addEventListener('input', debouncedPOFilter);        }
         if (statusSelect) {
             statusSelect.removeEventListener('change', renderPO);
             statusSelect.addEventListener('change', () => { poPageState.page = 1; renderPO(); });
@@ -156,18 +160,30 @@ async function renderPO(page = null) {
 async function showCreatePOModal(pr = null) {
     try {
         const projects = await api.getProjects();
-        const projectOpts = projects.map(p => `<option value="${p.code}" ${pr && p.code === pr.projectCode ? 'selected' : ''}>${p.code} - ${p.name}</option>`).join('');
+        const projectOpts = projects.map(p => 
+            `<option value="${p.code}" ${pr && p.code === pr.projectCode ? 'selected' : ''}>${p.code} - ${p.name}</option>`
+        ).join('');
         const vendors = await api.getVendors();
-        const vendorOpts = vendors.map(v => `<option value="${v.code}" ${pr && v.code === pr.vendorCode ? 'selected' : ''}>${v.code} - ${v.name}</option>`).join('');
-        let itemsData = [{ itemId: '', quantity: '' }];
-        if (pr) {
+        const vendorOpts = vendors.map(v => 
+            `<option value="${v.code}" ${pr && v.code === pr.vendorCode ? 'selected' : ''}>${v.code} - ${v.name}</option>`
+        ).join('');
+
+        let initialItems = [];
+        if (pr && pr.items) {
             try {
-                if (pr.items) {
-                    itemsData = typeof pr.items === 'string' ? JSON.parse(pr.items) : pr.items;
-                    if (!itemsData.length) itemsData = [{ itemId: '', quantity: '' }];
-                }
-            } catch (e) { itemsData = [{ itemId: '', quantity: '' }]; }
+                const items = typeof pr.items === 'string' ? JSON.parse(pr.items) : pr.items;
+                initialItems = items.map(it => ({
+                    itemId: it.itemId,
+                    quantity: it.quantity || 1,
+                    itemName: getItemName(it.itemId),
+                    itemCode: getItemCode(it.itemId),
+                    unit: getItemUnit(it.itemId)
+                }));
+            } catch (e) {}
         }
+        _poSelectedItems = initialItems;
+        _poMode = 'create';
+        _poEditId = null;
 
         showModal('Tạo Purchase Order (PO)', `
             <div class="form-group"><label>Dự án</label>
@@ -176,8 +192,14 @@ async function showCreatePOModal(pr = null) {
             <div class="form-group"><label>Nhà cung cấp</label>
                 <select id="f-po-vendor">${vendorOpts}</select>
             </div>
-            <div class="form-group"><label>Danh sách vật tư</label>
-                <div id="po-items-container">${buildItemRowsForForm(itemsData, 'po')}</div>
+            <div class="form-group">
+                <label>Danh sách vật tư</label>
+                <button type="button" class="btn btn-sm btn-info" onclick="openItemSelectorForPO()">
+                    <i class="fas fa-plus"></i> Chọn vật tư
+                </button>
+                <div id="po-selected-items-container" style="margin-top:8px; max-height:200px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:6px; padding:8px;">
+                    ${_renderPOSelectedItemsHTML()}
+                </div>
             </div>
             <div class="form-group"><label>Ghi chú</label><textarea id="f-po-note" rows="2">${pr ? pr.note || '' : ''}</textarea></div>
             <div class="modal-actions">
@@ -185,9 +207,78 @@ async function showCreatePOModal(pr = null) {
                 <button class="btn btn-danger" onclick="closeModal()">Hủy</button>
             </div>
         `);
+
+        setTimeout(() => {
+            _attachPOQuantityEvents();
+        }, 100);
     } catch (error) {
         showError('Lỗi tải dữ liệu: ' + error.message);
     }
+}
+
+function poItemSelectorCallback(selectedItems) {
+    _poSelectedItems = selectedItems.map(item => ({
+        itemId: item.itemId,
+        quantity: item.quantity || 1,
+        itemName: item.itemName || getItemName(item.itemId),
+        itemCode: item.itemCode || getItemCode(item.itemId),
+        unit: item.unit || getItemUnit(item.itemId)
+    }));
+    renderPOSelectedItems();
+}
+
+function renderPOSelectedItems() {
+    const container = document.getElementById('po-selected-items-container');
+    if (!container) return;
+    container.innerHTML = _renderPOSelectedItemsHTML();
+    _attachPOQuantityEvents();
+}
+
+function _renderPOSelectedItemsHTML() {
+    const items = _poSelectedItems || [];
+    if (items.length === 0) {
+        return '<div style="color:#999; text-align:center; padding:8px;">Chưa chọn vật tư nào</div>';
+    }
+    let html = '';
+    items.forEach((item, index) => {
+        html += `
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:4px 8px; margin-bottom:4px; background:#f0f4f8; border-radius:4px;">
+                <span><strong>${item.itemCode}</strong> - ${item.itemName} (${item.unit})</span>
+                <span>Số lượng: <input type="number" class="po-item-qty" data-index="${index}" value="${item.quantity}" style="width:70px; padding:4px; border:1px solid #ccc; border-radius:4px;" min="0.01" step="0.01"></span>
+                <button type="button" class="btn btn-sm btn-danger" onclick="removePOItem(${index})"><i class="fas fa-times"></i></button>
+            </div>
+        `;
+    });
+    return html;
+}
+
+function _attachPOQuantityEvents() {
+    document.querySelectorAll('.po-item-qty').forEach(input => {
+        input.removeEventListener('change', _onPOQtyChange);
+        input.addEventListener('change', _onPOQtyChange);
+    });
+}
+
+function _onPOQtyChange(e) {
+    const idx = parseInt(this.dataset.index);
+    const val = parseFloat(this.value) || 1;
+    if (val > 0 && _poSelectedItems[idx]) {
+        _poSelectedItems[idx].quantity = val;
+    } else {
+        this.value = _poSelectedItems[idx]?.quantity || 1;
+    }
+}
+
+function removePOItem(index) {
+    if (_poSelectedItems && _poSelectedItems.length > index) {
+        _poSelectedItems.splice(index, 1);
+        renderPOSelectedItems();
+    }
+}
+
+function openItemSelectorForPO() {
+    const selected = _poSelectedItems || [];
+    openItemSelectorHelper(selected, poItemSelectorCallback, 'po');
 }
 
 // ====== LƯU PO ======
@@ -199,14 +290,11 @@ async function savePOManual() {
 
     const projectCode = document.getElementById('f-po-project').value;
     const vendorCode = document.getElementById('f-po-vendor').value;
-    if (!projectCode || !vendorCode) {
-        showError('Vui lòng chọn dự án và nhà cung cấp');
-        return;
-    }
-    const container = document.getElementById('po-items-container');
-    const items = collectItemsFromForm(container);
-    if (items.length === 0) {
-        showError('Cần ít nhất một vật tư');
+    const note = document.getElementById('f-po-note').value.trim();
+    const items = _poSelectedItems || [];
+
+    if (!projectCode || !vendorCode || items.length === 0) {
+        showError('Vui lòng chọn dự án, nhà cung cấp và ít nhất một vật tư');
         return;
     }
 
@@ -215,19 +303,19 @@ async function savePOManual() {
         const proj = projects.find(p => p.code === projectCode);
         const vendors = await api.getVendors();
         const vendor = vendors.find(v => v.code === vendorCode);
-        const user = getUser();
 
         const newPO = {
             projectCode,
             projectName: proj ? proj.name : '',
             vendorCode,
             vendorName: vendor ? vendor.name : '',
-            items: JSON.stringify(items),
-            note: document.getElementById('f-po-note').value.trim(),
+            items: JSON.stringify(items.map(it => ({ itemId: it.itemId, quantity: it.quantity }))),
+            note
         };
 
         await api.createPO(newPO);
         closeModal();
+        _poSelectedItems = [];
         await renderPO();
         showSuccess('Tạo PO thành công! (Trạng thái DRAFT)');
     } catch (error) {
@@ -339,31 +427,52 @@ async function editPO(id) {
             showError('Không tìm thấy PO!');
             return;
         }
-        if (po.status !== 'DRAFT' && po.status !== 'PENDING') {
-            showWarning('Chỉ có thể sửa PO ở trạng thái DRAFT hoặc PENDING');
+        if (po.status !== 'DRAFT' && po.status !== 'PENDING' && !po.status.includes('PENDING_')) {
+            showWarning('Chỉ có thể sửa PO ở trạng thái DRAFT hoặc đang chờ duyệt');
             return;
         }
 
-        const projects = await api.getProjects();
-        const projectOpts = projects.map(p =>
-            `<option value="${p.code}" ${p.code === po.projectCode ? 'selected' : ''}>${p.code} - ${p.name}</option>`).join('');
-        const vendors = await api.getVendors();
-        const vendorOpts = vendors.map(v =>
-            `<option value="${v.code}" ${v.code === po.vendorCode ? 'selected' : ''}>${v.code} - ${v.name}</option>`).join('');
-
-        let itemsData = [{ itemId: '', quantity: '' }];
+        let initialItems = [];
         try {
             if (po.items) {
-                itemsData = typeof po.items === 'string' ? JSON.parse(po.items) : po.items;
-                if (!itemsData.length) itemsData = [{ itemId: '', quantity: '' }];
+                const items = typeof po.items === 'string' ? JSON.parse(po.items) : po.items;
+                initialItems = items.map(it => ({
+                    itemId: it.itemId,
+                    quantity: it.quantity || 1,
+                    itemName: getItemName(it.itemId),
+                    itemCode: getItemCode(it.itemId),
+                    unit: getItemUnit(it.itemId)
+                }));
             }
-        } catch (e) { itemsData = [{ itemId: '', quantity: '' }]; }
+        } catch (e) {}
+        _poSelectedItems = initialItems;
+        _poMode = 'edit';
+        _poEditId = id;
+
+        const projects = await api.getProjects();
+        const projectOpts = projects.map(p =>
+            `<option value="${p.code}" ${p.code === po.projectCode ? 'selected' : ''}>${p.code} - ${p.name}</option>`
+        ).join('');
+        const vendors = await api.getVendors();
+        const vendorOpts = vendors.map(v =>
+            `<option value="${v.code}" ${v.code === po.vendorCode ? 'selected' : ''}>${v.code} - ${v.name}</option>`
+        ).join('');
 
         showModal('Sửa Purchase Order', `
-            <div class="form-group"><label>Dự án</label><select id="f-po-project">${projectOpts}</select></div>
-            <div class="form-group"><label>Nhà cung cấp</label><select id="f-po-vendor">${vendorOpts}</select></div>
-            <div class="form-group"><label>Danh sách vật tư</label>
-                <div id="po-items-container">${buildItemRowsForForm(itemsData, 'po')}</div>
+            <div class="form-group"><label>Dự án</label>
+                <select id="f-po-project">${projectOpts}</select>
+            </div>
+            <div class="form-group"><label>Nhà cung cấp</label>
+                <select id="f-po-vendor">${vendorOpts}</select>
+            </div>
+            <div class="form-group">
+                <label>Danh sách vật tư</label>
+                <button type="button" class="btn btn-sm btn-info" onclick="openItemSelectorForPO()">
+                    <i class="fas fa-plus"></i> Chọn vật tư
+                </button>
+                <div id="po-selected-items-container" style="margin-top:8px; max-height:200px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:6px; padding:8px;">
+                    ${_renderPOSelectedItemsHTML()}
+                </div>
             </div>
             <div class="form-group"><label>Ghi chú</label><textarea id="f-po-note" rows="2">${po.note || ''}</textarea></div>
             <div class="modal-actions">
@@ -371,6 +480,10 @@ async function editPO(id) {
                 <button class="btn btn-danger" onclick="closeModal()">Hủy</button>
             </div>
         `);
+
+        setTimeout(() => {
+            _attachPOQuantityEvents();
+        }, 100);
     } catch (error) {
         showError('Lỗi khi tải thông tin PO: ' + error.message);
     }
@@ -380,14 +493,11 @@ async function editPO(id) {
 async function updatePO(id) {
     const projectCode = document.getElementById('f-po-project').value;
     const vendorCode = document.getElementById('f-po-vendor').value;
-    if (!projectCode || !vendorCode) {
-        showError('Vui lòng chọn dự án và NCC');
-        return;
-    }
-    const container = document.getElementById('po-items-container');
-    const items = collectItemsFromForm(container);
-    if (items.length === 0) {
-        showError('Cần ít nhất một vật tư');
+    const note = document.getElementById('f-po-note').value.trim();
+    const items = _poSelectedItems || [];
+
+    if (!projectCode || !vendorCode || items.length === 0) {
+        showError('Vui lòng chọn dự án, NCC và ít nhất một vật tư');
         return;
     }
 
@@ -402,12 +512,13 @@ async function updatePO(id) {
             projectName: proj ? proj.name : '',
             vendorCode,
             vendorName: vendor ? vendor.name : '',
-            items: JSON.stringify(items),
-            note: document.getElementById('f-po-note').value.trim(),
+            items: JSON.stringify(items.map(it => ({ itemId: it.itemId, quantity: it.quantity }))),
+            note
         };
 
         await api.updatePO(id, updatedPO);
         closeModal();
+        _poSelectedItems = [];
         await renderPO();
         showSuccess('Cập nhật PO thành công!');
     } catch (error) {
@@ -511,5 +622,9 @@ window.getPOActions = getPOActions;
 window.savePOManual = savePOManual;
 window.showCreatePOFromPRModal = showCreatePOFromPRModal;
 window.showCreatePOModal = showCreatePOModal;
+window.poItemSelectorCallback = poItemSelectorCallback;
+window.renderPOSelectedItems = renderPOSelectedItems;
+window.removePOItem = removePOItem;
+window.openItemSelectorForPO = openItemSelectorForPO;
 
 console.log('✅ PO module updated with permission checks (header removed).');

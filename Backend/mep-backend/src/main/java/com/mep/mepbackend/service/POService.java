@@ -149,14 +149,25 @@ public class POService {
             throw new RuntimeException("Workflow không có bước duyệt nào");
         }
 
+        // Nếu workflow có 1 bước → tự động duyệt luôn
         if (steps.size() == 1) {
             if (!currentUserUtil.hasPermission("po.approve")) {
                 throw new RuntimeException("Bạn không có quyền duyệt PO");
             }
+
+            // ✅ Quan trọng: Set status thành PENDING trước khi gọi approve()
+            Map<String, Object> firstStep = steps.get(0);
+            String statusCode = (String) firstStep.get("statusCode");
+            po.setStatus(statusCode != null && !statusCode.isEmpty() ? statusCode : "PENDING");
+            po.setApprovalStep(1);
+            po.setUpdatedAt(LocalDate.now());
+            poRepository.save(po);
+
             approve(id);
             return;
         }
 
+        // Nhiều bước → chuyển sang PENDING bước 1
         Map<String, Object> firstStep = steps.get(0);
         String statusCode = (String) firstStep.get("statusCode");
         po.setStatus(statusCode != null && !statusCode.isEmpty() ? statusCode : "PENDING");

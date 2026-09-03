@@ -119,7 +119,7 @@ public class MRService {
         return mrRepository.save(mr);
     }
 
-    // ===== SUBMIT =====
+    // ===== MRService.submit() =====
     @Transactional
     public void submit(Long id) {
         MR mr = getById(id);
@@ -141,6 +141,15 @@ public class MRService {
             if (!currentUserUtil.hasPermission("mr.approve")) {
                 throw new RuntimeException("Bạn không có quyền duyệt MR");
             }
+
+            // ✅ QUAN TRỌNG: Set status thành PENDING trước khi gọi approve()
+            Map<String, Object> firstStep = steps.get(0);
+            String statusCode = (String) firstStep.get("statusCode");
+            mr.setStatus(statusCode != null && !statusCode.isEmpty() ? statusCode : "PENDING");
+            mr.setApprovalStep(1);
+            mr.setUpdatedAt(LocalDate.now());
+            mrRepository.save(mr);
+
             approve(id);
             return;
         }

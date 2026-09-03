@@ -11,7 +11,6 @@ function getMRActions(mr) {
 
     actions += `<button class="btn btn-info btn-sm" onclick="viewMR(${mr.id})"><i class="fas fa-eye"></i></button>`;
 
-    // Quyền sửa: DRAFT hoặc PENDING chưa có lịch sử duyệt
     const canEdit = hasPermission('mr.edit') && 
                    (mr.status === 'DRAFT' || mr.status === 'PENDING') && 
                    (user?.role === 'ADMIN' || user?.id === mr.createdBy);
@@ -19,7 +18,6 @@ function getMRActions(mr) {
         actions += ` <button class="btn btn-warning btn-sm" onclick="editMR(${mr.id})"><i class="fas fa-edit"></i></button>`;
     }
 
-    // Quyền xóa: chỉ DRAFT
     const canDelete = hasPermission('mr.delete') && 
                      (user?.role === 'ADMIN' || user?.id === mr.createdBy) && 
                      mr.status === 'DRAFT';
@@ -27,19 +25,17 @@ function getMRActions(mr) {
         actions += ` <button class="btn btn-danger btn-sm" onclick="deleteMR(${mr.id})"><i class="fas fa-trash"></i></button>`;
     }
 
-    // ✅ Gửi duyệt: chỉ cần có quyền submit và status DRAFT (không cần là người tạo)
+    // ✅ SỬA: Gửi duyệt → Xác nhận
     const canSubmit = hasPermission('mr.submit') && mr.status === 'DRAFT';
     if (canSubmit) {
-        actions += ` <button class="btn btn-success btn-sm" onclick="submitMR(${mr.id})">Gửi duyệt</button>`;
+        actions += ` <button class="btn btn-success btn-sm" onclick="submitMR(${mr.id})">Xác nhận</button>`;
     }
 
-    // Duyệt: PENDING và có quyền approve (backend sẽ kiểm tra workflow)
     if (hasPermission('mr.approve') && mr.status === 'PENDING') {
         actions += ` <button class="btn btn-success btn-sm" onclick="approveMR(${mr.id})">Duyệt</button>`;
         actions += ` <button class="btn btn-danger btn-sm" onclick="rejectMR(${mr.id})">Từ chối</button>`;
     }
 
-    // Tạo PR từ MR: chỉ APPROVED
     const canCreatePR = hasPermission('pr.create') && mr.status === 'APPROVED';
     if (canCreatePR) {
         actions += ` <button class="btn btn-warning btn-sm" onclick="createPRFromMR(${mr.id})">Tạo PR</button>`;
@@ -138,7 +134,12 @@ async function renderMR(page = null) {
         const statusSelect = document.getElementById('mr-status-filter');
         if (filterInput) {
             filterInput.removeEventListener('input', renderMR);
-            filterInput.addEventListener('input', () => { mrPageState.page = 1; renderMR(); });
+            const debouncedMRFilter = debounce(() => {
+                    mrPageState.page = 1;
+                    renderMR();
+                }, 300);
+
+        filterInput?.addEventListener('input', debouncedMRFilter);        
         }
         if (statusSelect) {
             statusSelect.removeEventListener('change', renderMR);
@@ -152,9 +153,14 @@ async function renderMR(page = null) {
 }
 
 // ====== TẠO MR MỚI (MODAL) ======
+// Thay vì buildItemRowsForForm, chúng ta sẽ có nút "Chọn vật tư"
+// và container để hiển thị danh sách đã chọn.
+
 function showCreateMRModal() {
     api.getProjects().then(projects => {
         const projectOpts = projects.map(p => `<option value="${p.code}">${p.code} - ${p.name}</option>`).join('');
+        
+        // Tạo form với container cho selected items
         showModal('Tạo Material Request', `
             <div class="form-group"><label>Dự án</label>
                 <select id="f-mr-project"><option value="">-- Chọn --</option>${projectOpts}</select>
@@ -162,8 +168,14 @@ function showCreateMRModal() {
             <div class="form-group"><label>Ngày cần</label><input id="f-mr-needdate" type="date"></div>
             <div class="form-group"><label>Mục đích / Khu vực sử dụng</label><input id="f-mr-purpose"></div>
             <div class="form-group"><label>Người yêu cầu</label><input id="f-mr-requester" placeholder="Tên người yêu cầu"></div>
-            <div class="form-group"><label>Danh sách vật tư</label>
-                <div id="mr-items-container">${buildItemRowsForForm([{itemId:'', quantity:''}], 'mr')}</div>
+            <div class="form-group">
+                <label>Danh sách vật tư</label>
+                <button type="button" class="btn btn-sm btn-info" onclick="openItemSelectorForMR('create')">
+                    <i class="fas fa-plus"></i> Chọn vật tư
+                </button>
+                <div id="mr-selected-items-container" style="margin-top:8px; max-height:200px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:6px; padding:8px;">
+                    <div style="color:#999; text-align:center; padding:8px;">Chưa chọn vật tư nào</div>
+                </div>
             </div>
             <div class="form-group"><label>Ghi chú</label><textarea id="f-mr-note" rows="2"></textarea></div>
             <div class="modal-actions">
@@ -171,7 +183,71 @@ function showCreateMRModal() {
                 <button class="btn btn-danger" onclick="closeModal()">Hủy</button>
             </div>
         `);
+
+        // Lưu trạng thái items tạm
+        window._mrSelectedItems = [];
+        window._mrMode = 'create';
+        window._mrEditId = null;
     }).catch(err => showError('Không thể tải dự án: ' + err.message));
+}
+
+// Hàm này được gọi từ modal chọn vật tư
+function mrItemSelectorCallback(selectedItems) {
+    window._mrSelectedItems = selectedItems.map(item => ({
+        itemId: item.itemId,
+        quantity: item.quantity,
+        itemName: item.itemName || getItemName(item.itemId),
+        itemCode: item.itemCode || getItemCode(item.itemId),
+        unit: item.unit || getItemUnit(item.itemId)
+    }));
+    renderMRSelectedItems();
+}
+
+// Render danh sách đã chọn
+function renderMRSelectedItems() {
+    const container = document.getElementById('mr-selected-items-container');
+    if (!container) return;
+    const items = window._mrSelectedItems || [];
+    if (items.length === 0) {
+        container.innerHTML = '<div style="color:#999; text-align:center; padding:8px;">Chưa chọn vật tư nào</div>';
+        return;
+    }
+    let html = '';
+    items.forEach((item, index) => {
+        html += `
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:4px 8px; margin-bottom:4px; background:#f0f4f8; border-radius:4px;">
+                <span><strong>${item.itemCode}</strong> - ${item.itemName} (${item.unit})</span>
+                <span>Số lượng: <input type="number" class="mr-item-qty" data-index="${index}" value="${item.quantity}" style="width:70px; padding:4px; border:1px solid #ccc; border-radius:4px;"></span>
+                <button type="button" class="btn btn-sm btn-danger" onclick="removeMRItem(${index})"><i class="fas fa-times"></i></button>
+            </div>
+        `;
+    });
+    container.innerHTML = html;
+
+    // Gắn sự kiện thay đổi số lượng
+    container.querySelectorAll('.mr-item-qty').forEach(input => {
+        input.addEventListener('change', function() {
+            const idx = parseInt(this.dataset.index);
+            const val = parseFloat(this.value) || 1;
+            if (val > 0 && window._mrSelectedItems[idx]) {
+                window._mrSelectedItems[idx].quantity = val;
+            }
+        });
+    });
+}
+
+// Xóa một item
+function removeMRItem(index) {
+    if (window._mrSelectedItems && window._mrSelectedItems.length > index) {
+        window._mrSelectedItems.splice(index, 1);
+        renderMRSelectedItems();
+    }
+}
+
+// Hàm mở modal chọn vật tư cho MR
+function openItemSelectorForMR(mode) {
+    const selected = window._mrSelectedItems || [];
+    openItemSelectorHelper(selected, mrItemSelectorCallback, 'mr');
 }
 
 // ====== LƯU MR ======
@@ -185,8 +261,8 @@ async function saveMR() {
     const needDate = document.getElementById('f-mr-needdate').value;
     const purpose = document.getElementById('f-mr-purpose').value.trim();
     const requester = document.getElementById('f-mr-requester').value.trim();
-    const container = document.getElementById('mr-items-container');
-    const items = collectItemsFromForm(container);
+    const items = window._mrSelectedItems || [];
+    const note = document.getElementById('f-mr-note').value.trim();
 
     if (!projectCode || items.length === 0) {
         showError('Vui lòng chọn dự án và ít nhất một vật tư');
@@ -201,11 +277,11 @@ async function saveMR() {
         const newMR = {
             projectCode,
             projectName: proj ? proj.name : '',
-            items: JSON.stringify(items),
+            items: JSON.stringify(items.map(it => ({ itemId: it.itemId, quantity: it.quantity }))),
             needDate,
             purpose,
             requester: requester || user.name,
-            note: document.getElementById('f-mr-note').value.trim(),
+            note
         };
 
         await api.createMR(newMR);

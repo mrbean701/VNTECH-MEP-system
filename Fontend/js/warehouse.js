@@ -1459,6 +1459,12 @@ async function saveWarehouse() {
         const newWh = { code, name, type, projectId: type === 'SITE' ? projectId : null, manager, address, status, note };
         await api.createWarehouse(newWh);
         closeModal();
+        
+        // ✅ Cập nhật cache
+        const freshWarehouses = await api.getWarehouses();
+        window._warehousesCache = freshWarehouses;
+        saveData('warehouses', freshWarehouses);
+        
         switchWarehouseTab('wh-list');
         showSuccess('Thêm kho thành công!');
     } catch (error) {

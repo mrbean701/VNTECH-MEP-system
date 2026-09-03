@@ -3,6 +3,13 @@
 // ================================================================
 let prPageState = { page: 1, perPage: 10 };
 
+// ================================================================
+// BIẾN TOÀN CỤC CHO ITEM SELECTOR
+// ================================================================
+let _prSelectedItems = [];
+let _prMode = 'create'; // 'create' hoặc 'edit'
+let _prEditId = null;
+
 // ====== HÀM LẤY ACTION ======
 function getPRActions(pr) {
     const user = getUser();
@@ -10,7 +17,6 @@ function getPRActions(pr) {
 
     actions += `<button class="btn btn-info btn-sm" onclick="viewPR(${pr.id})"><i class="fas fa-eye"></i></button>`;
 
-    // Quyền sửa: DRAFT hoặc PENDING chưa có lịch sử duyệt
     const editStatuses = ['DRAFT', 'PENDING', 'PENDING_PLANNING', 'PENDING_PROJECT', 'PENDING_CEO', 
                           'PLANNING_APPROVED', 'PROJECT_APPROVED'];
     const canEdit = hasPermission('pr.edit') && 
@@ -20,7 +26,6 @@ function getPRActions(pr) {
         actions += ` <button class="btn btn-warning btn-sm" onclick="editPR(${pr.id})"><i class="fas fa-edit"></i></button>`;
     }
 
-    // Quyền xóa: chỉ DRAFT
     const canDelete = hasPermission('pr.delete') && 
                      (user?.role === 'ADMIN' || user?.id === pr.createdBy) && 
                      pr.status === 'DRAFT';
@@ -28,15 +33,14 @@ function getPRActions(pr) {
         actions += ` <button class="btn btn-danger btn-sm" onclick="deletePR(${pr.id})"><i class="fas fa-trash"></i></button>`;
     }
 
-    // Gửi duyệt: chỉ DRAFT và người tạo hoặc ADMIN
+    // ✅ SỬA: Gửi duyệt → Xác nhận
     const canSubmit = hasPermission('pr.submit') && 
                      pr.status === 'DRAFT' && 
                      (user?.role === 'ADMIN' || user?.id === pr.createdBy);
     if (canSubmit) {
-        actions += ` <button class="btn btn-success btn-sm" onclick="submitPR(${pr.id})">Gửi duyệt</button>`;
+        actions += ` <button class="btn btn-success btn-sm" onclick="submitPR(${pr.id})">Xác nhận</button>`;
     }
 
-    // Duyệt / Từ chối: tất cả trạng thái chờ duyệt
     const pendingStatuses = ['PENDING', 'PENDING_PLANNING', 'PENDING_PROJECT', 'PENDING_CEO', 
                              'PLANNING_APPROVED', 'PROJECT_APPROVED'];
     const canApprove = hasPermission('pr.approve') && pendingStatuses.includes(pr.status);
@@ -45,7 +49,6 @@ function getPRActions(pr) {
         actions += ` <button class="btn btn-danger btn-sm" onclick="rejectPR(${pr.id})">Từ chối</button>`;
     }
 
-    // Tạo PO từ PR: chỉ APPROVED
     const canCreatePO = hasPermission('po.create') && pr.status === 'APPROVED';
     if (canCreatePO) {
         actions += ` <button class="btn btn-warning btn-sm" onclick="createPOFromPR(${pr.id})">Tạo PO</button>`;
@@ -150,8 +153,12 @@ async function renderPR(page = null) {
         const statusSelect = document.getElementById('pr-status-filter');
         if (filterInput) {
             filterInput.removeEventListener('input', renderPR);
-            filterInput.addEventListener('input', () => { prPageState.page = 1; renderPR(); });
-        }
+const debouncedPRFilter = debounce(() => {
+    prPageState.page = 1;
+    renderPR();
+}, 300);
+
+filterInput?.addEventListener('input', debouncedPRFilter);        }
         if (statusSelect) {
             statusSelect.removeEventListener('change', renderPR);
             statusSelect.addEventListener('change', () => { prPageState.page = 1; renderPR(); });
@@ -167,21 +174,35 @@ async function renderPR(page = null) {
 // ... (viewPR, editPR, updatePR, submitPR, approvePR, rejectPR, deletePR, createPOFromPR, printPR, ...)
 
 // ====== TẠO PR MỚI ======
+// ====== TẠO PR MỚI (MODAL) ======
 async function showCreatePRModal(mr = null) {
     try {
         const projects = await api.getProjects();
-        const projectOpts = projects.map(p => `<option value="${p.code}" ${mr && p.code === mr.projectCode ? 'selected' : ''}>${p.code} - ${p.name}</option>`).join('');
+        const projectOpts = projects.map(p => 
+            `<option value="${p.code}" ${mr && p.code === mr.projectCode ? 'selected' : ''}>${p.code} - ${p.name}</option>`
+        ).join('');
         const vendors = await api.getVendors();
-        const vendorOpts = vendors.map(v => `<option value="${v.code}" ${mr && v.code === mr.vendorCode ? 'selected' : ''}>${v.code} - ${v.name}</option>`).join('');
-        let itemsData = [{ itemId: '', quantity: '' }];
-        if (mr) {
+        const vendorOpts = vendors.map(v => 
+            `<option value="${v.code}" ${mr && v.code === mr.vendorCode ? 'selected' : ''}>${v.code} - ${v.name}</option>`
+        ).join('');
+
+        // Khởi tạo selected items từ MR nếu có
+        let initialItems = [];
+        if (mr && mr.items) {
             try {
-                if (mr.items) {
-                    itemsData = typeof mr.items === 'string' ? JSON.parse(mr.items) : mr.items;
-                    if (!itemsData.length) itemsData = [{ itemId: '', quantity: '' }];
-                }
-            } catch (e) { itemsData = [{ itemId: '', quantity: '' }]; }
+                const items = typeof mr.items === 'string' ? JSON.parse(mr.items) : mr.items;
+                initialItems = items.map(it => ({
+                    itemId: it.itemId,
+                    quantity: it.quantity || 1,
+                    itemName: getItemName(it.itemId),
+                    itemCode: getItemCode(it.itemId),
+                    unit: getItemUnit(it.itemId)
+                }));
+            } catch (e) {}
         }
+        _prSelectedItems = initialItems;
+        _prMode = 'create';
+        _prEditId = null;
 
         showModal('Tạo Purchase Request (PR)', `
             <div class="form-group"><label>Dự án</label>
@@ -190,8 +211,14 @@ async function showCreatePRModal(mr = null) {
             <div class="form-group"><label>Nhà cung cấp</label>
                 <select id="f-pr-vendor"><option value="">-- Chọn --</option>${vendorOpts}</select>
             </div>
-            <div class="form-group"><label>Danh sách vật tư</label>
-                <div id="pr-items-container">${buildItemRowsForForm(itemsData, 'pr')}</div>
+            <div class="form-group">
+                <label>Danh sách vật tư</label>
+                <button type="button" class="btn btn-sm btn-info" onclick="openItemSelectorForPR()">
+                    <i class="fas fa-plus"></i> Chọn vật tư
+                </button>
+                <div id="pr-selected-items-container" style="margin-top:8px; max-height:200px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:6px; padding:8px;">
+                    ${_renderPRSelectedItemsHTML()}
+                </div>
             </div>
             <div class="form-group"><label>Ghi chú</label><textarea id="f-pr-note" rows="2">${mr ? mr.note || '' : ''}</textarea></div>
             <div class="modal-actions">
@@ -199,9 +226,83 @@ async function showCreatePRModal(mr = null) {
                 <button class="btn btn-danger" onclick="closeModal()">Hủy</button>
             </div>
         `);
+
+        // Gắn sự kiện cho input số lượng (nếu có)
+        setTimeout(() => {
+            _attachPRQuantityEvents();
+        }, 100);
     } catch (error) {
         showError('Lỗi tải dữ liệu: ' + error.message);
     }
+}
+
+// ====== CALLBACK TỪ MODAL CHỌN VẬT TƯ ======
+function prItemSelectorCallback(selectedItems) {
+    _prSelectedItems = selectedItems.map(item => ({
+        itemId: item.itemId,
+        quantity: item.quantity || 1,
+        itemName: item.itemName || getItemName(item.itemId),
+        itemCode: item.itemCode || getItemCode(item.itemId),
+        unit: item.unit || getItemUnit(item.itemId)
+    }));
+    renderPRSelectedItems();
+}
+
+// ====== RENDER DANH SÁCH VẬT TƯ ĐÃ CHỌN ======
+function renderPRSelectedItems() {
+    const container = document.getElementById('pr-selected-items-container');
+    if (!container) return;
+    container.innerHTML = _renderPRSelectedItemsHTML();
+    _attachPRQuantityEvents();
+}
+
+function _renderPRSelectedItemsHTML() {
+    const items = _prSelectedItems || [];
+    if (items.length === 0) {
+        return '<div style="color:#999; text-align:center; padding:8px;">Chưa chọn vật tư nào</div>';
+    }
+    let html = '';
+    items.forEach((item, index) => {
+        html += `
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:4px 8px; margin-bottom:4px; background:#f0f4f8; border-radius:4px;">
+                <span><strong>${item.itemCode}</strong> - ${item.itemName} (${item.unit})</span>
+                <span>Số lượng: <input type="number" class="pr-item-qty" data-index="${index}" value="${item.quantity}" style="width:70px; padding:4px; border:1px solid #ccc; border-radius:4px;" min="0.01" step="0.01"></span>
+                <button type="button" class="btn btn-sm btn-danger" onclick="removePRItem(${index})"><i class="fas fa-times"></i></button>
+            </div>
+        `;
+    });
+    return html;
+}
+
+function _attachPRQuantityEvents() {
+    document.querySelectorAll('.pr-item-qty').forEach(input => {
+        input.removeEventListener('change', _onPRQtyChange);
+        input.addEventListener('change', _onPRQtyChange);
+    });
+}
+
+function _onPRQtyChange(e) {
+    const idx = parseInt(this.dataset.index);
+    const val = parseFloat(this.value) || 1;
+    if (val > 0 && _prSelectedItems[idx]) {
+        _prSelectedItems[idx].quantity = val;
+    } else {
+        this.value = _prSelectedItems[idx]?.quantity || 1;
+    }
+}
+
+// ====== XÓA MỘT VẬT TƯ ======
+function removePRItem(index) {
+    if (_prSelectedItems && _prSelectedItems.length > index) {
+        _prSelectedItems.splice(index, 1);
+        renderPRSelectedItems();
+    }
+}
+
+// ====== MỞ MODAL CHỌN VẬT TƯ CHO PR ======
+function openItemSelectorForPR() {
+    const selected = _prSelectedItems || [];
+    openItemSelectorHelper(selected, prItemSelectorCallback, 'pr');
 }
 
 // ====== LƯU PR ======
@@ -213,14 +314,11 @@ async function savePRManual() {
 
     const projectCode = document.getElementById('f-pr-project').value;
     const vendorCode = document.getElementById('f-pr-vendor').value;
-    if (!projectCode || !vendorCode) {
-        showError('Vui lòng chọn dự án và nhà cung cấp');
-        return;
-    }
-    const container = document.getElementById('pr-items-container');
-    const items = collectItemsFromForm(container);
-    if (items.length === 0) {
-        showError('Cần ít nhất một vật tư');
+    const note = document.getElementById('f-pr-note').value.trim();
+    const items = _prSelectedItems || [];
+
+    if (!projectCode || !vendorCode || items.length === 0) {
+        showError('Vui lòng chọn dự án, nhà cung cấp và ít nhất một vật tư');
         return;
     }
 
@@ -229,19 +327,19 @@ async function savePRManual() {
         const proj = projects.find(p => p.code === projectCode);
         const vendors = await api.getVendors();
         const vendor = vendors.find(v => v.code === vendorCode);
-        const user = getUser();
 
         const newPR = {
             projectCode,
             projectName: proj ? proj.name : '',
             vendorCode,
             vendorName: vendor ? vendor.name : '',
-            items: JSON.stringify(items),
-            note: document.getElementById('f-pr-note').value.trim(),
+            items: JSON.stringify(items.map(it => ({ itemId: it.itemId, quantity: it.quantity }))),
+            note
         };
 
         await api.createPR(newPR);
         closeModal();
+        _prSelectedItems = [];
         await renderPR();
         showSuccess('Tạo PR thành công! (Trạng thái DRAFT)');
     } catch (error) {
@@ -353,31 +451,53 @@ async function editPR(id) {
             showError('Không tìm thấy PR!');
             return;
         }
-        if (pr.status !== 'DRAFT' && pr.status !== 'PENDING' && pr.status !== 'PENDING_PLANNING' && pr.status !== 'PENDING_PROJECT' && pr.status !== 'PENDING_CEO') {
+        if (pr.status !== 'DRAFT' && pr.status !== 'PENDING' && !pr.status.includes('PENDING_')) {
             showWarning('Chỉ có thể sửa PR ở trạng thái DRAFT hoặc đang chờ duyệt');
             return;
         }
 
-        const projects = await api.getProjects();
-        const projectOpts = projects.map(p =>
-            `<option value="${p.code}" ${p.code === pr.projectCode ? 'selected' : ''}>${p.code} - ${p.name}</option>`).join('');
-        const vendors = await api.getVendors();
-        const vendorOpts = vendors.map(v =>
-            `<option value="${v.code}" ${v.code === pr.vendorCode ? 'selected' : ''}>${v.code} - ${v.name}</option>`).join('');
-
-        let itemsData = [{ itemId: '', quantity: '' }];
+        // Khởi tạo selected items từ dữ liệu cũ
+        let initialItems = [];
         try {
             if (pr.items) {
-                itemsData = typeof pr.items === 'string' ? JSON.parse(pr.items) : pr.items;
-                if (!itemsData.length) itemsData = [{ itemId: '', quantity: '' }];
+                const items = typeof pr.items === 'string' ? JSON.parse(pr.items) : pr.items;
+                initialItems = items.map(it => ({
+                    itemId: it.itemId,
+                    quantity: it.quantity || 1,
+                    itemName: getItemName(it.itemId),
+                    itemCode: getItemCode(it.itemId),
+                    unit: getItemUnit(it.itemId)
+                }));
             }
-        } catch (e) { itemsData = [{ itemId: '', quantity: '' }]; }
+        } catch (e) {}
+        _prSelectedItems = initialItems;
+        _prMode = 'edit';
+        _prEditId = id;
+
+        const projects = await api.getProjects();
+        const projectOpts = projects.map(p =>
+            `<option value="${p.code}" ${p.code === pr.projectCode ? 'selected' : ''}>${p.code} - ${p.name}</option>`
+        ).join('');
+        const vendors = await api.getVendors();
+        const vendorOpts = vendors.map(v =>
+            `<option value="${v.code}" ${v.code === pr.vendorCode ? 'selected' : ''}>${v.code} - ${v.name}</option>`
+        ).join('');
 
         showModal('Sửa Purchase Request', `
-            <div class="form-group"><label>Dự án</label><select id="f-pr-project">${projectOpts}</select></div>
-            <div class="form-group"><label>Nhà cung cấp</label><select id="f-pr-vendor">${vendorOpts}</select></div>
-            <div class="form-group"><label>Danh sách vật tư</label>
-                <div id="pr-items-container">${buildItemRowsForForm(itemsData, 'pr')}</div>
+            <div class="form-group"><label>Dự án</label>
+                <select id="f-pr-project">${projectOpts}</select>
+            </div>
+            <div class="form-group"><label>Nhà cung cấp</label>
+                <select id="f-pr-vendor">${vendorOpts}</select>
+            </div>
+            <div class="form-group">
+                <label>Danh sách vật tư</label>
+                <button type="button" class="btn btn-sm btn-info" onclick="openItemSelectorForPR()">
+                    <i class="fas fa-plus"></i> Chọn vật tư
+                </button>
+                <div id="pr-selected-items-container" style="margin-top:8px; max-height:200px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:6px; padding:8px;">
+                    ${_renderPRSelectedItemsHTML()}
+                </div>
             </div>
             <div class="form-group"><label>Ghi chú</label><textarea id="f-pr-note" rows="2">${pr.note || ''}</textarea></div>
             <div class="modal-actions">
@@ -385,6 +505,10 @@ async function editPR(id) {
                 <button class="btn btn-danger" onclick="closeModal()">Hủy</button>
             </div>
         `);
+
+        setTimeout(() => {
+            _attachPRQuantityEvents();
+        }, 100);
     } catch (error) {
         showError('Lỗi khi tải thông tin PR: ' + error.message);
     }
@@ -394,14 +518,11 @@ async function editPR(id) {
 async function updatePR(id) {
     const projectCode = document.getElementById('f-pr-project').value;
     const vendorCode = document.getElementById('f-pr-vendor').value;
-    if (!projectCode || !vendorCode) {
-        showError('Vui lòng chọn dự án và NCC');
-        return;
-    }
-    const container = document.getElementById('pr-items-container');
-    const items = collectItemsFromForm(container);
-    if (items.length === 0) {
-        showError('Cần ít nhất một vật tư');
+    const note = document.getElementById('f-pr-note').value.trim();
+    const items = _prSelectedItems || [];
+
+    if (!projectCode || !vendorCode || items.length === 0) {
+        showError('Vui lòng chọn dự án, NCC và ít nhất một vật tư');
         return;
     }
 
@@ -416,12 +537,13 @@ async function updatePR(id) {
             projectName: proj ? proj.name : '',
             vendorCode,
             vendorName: vendor ? vendor.name : '',
-            items: JSON.stringify(items),
-            note: document.getElementById('f-pr-note').value.trim(),
+            items: JSON.stringify(items.map(it => ({ itemId: it.itemId, quantity: it.quantity }))),
+            note
         };
 
         await api.updatePR(id, updatedPR);
         closeModal();
+        _prSelectedItems = [];
         await renderPR();
         showSuccess('Cập nhật PR thành công!');
     } catch (error) {
@@ -542,5 +664,9 @@ window.getPRActions = getPRActions;
 window.savePRManual = savePRManual;
 window.showCreatePRFromMRModal = showCreatePRFromMRModal;
 window.showCreatePRModal = showCreatePRModal;
+window.prItemSelectorCallback = prItemSelectorCallback;
+window.renderPRSelectedItems = renderPRSelectedItems;
+window.removePRItem = removePRItem;
+window.openItemSelectorForPR = openItemSelectorForPR;
 
 console.log('✅ PR module updated with permission checks (header removed).');

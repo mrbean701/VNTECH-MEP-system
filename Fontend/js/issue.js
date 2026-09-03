@@ -173,10 +173,8 @@ function getIssueActions(item) {
     const user = getUser();
     let actions = '';
 
-    // Xem luôn hiển thị
     actions += `<button class="btn btn-info btn-sm" onclick="viewIssue(${item.id})"><i class="fas fa-eye"></i></button>`;
 
-    // Quyền sửa: DRAFT và có quyền edit + (admin hoặc người tạo)
     const canEdit = hasPermission('issue.edit') && 
                    (item.status === 'DRAFT' || item.status === 'PENDING') && 
                    (user?.role === 'ADMIN' || user?.id === item.createdBy);
@@ -184,7 +182,6 @@ function getIssueActions(item) {
         actions += ` <button class="btn btn-warning btn-sm" onclick="editIssue(${item.id})"><i class="fas fa-edit"></i></button>`;
     }
 
-    // Quyền xóa: DRAFT và có quyền delete + (admin hoặc người tạo)
     const canDelete = hasPermission('issue.delete') && 
                      item.status === 'DRAFT' && 
                      (user?.role === 'ADMIN' || user?.id === item.createdBy);
@@ -192,28 +189,25 @@ function getIssueActions(item) {
         actions += ` <button class="btn btn-danger btn-sm" onclick="deleteIssue(${item.id})"><i class="fas fa-trash"></i></button>`;
     }
 
-    // Gửi duyệt: DRAFT và có quyền submit + (admin hoặc người tạo)
+    // ✅ SỬA: Gửi duyệt → Xác nhận
     const canSubmit = hasPermission('issue.submit') && 
                      item.status === 'DRAFT' && 
                      (user?.role === 'ADMIN' || user?.id === item.createdBy);
     if (canSubmit) {
-        actions += ` <button class="btn btn-success btn-sm" onclick="submitIssue(${item.id})">Gửi duyệt</button>`;
+        actions += ` <button class="btn btn-success btn-sm" onclick="submitIssue(${item.id})">Xác nhận</button>`;
     }
 
-    // Duyệt: PENDING và có quyền approve
     const canApprove = hasPermission('issue.approve') && item.status === 'PENDING';
     if (canApprove) {
         actions += ` <button class="btn btn-success btn-sm" onclick="approveIssue(${item.id})">Duyệt</button>`;
         actions += ` <button class="btn btn-danger btn-sm" onclick="rejectIssue(${item.id})">Từ chối</button>`;
     }
 
-    // Cấp phát: APPROVED và có quyền complete
     const canComplete = hasPermission('issue.complete') && item.status === 'APPROVED';
     if (canComplete) {
         actions += ` <button class="btn btn-success btn-sm" onclick="showCompleteIssueModal(${item.id})">Cấp phát</button>`;
     }
 
-    // Xác nhận: COMPLETED và có quyền confirm
     const canConfirm = hasPermission('issue.confirm') && item.status === 'COMPLETED';
     if (canConfirm) {
         actions += ` <button class="btn btn-success btn-sm" onclick="confirmIssue(${item.id})">Xác nhận</button>`;

@@ -6,19 +6,24 @@ import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "items")
 @Data
-@NoArgsConstructor  // ✅ Thêm dòng này
+@NoArgsConstructor
 public class Item {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(unique = true, nullable = false)
+    @Column(nullable = false)  // ✅ XÓA unique=true
     private String code;
+
+    @Column(nullable = false)
     private String name;
+
     private String itemGroup;
     private String model;
     private String unit;
@@ -28,21 +33,17 @@ public class Item {
     private LocalDate createdAt;
     private LocalDate updatedAt;
 
-    public Item(LocalDate updatedAt, LocalDate createdAt, String note, String status, BigDecimal standardPrice, String unit, String model, String itemGroup, String name, String code, Long id) {
-        this.updatedAt = updatedAt;
-        this.createdAt = createdAt;
-        this.note = note;
-        this.status = status;
-        this.standardPrice = standardPrice;
-        this.unit = unit;
-        this.model = model;
-        this.itemGroup = itemGroup;
-        this.name = name;
-        this.code = code;
-        this.id = id;
-    }
+    // ✅ Thêm trường isMain
+    @Column(name = "is_main", nullable = false)
+    private Boolean isMain = true;  // Mặc định là tên chính
 
-    public Item(Long id, String code, String name, String itemGroup, String model, String unit, BigDecimal standardPrice, String status, String note, LocalDate createdAt, LocalDate updatedAt) {
+    // ✅ Quan hệ 1-n với chính nó (alias) – không cần thiết nếu ta coi mỗi bản ghi là một tên
+    // Ta sẽ xử lý bằng cách query theo code và lấy danh sách
+
+    // Constructor tiện ích
+    public Item(Long id, String code, String name, String itemGroup, String model, String unit,
+                BigDecimal standardPrice, String status, String note, LocalDate createdAt,
+                LocalDate updatedAt, Boolean isMain) {
         this.id = id;
         this.code = code;
         this.name = name;
@@ -54,5 +55,6 @@ public class Item {
         this.note = note;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
+        this.isMain = isMain != null ? isMain : true;
     }
 }

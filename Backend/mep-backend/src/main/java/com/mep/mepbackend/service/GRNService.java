@@ -51,6 +51,7 @@ public class GRNService {
     }
 
     private boolean isPendingStatus(String status) {
+
         return PENDING_STATUSES.contains(status);
     }
 
@@ -167,8 +168,8 @@ public class GRNService {
         grn.setWarehouseStaff(warehouseStaff);
         grn.setReceiptDate(receiptDate);
         grn.setStatus(statusCode != null ? statusCode : "RECEIVED");
+        grn.setApprovalStep(currentStep);
         history.setStatusAfter(grn.getStatus());
-
         approvalHistoryRepository.save(history);
         grn.setUpdatedAt(LocalDate.now());
         grnRepository.save(grn);
@@ -222,6 +223,7 @@ public class GRNService {
         } else {
             grn.setQcConfirm(qcName);
             grn.setStatus(statusCode != null ? statusCode : "QC_CHECKED");
+            grn.setApprovalStep(currentStep);
             grn.setNote((grn.getNote() != null ? grn.getNote() + " | " : "") +
                     "QC: " + qcName + " - " + result + " - " + note);
         }
@@ -304,6 +306,7 @@ public class GRNService {
         history.setStatusBefore(grn.getStatus());
 
         grn.setStatus(statusCode != null ? statusCode : "COMPLETED");
+        grn.setApprovalStep(currentStep);
         history.setStatusAfter(grn.getStatus());
 
         approvalHistoryRepository.save(history);

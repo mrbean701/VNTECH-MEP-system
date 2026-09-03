@@ -133,14 +133,25 @@ public class IssueService {
             throw new RuntimeException("Workflow không có bước duyệt nào");
         }
 
+        // Nếu workflow có 1 bước → tự động duyệt luôn
         if (steps.size() == 1) {
             if (!currentUserUtil.hasPermission("issue.approve")) {
                 throw new RuntimeException("Bạn không có quyền duyệt phiếu cấp phát");
             }
+
+            // ✅ Quan trọng: Set status thành PENDING trước khi gọi approve()
+            Map<String, Object> firstStep = steps.get(0);
+            String statusCode = (String) firstStep.get("statusCode");
+            issue.setStatus(statusCode != null && !statusCode.isEmpty() ? statusCode : "PENDING");
+            issue.setApprovalStep(1);
+            issue.setUpdatedAt(LocalDate.now());
+            issueRepository.save(issue);
+
             approve(id);
             return;
         }
 
+        // Nhiều bước → chuyển sang PENDING bước 1
         Map<String, Object> firstStep = steps.get(0);
         String statusCode = (String) firstStep.get("statusCode");
         issue.setStatus(statusCode != null && !statusCode.isEmpty() ? statusCode : "PENDING");
@@ -188,6 +199,7 @@ public class IssueService {
 
         if (currentStep == steps.size()) {
             issue.setStatus("APPROVED");
+            issue.setApprovalStep(currentStep);
         } else {
             issue.setApprovalStep(currentStep + 1);
             String nextStatusCode = workflowService.getStatusForStep(wf.getId(), currentStep + 1);
@@ -279,6 +291,7 @@ public class IssueService {
             history.setStatusBefore(issue.getStatus());
 
             issue.setStatus(statusCode != null ? statusCode : "COMPLETED");
+            issue.setApprovalStep(currentStep);
             issue.setCompletedBy(currentUser.getName());
             history.setStatusAfter(issue.getStatus());
 
@@ -332,6 +345,7 @@ public class IssueService {
         history.setStatusBefore(issue.getStatus());
 
         issue.setStatus(statusCode != null ? statusCode : "CONFIRMED");
+        issue.setApprovalStep(currentStep);
         issue.setConfirmedBy(currentUser.getName());
         issue.setCompletionDate(LocalDate.now());
         history.setStatusAfter(issue.getStatus());

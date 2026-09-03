@@ -17,6 +17,10 @@ async function fetchPositions() {
     }
 }
 
+// ================================================================
+// PHẦN 1: RENDER DANH SÁCH USER
+// ================================================================
+
 function renderUsersTab() {
     const users = getUsersData();
     const departments = getDepartmentsData();
@@ -103,13 +107,131 @@ function renderUsersTab() {
     return html;
 }
 
-function viewUser(id) {
-    const users = getUsersData();
-    const u = users.find(user => user.id === id);
-    if (!u) { showError('Không tìm thấy người dùng!'); return; }
+// ================================================================
+// PHẦN 2: XEM CHI TIẾT USER (CẬP NHẬT - HIỂN THỊ DỰ ÁN)
+// ================================================================
 
+/**
+ * Xem chi tiết người dùng - HIỂN THỊ DANH SÁCH DỰ ÁN USER THAM GIA
+ */
+// ====== SỬA HÀM viewUser ======
+async function viewUser(id, returnToProjectId = null) {
+    // 1. Lấy user (từ cache hoặc API)
+    let users = getUsersData();
+    let u = users.find(user => user.id === id);
+    if (!u) {
+        try {
+            const freshUsers = await api.getUsers();
+            u = freshUsers.find(user => user.id === id);
+            if (u) {
+                if (typeof refreshAdminUsers === 'function') {
+                    await refreshAdminUsers();
+                } else {
+                    saveData('users', freshUsers);
+                }
+            }
+        } catch (e) {
+            console.warn('Không thể lấy user từ API:', e);
+        }
+    }
+    if (!u) {
+        showError('Không tìm thấy người dùng!');
+        return;
+    }
+
+    // Lấy department
     const dept = getDepartmentsData().find(d => d.id === u.departmentId);
     const roleLabel = getRoles().find(r => r.value === u.role)?.label || u.role;
+
+    // Lấy danh sách dự án user tham gia
+    let projects = [];
+    let projectsHtml = '<p style="color:#999; font-size:13px;">Đang tải...</p>';
+    try {
+        projects = await api.getProjectsByUser(id, true);
+        if (projects && projects.length > 0) {
+            projectsHtml = `
+                <div style="max-height:200px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:6px;">
+                    <table style="width:100%; font-size:13px; border-collapse:collapse;">
+                        <thead style="background:#f8fafc; position:sticky; top:0;">
+                            <tr>
+                                <th style="padding:6px 8px; text-align:left;">Dự án</th>
+                                <th style="padding:6px 8px; text-align:left;">Vai trò</th>
+                                <th style="padding:6px 8px; text-align:left;">Tham gia</th>
+                                <th style="padding:6px 8px; text-align:left;">Rời</th>
+                                <th style="padding:6px 8px; text-align:left;">Trạng thái</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${projects.map(p => `
+                                <tr style="border-bottom:1px solid #f0f0f0; ${p.leftAt ? 'opacity:0.6;' : ''}">
+                                    <td style="padding:4px 8px; cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="closeModal(); viewProject(${p.projectId})">
+                                        ${p.projectName || 'N/A'}
+                                    </td>
+                                    <td style="padding:4px 8px;">${p.role || 'Thành viên'}</td>
+                                    <td style="padding:4px 8px; font-size:12px;">${formatDate(p.joinedAt)}</td>
+                                    <td style="padding:4px 8px; font-size:12px;">${p.leftAt ? formatDate(p.leftAt) : '--'}</td>
+                                    <td style="padding:4px 8px;">
+                                        ${p.leftAt 
+                                            ? '<span class="badge badge-draft">Đã rời</span>' 
+                                            : '<span class="badge badge-approved">Đang tham gia</span>'}
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+                <div style="font-size:12px; color:#888; margin-top:4px;">
+                    <i class="fas fa-info-circle"></i> 
+                    ${projects.filter(p => !p.leftAt).length} dự án đang tham gia, 
+                    ${projects.filter(p => p.leftAt).length} dự án đã rời
+                </div>
+            `;
+        } else {
+            projectsHtml = '<p style="color:#999; font-size:13px;">User chưa tham gia dự án nào</p>';
+        }
+    } catch (e) {
+        console.warn('Không thể lấy danh sách dự án của user:', e);
+        projectsHtml = '<p style="color:#999; font-size:13px;">Không thể tải danh sách dự án</p>';
+    }
+
+    // Lấy danh sách team
+    let teamsHtml = '<p style="color:#999; font-size:13px;">Đang tải...</p>';
+    try {
+        const teamMembers = await api.getTeamMembers ? await api.getTeamMembers(id) : [];
+        if (teamMembers && teamMembers.length > 0) {
+            teamsHtml = teamMembers.map(m => `
+                <div style="display:flex; justify-content:space-between; padding:4px 8px; background:#f8fafc; border-radius:4px; margin-bottom:4px; font-size:13px;">
+                    <span>${m.teamName || 'N/A'}</span>
+                    <span style="color:#888;">${m.role || 'Thành viên'}</span>
+                    <span style="color:#999; font-size:12px;">${m.leftAt ? 'Đã rời' : 'Đang tham gia'}</span>
+                </div>
+            `).join('');
+        } else {
+            teamsHtml = '<p style="color:#999; font-size:13px;">User chưa tham gia team nào</p>';
+        }
+    } catch (e) {
+        console.warn('Không thể lấy danh sách team của user:', e);
+        teamsHtml = '<p style="color:#999; font-size:13px;">Không thể tải danh sách team</p>';
+    }
+
+    // ✅ Xây dựng modal-actions với nút "Quay lại" nếu có returnToProjectId
+    let actionsHtml = `
+        <div class="modal-actions">
+    `;
+    if (u.id === getUser()?.id) {
+        actionsHtml += `<button class="btn btn-primary" onclick="editProfile()"><i class="fas fa-user-edit"></i> Sửa hồ sơ của tôi</button>`;
+    }
+    if (returnToProjectId) {
+        actionsHtml += `
+            <button class="btn btn-secondary" onclick="closeModal(); viewProject(${returnToProjectId})">
+                <i class="fas fa-arrow-left"></i> Quay lại dự án
+            </button>
+        `;
+    }
+    actionsHtml += `
+            <button class="btn btn-danger" onclick="closeModal()">Đóng</button>
+        </div>
+    `;
 
     showModal('Chi tiết người dùng', `
         <div class="detail-grid">
@@ -124,12 +246,21 @@ function viewUser(id) {
             <div><span class="label">Trình độ học vấn:</span> <span class="value">${u.education || '--'}</span></div>
             <div><span class="label">Ngày tạo:</span> <span class="value">${u.createdAt || '--'}</span></div>
         </div>
-        <div class="modal-actions">
-            ${u.id === getUser()?.id ? `<button class="btn btn-primary" onclick="editProfile()"><i class="fas fa-user-edit"></i> Sửa hồ sơ của tôi</button>` : ''}
-            <button class="btn btn-danger" onclick="closeModal()">Đóng</button>
+        <div style="margin-top:12px; border-top:1px solid #e2e8f0; padding-top:12px;">
+            <h4 style="margin:0 0 8px 0;">📋 Dự án đã tham gia</h4>
+            ${projectsHtml}
         </div>
+        <div style="margin-top:12px; border-top:1px solid #e2e8f0; padding-top:12px;">
+            <h4 style="margin:0 0 8px 0;">👥 Team tham gia</h4>
+            ${teamsHtml}
+        </div>
+        ${actionsHtml}
     `);
 }
+
+// ================================================================
+// PHẦN 3: CÁC HÀM KHÁC (GIỮ NGUYÊN)
+// ================================================================
 
 // ===== USER PROFILE MODAL =====
 function showUserProfileModal() {
@@ -230,7 +361,7 @@ async function saveProfile() {
     }
 }
 
-// ===== SHOW ADD USER MODAL (cập nhật với checkbox) =====
+// ===== SHOW ADD USER MODAL =====
 function showAddUserModal() {
     const departments = getDepartmentsData();
     const deptOpts = departments.map(d => `<option value="${d.id}">${d.code} - ${d.name}</option>`).join('');
@@ -277,7 +408,7 @@ function showAddUserModal() {
                     ${positionOpts}
                 </select>
             </div>
-            <!-- ✅ Checkbox gán quyền -->
+            <!-- Checkbox gán quyền -->
             <div id="grant-permission-group" style="display:none; padding:8px 12px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; margin-bottom:12px;">
                 <label style="display:flex; align-items:center; gap:8px; font-weight:500; cursor:pointer;">
                     <input type="checkbox" id="f-admin-grant-permissions" checked>
@@ -306,7 +437,7 @@ function showAddUserModal() {
             </div>
         `);
 
-        // ✅ Gắn sự kiện: khi chọn position đặc biệt, hiện checkbox
+        // Gắn sự kiện: khi chọn position đặc biệt, hiện checkbox
         const positionSelect = document.getElementById('f-admin-position');
         const grantGroup = document.getElementById('grant-permission-group');
         const specialPositions = getSpecialPositions();
@@ -335,7 +466,6 @@ async function saveUser() {
     const phone = document.getElementById('f-admin-phone').value.trim();
     const address = document.getElementById('f-admin-address').value.trim();
     const education = document.getElementById('f-admin-education').value.trim();
-    // ✅ Lấy flag grant permissions
     const grantAllDeptPermissions = document.getElementById('f-admin-grant-permissions')?.checked || false;
 
     if (!name || !email) {
@@ -350,7 +480,7 @@ async function saveUser() {
     try {
         const newUser = { 
             name, email, password, role, departmentId, position, phone, address, education,
-            grantAllDeptPermissions // ✅ Thêm flag
+            grantAllDeptPermissions
         };
         await api.createUser(newUser);
         closeModal();
@@ -362,7 +492,7 @@ async function saveUser() {
     }
 }
 
-// ===== EDIT USER MODAL (cập nhật với checkbox) =====
+// ===== EDIT USER MODAL =====
 async function editUser(id) {
     const users = getUsersData();
     const u = users.find(user => user.id === id);
@@ -423,7 +553,7 @@ async function editUser(id) {
                 ${positionOpts}
             </select>
         </div>
-        <!-- ✅ Checkbox gán quyền -->
+        <!-- Checkbox gán quyền -->
         <div id="grant-permission-group" style="display:none; padding:8px 12px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; margin-bottom:12px;">
             <label style="display:flex; align-items:center; gap:8px; font-weight:500; cursor:pointer;">
                 <input type="checkbox" id="f-admin-grant-permissions" checked>
@@ -452,7 +582,6 @@ async function editUser(id) {
         </div>
     `);
 
-    // ✅ Gắn sự kiện tương tự
     const positionSelect = document.getElementById('f-admin-position');
     const grantGroup = document.getElementById('grant-permission-group');
     const specialPositions = getSpecialPositions();
@@ -480,7 +609,6 @@ async function updateUser(id) {
     const phone = document.getElementById('f-admin-phone').value.trim();
     const address = document.getElementById('f-admin-address').value.trim();
     const education = document.getElementById('f-admin-education').value.trim();
-    // ✅ Lấy flag grant permissions
     const grantAllDeptPermissions = document.getElementById('f-admin-grant-permissions')?.checked || false;
 
     if (!name || !email) {
@@ -495,7 +623,7 @@ async function updateUser(id) {
     try {
         const updatedUser = { 
             name, email, role, departmentId, position, phone, address, education,
-            grantAllDeptPermissions // ✅ Thêm flag
+            grantAllDeptPermissions
         };
         if (password) updatedUser.password = password;
         await api.updateUser(id, updatedUser);
@@ -529,7 +657,10 @@ async function deleteUser(id) {
     }
 }
 
-// Export
+// ================================================================
+// EXPORT
+// ================================================================
+
 window.renderUsersTab = renderUsersTab;
 window.viewUser = viewUser;
 window.showAddUserModal = showAddUserModal;
@@ -541,3 +672,5 @@ window.showUserProfileModal = showUserProfileModal;
 window.saveProfile = saveProfile;
 window.editProfile = editProfile;
 window.fetchPositions = fetchPositions;
+
+console.log('✅ Admin Users module updated with project/team display.');

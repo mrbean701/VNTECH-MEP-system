@@ -175,10 +175,8 @@ function getReturnActions(item) {
     const user = getUser();
     let actions = '';
 
-    // Xem luôn hiển thị
     actions += `<button class="btn btn-info btn-sm" onclick="viewMaterialReturn(${item.id})"><i class="fas fa-eye"></i></button>`;
 
-    // Quyền sửa: DRAFT và có quyền edit + (admin hoặc người tạo)
     const canEdit = hasPermission('materialreturn.edit') && 
                    (item.status === 'DRAFT' || item.status === 'PENDING') && 
                    (user?.role === 'ADMIN' || user?.id === item.createdBy);
@@ -186,7 +184,6 @@ function getReturnActions(item) {
         actions += ` <button class="btn btn-warning btn-sm" onclick="editMaterialReturn(${item.id})"><i class="fas fa-edit"></i></button>`;
     }
 
-    // Quyền xóa: DRAFT và có quyền delete + (admin hoặc người tạo)
     const canDelete = hasPermission('materialreturn.delete') && 
                      item.status === 'DRAFT' && 
                      (user?.role === 'ADMIN' || user?.id === item.createdBy);
@@ -194,22 +191,20 @@ function getReturnActions(item) {
         actions += ` <button class="btn btn-danger btn-sm" onclick="deleteMaterialReturn(${item.id})"><i class="fas fa-trash"></i></button>`;
     }
 
-    // Gửi duyệt: DRAFT và có quyền submit + (admin hoặc người tạo)
+    // ✅ SỬA: Gửi duyệt → Xác nhận
     const canSubmit = hasPermission('materialreturn.submit') && 
                      item.status === 'DRAFT' && 
                      (user?.role === 'ADMIN' || user?.id === item.createdBy);
     if (canSubmit) {
-        actions += ` <button class="btn btn-success btn-sm" onclick="submitMaterialReturn(${item.id})">Gửi duyệt</button>`;
+        actions += ` <button class="btn btn-success btn-sm" onclick="submitMaterialReturn(${item.id})">Xác nhận</button>`;
     }
 
-    // Duyệt: PENDING và có quyền approve
     const canApprove = hasPermission('materialreturn.approve') && item.status === 'PENDING';
     if (canApprove) {
         actions += ` <button class="btn btn-success btn-sm" onclick="approveMaterialReturn(${item.id})">Nhận vật tư</button>`;
         actions += ` <button class="btn btn-danger btn-sm" onclick="rejectMaterialReturn(${item.id})">Từ chối</button>`;
     }
 
-    // Xác nhận hoàn tất: APPROVED và có quyền confirm
     const canConfirm = hasPermission('materialreturn.confirm') && item.status === 'APPROVED';
     if (canConfirm) {
         actions += ` <button class="btn btn-success btn-sm" onclick="confirmMaterialReturn(${item.id})">Xác nhận hoàn tất</button>`;

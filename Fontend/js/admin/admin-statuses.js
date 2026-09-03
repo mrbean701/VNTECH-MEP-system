@@ -1,5 +1,5 @@
 // ================================================================
-// ADMIN STATUSES - Quản lý trạng thái động
+// ADMIN STATUSES - Quản lý trạng thái động (cập nhật statusGroup)
 // ================================================================
 
 function renderStatusesTab() {
@@ -8,7 +8,7 @@ function renderStatusesTab() {
     // ✅ Mở rộng entity types
     const entityTypes = ['mr', 'pr', 'po', 'grn', 'sto', 'issue', 'materialreturn', 'user', 'department', 'vendor', 'project', 'warehouse', 'workflow'];
 
-    // ✅ Lấy danh sách group từ statuses
+    // ✅ Lấy danh sách group từ statuses (dùng statusGroup)
     const groups = getStatusGroups(statuses);
 
     let html = `
@@ -29,15 +29,15 @@ function renderStatusesTab() {
         </div>
     `;
 
-    // ✅ Hiển thị theo entity type, nhóm theo group
+    // ✅ Hiển thị theo entity type, nhóm theo statusGroup
     for (const entityType of entityTypes) {
         const list = statuses.filter(s => s.entityType === entityType);
         const defaultStatus = list.find(s => s.isDefault === true);
         
-        // Nhóm theo group
+        // Nhóm theo statusGroup
         const grouped = {};
         list.forEach(s => {
-            const group = s.group || 'Khác';
+            const group = s.statusGroup || 'Khác';
             if (!grouped[group]) grouped[group] = [];
             grouped[group].push(s);
         });
@@ -78,7 +78,7 @@ function renderStatusesTab() {
                                         ${s.isFinal ? '<span class="badge badge-info">🏁 Kết thúc</span>' : ''}
                                         ${s.description ? `<span style="color:#94a3b8;">${s.description}</span>` : ''}
                                         <span style="color:#94a3b8;">| Thứ tự: ${s.sortOrder || 0}</span>
-                                        ${s.group ? `<span style="color:#94a3b8;">| Nhóm: ${s.group}</span>` : ''}
+                                        ${s.statusGroup ? `<span style="color:#94a3b8;">| Nhóm: ${s.statusGroup}</span>` : ''}
                                     </div>
                                 </div>
                                 <div style="display:flex; gap:4px; flex-wrap:wrap; margin-left:8px;">
@@ -100,12 +100,12 @@ function renderStatusesTab() {
 function getStatusGroups(statuses) {
     const groups = new Set();
     statuses.forEach(s => {
-        if (s.group) groups.add(s.group);
+        if (s.statusGroup) groups.add(s.statusGroup);
     });
     return Array.from(groups);
 }
 
-// ===== SHOW CREATE STATUS MODAL (cập nhật thêm group) =====
+// ===== SHOW CREATE STATUS MODAL (cập nhật thêm statusGroup) =====
 function showCreateStatusModal(entityType = null) {
     const entityTypes = ['mr', 'pr', 'po', 'grn', 'sto', 'issue', 'materialreturn', 'user', 'department', 'vendor', 'project', 'warehouse', 'workflow'];
     const entityOpts = entityTypes.map(e => 
@@ -166,7 +166,7 @@ async function saveStatus() {
     const code = document.getElementById('f-status-code').value.trim().toUpperCase();
     const description = document.getElementById('f-status-desc').value.trim();
     const color = document.getElementById('f-status-color').value.trim();
-    const group = document.getElementById('f-status-group').value.trim();
+    const statusGroup = document.getElementById('f-status-group').value.trim();
     const sortOrder = parseInt(document.getElementById('f-status-sort').value) || 0;
     const isDefault = document.getElementById('f-status-default').checked;
     const isFinal = document.getElementById('f-status-final').checked;
@@ -175,7 +175,7 @@ async function saveStatus() {
         showError('Vui lòng nhập tên và mã code');
         return;
     }
-    if (!group) {
+    if (!statusGroup) {
         showError('Vui lòng nhập nhóm trạng thái');
         return;
     }
@@ -187,7 +187,7 @@ async function saveStatus() {
             code,
             description,
             color: color || '#6b7280',
-            group,
+            statusGroup,
             sortOrder,
             isDefault,
             isFinal
@@ -201,7 +201,7 @@ async function saveStatus() {
     }
 }
 
-// ===== EDIT STATUS (cập nhật thêm group) =====
+// ===== EDIT STATUS (cập nhật thêm statusGroup) =====
 async function editStatus(id) {
     try {
         const status = _adminStatuses.find(s => s.id === id);
@@ -235,7 +235,7 @@ async function editStatus(id) {
             </div>
             <div class="form-group">
                 <label>Nhóm <span style="color:red;">*</span></label>
-                <input id="f-status-group" value="${status.group || ''}" class="form-control">
+                <input id="f-status-group" value="${status.statusGroup || ''}" class="form-control">
             </div>
             <div class="form-group">
                 <label>Thứ tự sắp xếp</label>
@@ -267,7 +267,7 @@ async function updateStatus(id) {
     const code = document.getElementById('f-status-code').value.trim().toUpperCase();
     const description = document.getElementById('f-status-desc').value.trim();
     const color = document.getElementById('f-status-color').value.trim();
-    const group = document.getElementById('f-status-group').value.trim();
+    const statusGroup = document.getElementById('f-status-group').value.trim();
     const sortOrder = parseInt(document.getElementById('f-status-sort').value) || 0;
     const isDefault = document.getElementById('f-status-default').checked;
     const isFinal = document.getElementById('f-status-final').checked;
@@ -276,7 +276,7 @@ async function updateStatus(id) {
         showError('Vui lòng nhập tên và mã code');
         return;
     }
-    if (!group) {
+    if (!statusGroup) {
         showError('Vui lòng nhập nhóm trạng thái');
         return;
     }
@@ -288,7 +288,7 @@ async function updateStatus(id) {
             code,
             description,
             color: color || '#6b7280',
-            group,
+            statusGroup,
             sortOrder,
             isDefault,
             isFinal

@@ -268,5 +268,89 @@ if (typeof getUser === 'function' && getUser() && typeof hasPermission === 'func
     window.updateMenuVisibility();
 }
 
+
+// ================================================================
+// LƯU TRANG HIỆN TẠI & KHÔI PHỤC SAU RELOAD
+// ================================================================
+
+const STORAGE_KEY_PAGE = 'mep2_current_page';
+
+// Hàm lưu trang hiện tại
+function saveCurrentPage() {
+    const activePage = document.querySelector('.page.active');
+    if (activePage) {
+        localStorage.setItem(STORAGE_KEY_PAGE, activePage.id);
+    }
+}
+
+// Hàm khôi phục trang
+function restorePage() {
+    const savedPageId = localStorage.getItem(STORAGE_KEY_PAGE);
+    if (savedPageId) {
+        const page = document.getElementById(savedPageId);
+        if (page) {
+            // Ẩn tất cả, hiển thị page đã lưu
+            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+            page.classList.add('active');
+            // Cập nhật menu
+            document.querySelectorAll('#menu > li').forEach(li => li.classList.remove('active'));
+            const menuItem = document.querySelector(`#menu > li[data-page="${page.id.replace('page-', '')}"]`);
+            if (menuItem) menuItem.classList.add('active');
+            // Gọi render tương ứng
+            const pageName = page.id.replace('page-', '');
+            const renderMap = {
+                'dashboard': renderDashboard,
+                'projects': renderProjects,
+                'vendors': renderVendors,
+                'items': renderItems,
+                'mr': renderMR,
+                'pr': renderPR,
+                'po': renderPO,
+                'inventory': () => renderWarehousePage('wh-list'),
+                'issue': renderIssuePage,
+                'material-return': renderMaterialReturnPage,
+                'min-stock': renderMinStockPage,
+                'auto-reorder': renderAutoReorderPage,
+                'admin': renderAdminPage
+            };
+            if (renderMap[pageName]) {
+                try { renderMap[pageName](); } catch(e) { console.warn('Render error:', e); }
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
+// Gán sự kiện lưu trang trước khi reload
+window.addEventListener('beforeunload', saveCurrentPage);
+
+// Sau khi load xong, khôi phục trang (nếu có)
+document.addEventListener('DOMContentLoaded', function() {
+    // Chỉ khôi phục nếu đã login
+    if (getUser()) {
+        const restored = restorePage();
+        if (!restored) {
+            // Nếu không có trang lưu, mặc định về dashboard
+            const dashboard = document.getElementById('page-dashboard');
+            if (dashboard) {
+                document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+                dashboard.classList.add('active');
+            }
+        }
+    }
+});
+
+// Cập nhật saveCurrentPage khi chuyển trang (thêm vào sự kiện click menu)
+// Đã có sẵn trong menu click, nhưng thêm vào để đảm bảo
+document.querySelectorAll('#menu > li').forEach(li => {
+    const originalClick = li._clickHandler || li.onclick;
+    li.addEventListener('click', function() {
+        // Lưu trang sau khi chuyển (sau 100ms để page đã active)
+        setTimeout(saveCurrentPage, 100);
+    });
+});
+
+
 console.log('✅ App module loaded successfully (safe render added).');
 

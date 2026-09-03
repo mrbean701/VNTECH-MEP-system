@@ -370,12 +370,35 @@ window._changePageSize = function(storageKey, size, targetFn) {
 // ================================================================
 // SHOW WAREHOUSE INFO MODAL
 // ================================================================
-function showWarehouseInfoModal(whId) {
-    const wh = (window._warehousesCache || []).find(w => w.id === whId);
+// ====== SHOW WAREHOUSE INFO MODAL ======
+async function showWarehouseInfoModal(whId) {
+    if (!whId) {
+        showError('ID kho không hợp lệ!');
+        return;
+    }
+
+    // 1. Thử tìm trong cache trước
+    let wh = (window._warehousesCache || []).find(w => w.id === whId);
+    
+    // 2. Nếu không có trong cache, gọi API lấy mới
+    if (!wh) {
+        try {
+            const warehouses = await api.getWarehouses();
+            window._warehousesCache = warehouses;
+            wh = warehouses.find(w => w.id === whId);
+            if (wh) {
+                saveData('warehouses', warehouses);
+            }
+        } catch (e) {
+            console.warn('Không thể lấy danh sách kho từ API:', e);
+        }
+    }
+
     if (!wh) {
         showError('Không tìm thấy kho!');
         return;
     }
+
     const inventory = window._inventoryCache || [];
     const itemCount = inventory.filter(i => i.warehouse_id === whId || i.warehouseId === whId).length;
     const totalQty = inventory.filter(i => i.warehouse_id === whId || i.warehouseId === whId).reduce((s, i) => s + (i.quantity || 0), 0);
@@ -398,6 +421,87 @@ function showWarehouseInfoModal(whId) {
         </div>
         <div class="modal-actions"><button class="btn btn-danger" onclick="closeModal()">Đóng</button></div>
     `);
+}
+
+// ================================================================
+// UTILITY FUNCTIONS - Caching & Debounce
+// ================================================================
+
+// ====== CACHE MANAGER ======
+const _cache = {
+    data: {},
+    lastFetch: {},
+    ttl: {}
+};
+
+/**
+ * Lấy dữ liệu từ cache hoặc gọi API
+ * @param {string} key - Cache key (vd: 'items', 'projects')
+ * @param {Function} fetchFn - Hàm trả về Promise
+ * @param {number} ttl - Thời gian sống (ms), mặc định 60 giây
+ * @param {boolean} forceRefresh - Bỏ qua cache, gọi API luôn
+ * @returns {Promise<any>}
+ */
+function getCachedData(key, fetchFn, ttl = 60000, forceRefresh = false) {
+    const now = Date.now();
+    if (!forceRefresh && _cache.data[key] && _cache.lastFetch[key] && (now - _cache.lastFetch[key] < ttl)) {
+        return Promise.resolve(_cache.data[key]);
+    }
+    return fetchFn().then(data => {
+        _cache.data[key] = data;
+        _cache.lastFetch[key] = now;
+        _cache.ttl[key] = ttl;
+        return data;
+    });
+}
+
+/**
+ * Xóa cache của một key
+ */
+function clearCache(key) {
+    if (key) {
+        delete _cache.data[key];
+        delete _cache.lastFetch[key];
+        delete _cache.ttl[key];
+    } else {
+        _cache.data = {};
+        _cache.lastFetch = {};
+        _cache.ttl = {};
+    }
+}
+
+/**
+ * Lấy cache hiện tại (dùng cho debug)
+ */
+function getCacheStatus() {
+    return {
+        keys: Object.keys(_cache.data),
+        lastFetch: _cache.lastFetch,
+        ttl: _cache.ttl
+    };
+}
+
+// ====== DEBOUNCE ======
+/**
+ * Debounce function – trì hoãn gọi hàm cho đến khi ngừng gõ
+ * @param {Function} func - Hàm cần debounce
+ * @param {number} wait - Thời gian chờ (ms)
+ * @param {boolean} immediate - Gọi ngay lần đầu tiên
+ * @returns {Function}
+ */
+function debounce(func, wait = 300, immediate = false) {
+    let timeout;
+    return function executedFunction(...args) {
+        const context = this;
+        const later = () => {
+            timeout = null;
+            if (!immediate) func.apply(context, args);
+        };
+        const callNow = immediate && !timeout;
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+        if (callNow) func.apply(context, args);
+    };
 }
 
 // ====== EXPORT RA WINDOW ======
@@ -425,4 +529,10 @@ window.setPageSize = setPageSize;
 window.DEFAULT_PAGE_SIZE = DEFAULT_PAGE_SIZE;
 window.PAGE_SIZE_OPTIONS = PAGE_SIZE_OPTIONS;
 
-console.log('✅ Utils module loaded successfully.');
+// Export ra window
+window.getCachedData = getCachedData;
+window.clearCache = clearCache;
+window.getCacheStatus = getCacheStatus;
+window.debounce = debounce;
+
+console.log('✅ Utils updated with caching & debounce.');

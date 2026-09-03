@@ -52,12 +52,10 @@ public class StatusService {
 
     @Transactional
     public Status create(Status status) {
-        // Kiểm tra trùng code
         if (statusRepository.existsByCode(status.getCode())) {
             throw new DuplicateResourceException("Status code '" + status.getCode() + "' already exists");
         }
 
-        // Nếu là default, reset các default khác trong cùng entityType
         if (Boolean.TRUE.equals(status.getIsDefault())) {
             resetDefaultStatuses(status.getEntityType());
         }
@@ -73,7 +71,6 @@ public class StatusService {
     public Status update(Long id, Status details) {
         Status status = getById(id);
 
-        // Kiểm tra trùng code (nếu thay đổi code)
         if (!status.getCode().equals(details.getCode()) &&
                 statusRepository.existsByCode(details.getCode())) {
             throw new DuplicateResourceException("Status code '" + details.getCode() + "' already exists");
@@ -86,9 +83,9 @@ public class StatusService {
         status.setIsFinal(details.getIsFinal());
         status.setSortOrder(details.getSortOrder());
         status.setColor(details.getColor());
+        status.setStatusGroup(details.getStatusGroup()); // ✅ Đổi tên
         status.setUpdatedAt(LocalDate.now());
 
-        // Nếu set default, reset các default khác trong cùng entityType
         if (Boolean.TRUE.equals(details.getIsDefault()) && !Boolean.TRUE.equals(status.getIsDefault())) {
             resetDefaultStatuses(status.getEntityType());
             status.setIsDefault(true);
@@ -104,7 +101,6 @@ public class StatusService {
     @Transactional
     public void delete(Long id) {
         Status status = getById(id);
-        // Không cho xóa status đang là default
         if (Boolean.TRUE.equals(status.getIsDefault())) {
             throw new RuntimeException("Cannot delete default status. Please set another status as default first.");
         }

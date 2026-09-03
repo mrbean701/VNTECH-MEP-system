@@ -64,39 +64,40 @@ async function login(email, password) {
 
 // ====== CÁC HÀM GET (fallback localStorage) ======
 async function getProjects() {
-    try {
+    return getCachedData('projects', async () => {
         const data = await apiRequest('/projects');
         const arr = extractArray(data);
         if (arr && arr.length > 0) {
             saveData('projects', arr);
             return arr;
         }
-    } catch(e) { console.warn('getProjects fallback:', e); }
-    return getData('projects') || [];
+        return getData('projects') || [];
+    }, 60000);
 }
 
 async function getVendors() {
-    try {
+    return getCachedData('vendors', async () => {
         const data = await apiRequest('/vendors');
         const arr = extractArray(data);
         if (arr && arr.length > 0) {
             saveData('vendors', arr);
             return arr;
         }
-    } catch(e) { console.warn('getVendors fallback:', e); }
-    return getData('vendors') || [];
+        return getData('vendors') || [];
+    }, 60000);
 }
 
+// Override các hàm GET để dùng cache
 async function getItems() {
-    try {
+    return getCachedData('items', async () => {
         const data = await apiRequest('/items');
         const arr = extractArray(data);
         if (arr && arr.length > 0) {
             saveData('items', arr);
             return arr;
         }
-    } catch(e) { console.warn('getItems fallback:', e); }
-    return getData('items') || [];
+        return getData('items') || [];
+    }, 60000);
 }
 
 async function getMRs() {
@@ -136,15 +137,15 @@ async function getPOs() {
 }
 
 async function getWarehouses() {
-    try {
+    return getCachedData('warehouses', async () => {
         const data = await apiRequest('/warehouses');
         const arr = extractArray(data);
         if (arr && arr.length > 0) {
             saveData('warehouses', arr);
             return arr;
         }
-    } catch(e) { console.warn('getWarehouses fallback:', e); }
-    return getData('warehouses') || [];
+        return getData('warehouses') || [];
+    }, 60000);
 }
 
 async function getInventory() {
@@ -241,27 +242,27 @@ async function getMinStock() {
 }
 
 async function getUsers() {
-    try {
+    return getCachedData('users', async () => {
         const data = await apiRequest('/users');
         const arr = extractArray(data);
         if (arr && arr.length > 0) {
             saveData('users', arr);
             return arr;
         }
-    } catch(e) { console.warn('getUsers fallback:', e); }
-    return getData('users') || [];
+        return getData('users') || [];
+    }, 120000); // 2 phút cho users (ít thay đổi)
 }
 
 async function getDepartments() {
-    try {
+    return getCachedData('departments', async () => {
         const data = await apiRequest('/departments');
         const arr = extractArray(data);
         if (arr && arr.length > 0) {
             saveData('departments', arr);
             return arr;
         }
-    } catch(e) { console.warn('getDepartments fallback:', e); }
-    return getData('departments') || [];
+        return getData('departments') || [];
+    }, 120000);
 }
 
 async function getPermissions() {
@@ -595,6 +596,220 @@ async function removeDepartmentPermission(departmentId, permissionKey) {
     return apiRequest(`/permissions/department/${departmentId}/remove?permissionKey=${permissionKey}`, 'DELETE');
 }
 
+// ================================================================
+// TEAM API
+// ================================================================
+
+async function getTeams() {
+    try {
+        const data = await apiRequest('/teams');
+        return extractArray(data) || [];
+    } catch(e) {
+        console.warn('getTeams fallback:', e);
+        return [];
+    }
+}
+
+async function getTeam(id) {
+    return apiRequest(`/teams/${id}`);
+}
+
+async function createTeam(team) {
+    return apiRequest('/teams', 'POST', team);
+}
+
+async function updateTeam(id, team) {
+    return apiRequest(`/teams/${id}`, 'PUT', team);
+}
+
+async function deleteTeam(id) {
+    return apiRequest(`/teams/${id}`, 'DELETE');
+}
+
+async function getTeamMembers(teamId, includeLeft = false) {
+    const endpoint = includeLeft ? `/teams/${teamId}/members/all` : `/teams/${teamId}/members`;
+    return apiRequest(endpoint);
+}
+
+async function addTeamMember(teamId, userId, role, joinedAt) {
+    const params = new URLSearchParams({ userId, role: role || 'Thành viên', joinedAt: joinedAt || '' });
+    return apiRequest(`/teams/${teamId}/members?${params.toString()}`, 'POST');
+}
+
+async function removeTeamMember(teamId, userId, leftAt) {
+    const params = new URLSearchParams({ leftAt: leftAt || '' });
+    return apiRequest(`/teams/${teamId}/members/${userId}?${params.toString()}`, 'DELETE');
+}
+
+// ================================================================
+// PROJECT MEMBER API
+// ================================================================
+
+async function getProjectMembers(projectId, includeLeft = false) {
+    return apiRequest(`/project-members/project/${projectId}?includeLeft=${includeLeft}`);
+}
+
+async function getProjectsByUser(userId, includeLeft = false) {
+    return apiRequest(`/project-members/user/${userId}?includeLeft=${includeLeft}`);
+}
+
+async function addProjectMember(data) {
+    return apiRequest('/project-members', 'POST', data);
+}
+
+async function updateProjectMemberRole(id, role) {
+    return apiRequest(`/project-members/${id}/role?role=${role}`, 'PUT');
+}
+
+async function leaveProject(id, leftAt) {
+    const params = new URLSearchParams({ leftAt: leftAt || '' });
+    return apiRequest(`/project-members/${id}/leave?${params.toString()}`, 'POST');
+}
+
+async function deleteProjectMember(id) {
+    return apiRequest(`/project-members/${id}`, 'DELETE');
+}
+
+
+// ================================================================
+// PROJECT - GET BY ID (THIẾU)
+// ================================================================
+
+async function getProjectById(id) {
+    try {
+        const data = await apiRequest(`/projects/${id}`);
+        return data;
+    } catch(e) {
+        console.warn('getProjectById fallback:', e);
+        const projects = getData('projects') || [];
+        return projects.find(p => p.id === id) || null;
+    }
+}
+
+// ================================================================
+// PR - GET BY ID (THIẾU)
+// ================================================================
+
+async function getPRById(id) {
+    try {
+        const data = await apiRequest(`/pr/${id}`);
+        return data;
+    } catch(e) {
+        console.warn('getPRById fallback:', e);
+        const prs = getData('prs') || [];
+        return prs.find(p => p.id === id) || null;
+    }
+}
+
+// ================================================================
+// PO - GET BY ID (THIẾU)
+// ================================================================
+
+async function getPOById(id) {
+    try {
+        const data = await apiRequest(`/po/${id}`);
+        return data;
+    } catch(e) {
+        console.warn('getPOById fallback:', e);
+        const pos = getData('pos') || [];
+        return pos.find(p => p.id === id) || null;
+    }
+}
+
+// ================================================================
+// GRN - GET BY ID (THIẾU)
+// ================================================================
+
+async function getGRNById(id) {
+    try {
+        const data = await apiRequest(`/grn/${id}`);
+        return data;
+    } catch(e) {
+        console.warn('getGRNById fallback:', e);
+        const grns = getData('grns') || [];
+        return grns.find(g => g.id === id) || null;
+    }
+}
+
+// ================================================================
+// STO - GET BY ID (THIẾU)
+// ================================================================
+
+async function getSTOById(id) {
+    try {
+        const data = await apiRequest(`/sto/${id}`);
+        return data;
+    } catch(e) {
+        console.warn('getSTOById fallback:', e);
+        const stos = getData('stos') || [];
+        return stos.find(s => s.id === id) || null;
+    }
+}
+
+// ================================================================
+// ISSUE - GET BY ID (THIẾU)
+// ================================================================
+
+async function getIssueById(id) {
+    try {
+        const data = await apiRequest(`/issue/${id}`);
+        return data;
+    } catch(e) {
+        console.warn('getIssueById fallback:', e);
+        const issues = getData('issues') || [];
+        return issues.find(i => i.id === id) || null;
+    }
+}
+
+// ================================================================
+// MATERIAL RETURN - GET BY ID (THIẾU)
+// ================================================================
+
+async function getMaterialReturnById(id) {
+    try {
+        const data = await apiRequest(`/material-return/${id}`);
+        return data;
+    } catch(e) {
+        console.warn('getMaterialReturnById fallback:', e);
+        const returns = getData('material_returns') || [];
+        return returns.find(r => r.id === id) || null;
+    }
+}
+
+// ================================================================
+// VENDOR - GET BY ID (THIẾU)
+// ================================================================
+
+async function getVendorById(id) {
+    try {
+        const data = await apiRequest(`/vendors/${id}`);
+        return data;
+    } catch(e) {
+        console.warn('getVendorById fallback:', e);
+        const vendors = getData('vendors') || [];
+        return vendors.find(v => v.id === id) || null;
+    }
+}
+
+async function updateProjectMember(id, data) {
+    return apiRequest(`/project-members/${id}`, 'PUT', data);
+}
+
+// ====== HÀM XÓA CACHE KHI CÓ THAY ĐỔI ======
+// Gọi sau khi create/update/delete
+function invalidateCache(keys) {
+    if (Array.isArray(keys)) {
+        keys.forEach(key => clearCache(key));
+    } else {
+        clearCache(keys);
+    }
+}
+
+// ====== VENDOR GROUPS ======
+async function updateVendorGroups(vendorId, groupNames) {
+    return apiRequest(`/vendors/${vendorId}/groups`, 'PUT', groupNames);
+}
+
 // ====== EXPORT RA WINDOW ======
 window.api = {
     // Auth
@@ -642,6 +857,39 @@ window.api = {
     getDepartmentPermissions,
     assignDepartmentPermission,
     removeDepartmentPermission,
+
+    getProjectById,
+    getPRById,
+    getPOById,
+    getGRNById,
+    getSTOById,
+    getIssueById,
+    getMaterialReturnById,
+    getVendorById,
+
+    getTeams,
+    getTeam,
+    createTeam,
+    updateTeam,
+    deleteTeam,
+    getTeamMembers,
+    addTeamMember,
+    removeTeamMember,
+    
+    // Project Member
+    getProjectMembers,
+    getProjectsByUser,
+    addProjectMember,
+    updateProjectMemberRole,
+    leaveProject,
+    deleteProjectMember,
+
+    updateProjectMember,
+    
 };
+
+window.invalidateCache = invalidateCache;
+window.updateVendorGroups = updateVendorGroups;
+
 
 console.log('✅ API layer loaded successfully');

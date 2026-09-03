@@ -1,6 +1,7 @@
 -- ================================================================
 -- RESET DATABASE - CHỈ ADMIN + WORKFLOW MẪU + STATUS + PERMISSIONS
--- PHIÊN BẢN 2.0.27 (Ngày 29/08/2025)
+-- PHIÊN BẢN 2.0.27 (Ngày 03/09/2025)
+-- BAO GỒM: PHẦN I → VI
 -- ================================================================
 
 DROP DATABASE IF EXISTS mep_db;
@@ -20,6 +21,9 @@ CREATE TABLE IF NOT EXISTS users (
     `role` VARCHAR(50) NOT NULL,
     department_id BIGINT NULL,
     `position` VARCHAR(100) NULL,
+    address VARCHAR(255) NULL,
+    phone VARCHAR(20) NULL,
+    education VARCHAR(100) NULL,
     created_at DATE NULL,
     updated_at DATE NULL,
     INDEX idx_email (email),
@@ -33,6 +37,7 @@ CREATE TABLE IF NOT EXISTS departments (
     `name` VARCHAR(100) NOT NULL,
     manager_id BIGINT NULL,
     manager_name VARCHAR(100) NULL,
+    parent_id BIGINT NULL,
     created_at DATE NULL,
     updated_at DATE NULL,
     INDEX idx_code (`code`)
@@ -66,12 +71,26 @@ CREATE TABLE IF NOT EXISTS vendors (
     email VARCHAR(100) NULL,
     payment_term VARCHAR(50) NULL,
     note TEXT NULL,
+    `status` VARCHAR(20) DEFAULT 'ACTIVE',
+    inactive_date DATE NULL,
     created_at DATE NULL,
     updated_at DATE NULL,
-    INDEX idx_code (`code`)
+    INDEX idx_code (`code`),
+    INDEX idx_status (`status`)
 );
 
--- 5. ITEMS
+-- 5. VENDOR_GROUPS (MỚI - PHẦN VI)
+CREATE TABLE IF NOT EXISTS vendor_groups (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    vendor_id BIGINT NOT NULL,
+    `name` VARCHAR(100) NOT NULL,
+    created_at DATE NULL,
+    updated_at DATE NULL,
+    INDEX idx_vendor_id (vendor_id),
+    CONSTRAINT fk_vendor_groups_vendor FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 6. ITEMS
 CREATE TABLE IF NOT EXISTS items (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     `code` VARCHAR(50) UNIQUE NOT NULL,
@@ -88,7 +107,7 @@ CREATE TABLE IF NOT EXISTS items (
     INDEX idx_status (`status`)
 );
 
--- 6. MR
+-- 7. MR
 CREATE TABLE IF NOT EXISTS mr (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     `code` VARCHAR(50) UNIQUE NOT NULL,
@@ -99,8 +118,10 @@ CREATE TABLE IF NOT EXISTS mr (
     purpose TEXT NULL,
     requester VARCHAR(100) NULL,
     `status` VARCHAR(20) DEFAULT 'DRAFT',
+    approval_step INT DEFAULT 1,
     created_by BIGINT NULL,
     created_by_name VARCHAR(100) NULL,
+    workflow_id BIGINT NULL,
     created_at DATE NULL,
     updated_at DATE NULL,
     note TEXT NULL,
@@ -109,7 +130,7 @@ CREATE TABLE IF NOT EXISTS mr (
     INDEX idx_status (`status`)
 );
 
--- 7. PR
+-- 8. PR
 CREATE TABLE IF NOT EXISTS pr (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     `code` VARCHAR(50) UNIQUE NOT NULL,
@@ -123,6 +144,7 @@ CREATE TABLE IF NOT EXISTS pr (
     approval_step INT DEFAULT 1,
     created_by BIGINT NULL,
     created_by_name VARCHAR(100) NULL,
+    workflow_id BIGINT NULL,
     created_at DATE NULL,
     updated_at DATE NULL,
     note TEXT NULL,
@@ -132,7 +154,7 @@ CREATE TABLE IF NOT EXISTS pr (
     INDEX idx_mr_id (mr_id)
 );
 
--- 8. PO
+-- 9. PO
 CREATE TABLE IF NOT EXISTS po (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     `code` VARCHAR(50) UNIQUE NOT NULL,
@@ -146,6 +168,7 @@ CREATE TABLE IF NOT EXISTS po (
     approval_step INT DEFAULT 1,
     created_by BIGINT NULL,
     created_by_name VARCHAR(100) NULL,
+    workflow_id BIGINT NULL,
     created_at DATE NULL,
     updated_at DATE NULL,
     note TEXT NULL,
@@ -155,7 +178,7 @@ CREATE TABLE IF NOT EXISTS po (
     INDEX idx_pr_id (pr_id)
 );
 
--- 9. WAREHOUSES
+-- 10. WAREHOUSES
 CREATE TABLE IF NOT EXISTS warehouses (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     `code` VARCHAR(50) UNIQUE NOT NULL,
@@ -173,7 +196,7 @@ CREATE TABLE IF NOT EXISTS warehouses (
     INDEX idx_status (`status`)
 );
 
--- 10. INVENTORY
+-- 11. INVENTORY
 CREATE TABLE IF NOT EXISTS inventory (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     warehouse_id BIGINT NOT NULL,
@@ -185,7 +208,7 @@ CREATE TABLE IF NOT EXISTS inventory (
     INDEX idx_item_id (item_id)
 );
 
--- 11. GRN
+-- 12. GRN
 CREATE TABLE IF NOT EXISTS grn (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     `code` VARCHAR(50) UNIQUE NOT NULL,
@@ -203,6 +226,10 @@ CREATE TABLE IF NOT EXISTS grn (
     accountant_confirm VARCHAR(100) NULL,
     invoice VARCHAR(100) NULL,
     `status` VARCHAR(20) DEFAULT 'DRAFT',
+    approval_step INT NULL,
+    created_by BIGINT NULL,
+    created_by_name VARCHAR(100) NULL,
+    workflow_id BIGINT NULL,
     note TEXT NULL,
     created_at DATE NULL,
     updated_at DATE NULL,
@@ -212,7 +239,7 @@ CREATE TABLE IF NOT EXISTS grn (
     INDEX idx_status (`status`)
 );
 
--- 12. STO
+-- 13. STO
 CREATE TABLE IF NOT EXISTS sto (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     `code` VARCHAR(50) UNIQUE NOT NULL,
@@ -228,6 +255,10 @@ CREATE TABLE IF NOT EXISTS sto (
     transporter VARCHAR(100) NULL,
     departure_time VARCHAR(10) NULL,
     `status` VARCHAR(20) DEFAULT 'DRAFT',
+    approval_step INT NULL,
+    created_by BIGINT NULL,
+    created_by_name VARCHAR(100) NULL,
+    workflow_id BIGINT NULL,
     note TEXT NULL,
     created_at DATE NULL,
     updated_at DATE NULL,
@@ -237,7 +268,7 @@ CREATE TABLE IF NOT EXISTS sto (
     INDEX idx_status (`status`)
 );
 
--- 13. ISSUES
+-- 14. ISSUES
 CREATE TABLE IF NOT EXISTS issues (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     `code` VARCHAR(50) UNIQUE NOT NULL,
@@ -251,6 +282,8 @@ CREATE TABLE IF NOT EXISTS issues (
     `status` VARCHAR(20) DEFAULT 'DRAFT',
     created_by BIGINT NULL,
     created_by_name VARCHAR(100) NULL,
+    approval_step INT NULL,
+    workflow_id BIGINT NULL,
     created_at DATE NULL,
     updated_at DATE NULL,
     approved_by VARCHAR(100) NULL,
@@ -264,7 +297,7 @@ CREATE TABLE IF NOT EXISTS issues (
     INDEX idx_status (`status`)
 );
 
--- 14. MATERIAL_RETURNS
+-- 15. MATERIAL_RETURNS
 CREATE TABLE IF NOT EXISTS material_returns (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     `code` VARCHAR(50) UNIQUE NOT NULL,
@@ -278,6 +311,8 @@ CREATE TABLE IF NOT EXISTS material_returns (
     `status` VARCHAR(20) DEFAULT 'DRAFT',
     created_by BIGINT NULL,
     created_by_name VARCHAR(100) NULL,
+    approval_step INT NULL,
+    workflow_id BIGINT NULL,
     created_at DATE NULL,
     updated_at DATE NULL,
     approved_by VARCHAR(100) NULL,
@@ -290,28 +325,33 @@ CREATE TABLE IF NOT EXISTS material_returns (
     INDEX idx_status (`status`)
 );
 
--- 15. MIN_STOCK
+-- 16. MIN_STOCK
 CREATE TABLE IF NOT EXISTS min_stock (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     warehouse_id BIGINT NOT NULL,
     item_id BIGINT NOT NULL,
     min_quantity DECIMAL(15,2) DEFAULT 0,
+    safe_quantity DECIMAL(15,2) DEFAULT 0,
+    alert_percent DECIMAL(5,2) DEFAULT 20,
     updated_at DATE NULL,
     UNIQUE KEY uk_warehouse_item (warehouse_id, item_id),
     INDEX idx_warehouse_id (warehouse_id),
     INDEX idx_item_id (item_id)
 );
 
--- 16. AUTO_REORDER_CONFIG
+-- 17. AUTO_REORDER_CONFIG
 CREATE TABLE IF NOT EXISTS auto_reorder_config (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     enabled BOOLEAN DEFAULT FALSE,
     multiplier DECIMAL(5,2) DEFAULT 2.0,
     default_vendor_code VARCHAR(50) NULL,
+    schedule VARCHAR(100) NULL,
+    note TEXT NULL,
+    created_by BIGINT NULL,
     updated_at DATE NULL
 );
 
--- 17. WORKFLOWS
+-- 18. WORKFLOWS
 CREATE TABLE IF NOT EXISTS workflows (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     module VARCHAR(50) NOT NULL,
@@ -320,6 +360,7 @@ CREATE TABLE IF NOT EXISTS workflows (
     steps JSON NOT NULL,
     is_active BOOLEAN NOT NULL DEFAULT FALSE,
     is_system BOOLEAN NOT NULL DEFAULT FALSE,
+    `status` VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
     created_at DATE NULL,
     updated_at DATE NULL,
     INDEX idx_workflows_module (module),
@@ -327,7 +368,7 @@ CREATE TABLE IF NOT EXISTS workflows (
     INDEX idx_workflows_module_active (module, is_active)
 );
 
--- 18. STATUSES
+-- 19. STATUSES
 CREATE TABLE IF NOT EXISTS statuses (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     entity_type VARCHAR(50) NOT NULL,
@@ -338,7 +379,7 @@ CREATE TABLE IF NOT EXISTS statuses (
     is_final BOOLEAN DEFAULT FALSE,
     sort_order INT DEFAULT 0,
     color VARCHAR(20) NULL,
-    `group` VARCHAR(50) NULL, -- ✅ TRƯỜNG MỚI (Phiên bản 2.0.27)
+    `group` VARCHAR(50) NULL,
     created_at DATE NULL,
     updated_at DATE NULL,
     INDEX idx_statuses_entity_type (entity_type),
@@ -346,7 +387,7 @@ CREATE TABLE IF NOT EXISTS statuses (
     INDEX idx_statuses_group (`group`)
 );
 
--- 19. WORKFLOW_STEP_STATUS
+-- 20. WORKFLOW_STEP_STATUS
 CREATE TABLE IF NOT EXISTS workflow_step_status (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     workflow_id BIGINT NOT NULL,
@@ -358,7 +399,7 @@ CREATE TABLE IF NOT EXISTS workflow_step_status (
     INDEX idx_wf_step_status_code (status_code)
 );
 
--- 20. PERMISSIONS
+-- 21. PERMISSIONS
 CREATE TABLE IF NOT EXISTS permissions (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     `role` VARCHAR(50) DEFAULT 'DEPARTMENT',
@@ -369,7 +410,7 @@ CREATE TABLE IF NOT EXISTS permissions (
     INDEX idx_department (department_id)
 );
 
--- 21. USER_PERMISSIONS
+-- 22. USER_PERMISSIONS
 CREATE TABLE IF NOT EXISTS user_permissions (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     user_id BIGINT NOT NULL,
@@ -379,7 +420,7 @@ CREATE TABLE IF NOT EXISTS user_permissions (
     INDEX idx_user_id (user_id)
 );
 
--- 22. AUTO_REORDER_RULES
+-- 23. AUTO_REORDER_RULES
 CREATE TABLE IF NOT EXISTS auto_reorder_rules (
     id VARCHAR(50) PRIMARY KEY,
     item_id BIGINT NOT NULL,
@@ -392,13 +433,16 @@ CREATE TABLE IF NOT EXISTS auto_reorder_rules (
     order_type VARCHAR(20) DEFAULT 'PR',
     enabled BOOLEAN DEFAULT TRUE,
     notes TEXT NULL,
+    schedule VARCHAR(100) NULL,
+    note TEXT NULL,
+    created_by BIGINT NULL,
     created_at DATETIME NULL,
     updated_at DATETIME NULL,
     INDEX idx_item_id (item_id),
     INDEX idx_warehouse_id (warehouse_id)
 );
 
--- 23. ACTIVITY_LOGS
+-- 24. ACTIVITY_LOGS
 CREATE TABLE IF NOT EXISTS activity_logs (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     user_id INT NULL,
@@ -412,6 +456,50 @@ CREATE TABLE IF NOT EXISTS activity_logs (
     user_agent TEXT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- ===== BẢNG MỚI (PHẦN IV - TEAM) =====
+CREATE TABLE IF NOT EXISTS teams (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    `name` VARCHAR(100) NOT NULL,
+    description TEXT NULL,
+    created_at DATE NULL,
+    updated_at DATE NULL,
+    INDEX idx_name (`name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS team_members (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    team_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    `role` VARCHAR(100) NULL,
+    joined_at DATE NULL,
+    left_at DATE NULL,
+    created_at DATE NULL,
+    updated_at DATE NULL,
+    UNIQUE KEY uk_team_user (team_id, user_id),
+    CONSTRAINT fk_team_members_team FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE,
+    CONSTRAINT fk_team_members_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_team_id (team_id),
+    INDEX idx_user_id (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ===== BẢNG MỚI (PHẦN V - PROJECT MEMBERS) =====
+CREATE TABLE IF NOT EXISTS project_members (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    project_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    `role` VARCHAR(100) NULL,
+    joined_at DATE NULL,
+    left_at DATE NULL,
+    created_at DATE NULL,
+    updated_at DATE NULL,
+    UNIQUE KEY uk_project_user (project_id, user_id),
+    CONSTRAINT fk_project_members_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    CONSTRAINT fk_project_members_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_project_id (project_id),
+    INDEX idx_user_id (user_id),
+    INDEX idx_left_at (left_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ================================================================
 -- KHÓA NGOẠI
@@ -440,20 +528,19 @@ ALTER TABLE user_permissions ADD CONSTRAINT fk_userperm_user
 -- ================================================================
 
 -- 1. DEPARTMENTS
-INSERT INTO departments (code, name, manager_id, manager_name, created_at, updated_at) VALUES
-('BGD', 'Ban Giám đốc', 1, 'Admin', CURDATE(), CURDATE()),
-('PURCHASING', 'Phòng Mua hàng', NULL, NULL, CURDATE(), CURDATE()),
-('PLANNING', 'Phòng Kế hoạch', NULL, NULL, CURDATE(), CURDATE()),
-('PROJECT', 'Phòng Dự án', NULL, NULL, CURDATE(), CURDATE()),
-('QC', 'Phòng QC', NULL, NULL, CURDATE(), CURDATE()),
-('CT', 'Công trường', NULL, NULL, CURDATE(), CURDATE());
+INSERT INTO departments (code, name, manager_id, manager_name, parent_id, created_at, updated_at) VALUES
+('BGD', 'Ban Giám đốc', 1, 'Admin', NULL, CURDATE(), CURDATE()),
+('PURCHASING', 'Phòng Mua hàng', NULL, NULL, NULL, CURDATE(), CURDATE()),
+('PLANNING', 'Phòng Kế hoạch', NULL, NULL, NULL, CURDATE(), CURDATE()),
+('PROJECT', 'Phòng Dự án', NULL, NULL, NULL, CURDATE(), CURDATE()),
+('QC', 'Phòng QC', NULL, NULL, NULL, CURDATE(), CURDATE()),
+('CT', 'Công trường', NULL, NULL, NULL, CURDATE(), CURDATE());
 
 -- 2. USERS (admin - password = 'password')
 INSERT INTO users (email, password, name, role, department_id, position, created_at, updated_at) VALUES
-('admin@mep.com', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', 'Admin', 'ADMIN', 1, 'Quản trị hệ thống', CURDATE(), CURDATE());
+('admin@mep.com', '$2a$10$3dvJVZpby4ubWv7J/mn/a.zW.6Mu6ydQ/yV3lwC61BEXZLg1U48t.', 'Admin', 'ADMIN', 1, 'Quản trị hệ thống', CURDATE(), CURDATE());
 
--- 3. STATUSES (Đầy đủ các entity type + group)
--- Helper procedure
+-- 3. STATUSES
 DELIMITER $$
 DROP PROCEDURE IF EXISTS InsertStatusIfNotExists $$
 CREATE PROCEDURE InsertStatusIfNotExists(
@@ -529,8 +616,7 @@ CALL InsertStatusIfNotExists('materialreturn', 'Đã nhận', 'APPROVED', 'Thủ
 CALL InsertStatusIfNotExists('materialreturn', 'Đã xác nhận', 'CONFIRMED', 'Đã xác nhận', FALSE, TRUE, 3, '#22c55e', 'warehouse');
 CALL InsertStatusIfNotExists('materialreturn', 'Từ chối', 'REJECTED', 'Từ chối', FALSE, TRUE, 4, '#ef4444', 'warehouse');
 
--- ===== CÁC ENTITY TYPE MỚI (Phiên bản 2.0.27) =====
-
+-- ===== CÁC ENTITY TYPE MỚI (PHẦN III) =====
 -- User
 CALL InsertStatusIfNotExists('user', 'Hoạt động', 'ACTIVE', 'User đang hoạt động', TRUE, FALSE, 0, '#22c55e', 'user');
 CALL InsertStatusIfNotExists('user', 'Bị khóa', 'LOCKED', 'User bị khóa', FALSE, TRUE, 1, '#ef4444', 'user');
@@ -561,14 +647,14 @@ CALL InsertStatusIfNotExists('workflow', 'Ngừng áp dụng', 'INACTIVE', 'Work
 DROP PROCEDURE IF EXISTS InsertStatusIfNotExists;
 
 -- 4. WORKFLOWS
-INSERT INTO workflows (module, name, description, steps, is_active, is_system, created_at, updated_at) VALUES
-('mr', 'MR - Mặc định', 'Quy trình duyệt MR', '[{"step":1,"permissionKey":"mr.approve","label":"Chỉ huy trưởng duyệt","departmentId":5}]', TRUE, TRUE, CURDATE(), CURDATE()),
-('pr', 'PR - 3 bước mặc định', 'Planning → Project → CEO', '[{"step":1,"permissionKey":"pr.approve","label":"Kế hoạch duyệt","departmentId":2},{"step":2,"permissionKey":"pr.approve","label":"Dự án duyệt","departmentId":3},{"step":3,"permissionKey":"pr.approve","label":"CEO duyệt","departmentId":1}]', TRUE, TRUE, CURDATE(), CURDATE()),
-('po', 'PO - 3 bước mặc định', 'Planning → Project → CEO', '[{"step":1,"permissionKey":"po.approve","label":"Kế hoạch duyệt","departmentId":2},{"step":2,"permissionKey":"po.approve","label":"Dự án duyệt","departmentId":3},{"step":3,"permissionKey":"po.approve","label":"CEO duyệt","departmentId":1}]', TRUE, TRUE, CURDATE(), CURDATE()),
-('grn', 'GRN - 4 bước mặc định', 'Lập phiếu → Nhận → QC → Hoàn thành', '[{"step":1,"permissionKey":"grn.create","label":"Lập phiếu","departmentId":4},{"step":2,"permissionKey":"grn.receive","label":"Thủ kho nhận","departmentId":null},{"step":3,"permissionKey":"grn.qc","label":"QC kiểm tra","departmentId":6},{"step":4,"permissionKey":"grn.complete","label":"Hoàn thành","departmentId":4}]', TRUE, TRUE, CURDATE(), CURDATE()),
-('sto', 'STO - 3 bước mặc định', 'Lập phiếu → Duyệt → Xuất kho', '[{"step":1,"permissionKey":"sto.create","label":"Lập phiếu","departmentId":4},{"step":2,"permissionKey":"sto.approve","label":"Duyệt","departmentId":4},{"step":3,"permissionKey":"sto.complete","label":"Xuất kho","departmentId":4}]', TRUE, TRUE, CURDATE(), CURDATE()),
-('issue', 'Issue - 4 bước mặc định', 'Tạo phiếu → Duyệt → Cấp phát → Xác nhận', '[{"step":1,"permissionKey":"issue.create","label":"Tạo phiếu","departmentId":5},{"step":2,"permissionKey":"issue.approve","label":"Duyệt","departmentId":5},{"step":3,"permissionKey":"issue.complete","label":"Cấp phát","departmentId":4},{"step":4,"permissionKey":"issue.confirm","label":"Xác nhận","departmentId":5}]', TRUE, TRUE, CURDATE(), CURDATE()),
-('materialreturn', 'Material Return - 3 bước mặc định', 'Tạo phiếu → Nhận → Xác nhận', '[{"step":1,"permissionKey":"materialreturn.create","label":"Tạo phiếu","departmentId":5},{"step":2,"permissionKey":"materialreturn.approve","label":"Thủ kho nhận","departmentId":4},{"step":3,"permissionKey":"materialreturn.confirm","label":"Xác nhận","departmentId":5}]', TRUE, TRUE, CURDATE(), CURDATE());
+INSERT INTO workflows (module, name, description, steps, is_active, is_system, status, created_at, updated_at) VALUES
+('mr', 'MR - Mặc định', 'Quy trình duyệt MR', '[{"step":1,"permissionKey":"mr.approve","label":"Chỉ huy trưởng duyệt","departmentId":5}]', TRUE, TRUE, 'ACTIVE', CURDATE(), CURDATE()),
+('pr', 'PR - 3 bước mặc định', 'Planning → Project → CEO', '[{"step":1,"permissionKey":"pr.approve","label":"Kế hoạch duyệt","departmentId":2},{"step":2,"permissionKey":"pr.approve","label":"Dự án duyệt","departmentId":3},{"step":3,"permissionKey":"pr.approve","label":"CEO duyệt","departmentId":1}]', TRUE, TRUE, 'ACTIVE', CURDATE(), CURDATE()),
+('po', 'PO - 3 bước mặc định', 'Planning → Project → CEO', '[{"step":1,"permissionKey":"po.approve","label":"Kế hoạch duyệt","departmentId":2},{"step":2,"permissionKey":"po.approve","label":"Dự án duyệt","departmentId":3},{"step":3,"permissionKey":"po.approve","label":"CEO duyệt","departmentId":1}]', TRUE, TRUE, 'ACTIVE', CURDATE(), CURDATE()),
+('grn', 'GRN - 4 bước mặc định', 'Lập phiếu → Nhận → QC → Hoàn thành', '[{"step":1,"permissionKey":"grn.create","label":"Lập phiếu","departmentId":4},{"step":2,"permissionKey":"grn.receive","label":"Thủ kho nhận","departmentId":null},{"step":3,"permissionKey":"grn.qc","label":"QC kiểm tra","departmentId":6},{"step":4,"permissionKey":"grn.complete","label":"Hoàn thành","departmentId":4}]', TRUE, TRUE, 'ACTIVE', CURDATE(), CURDATE()),
+('sto', 'STO - 3 bước mặc định', 'Lập phiếu → Duyệt → Xuất kho', '[{"step":1,"permissionKey":"sto.create","label":"Lập phiếu","departmentId":4},{"step":2,"permissionKey":"sto.approve","label":"Duyệt","departmentId":4},{"step":3,"permissionKey":"sto.complete","label":"Xuất kho","departmentId":4}]', TRUE, TRUE, 'ACTIVE', CURDATE(), CURDATE()),
+('issue', 'Issue - 4 bước mặc định', 'Tạo phiếu → Duyệt → Cấp phát → Xác nhận', '[{"step":1,"permissionKey":"issue.create","label":"Tạo phiếu","departmentId":5},{"step":2,"permissionKey":"issue.approve","label":"Duyệt","departmentId":5},{"step":3,"permissionKey":"issue.complete","label":"Cấp phát","departmentId":4},{"step":4,"permissionKey":"issue.confirm","label":"Xác nhận","departmentId":5}]', TRUE, TRUE, 'ACTIVE', CURDATE(), CURDATE()),
+('materialreturn', 'Material Return - 3 bước mặc định', 'Tạo phiếu → Nhận → Xác nhận', '[{"step":1,"permissionKey":"materialreturn.create","label":"Tạo phiếu","departmentId":5},{"step":2,"permissionKey":"materialreturn.approve","label":"Thủ kho nhận","departmentId":4},{"step":3,"permissionKey":"materialreturn.confirm","label":"Xác nhận","departmentId":5}]', TRUE, TRUE, 'ACTIVE', CURDATE(), CURDATE());
 
 -- 5. PERMISSIONS (cấp full quyền cho BGD)
 INSERT INTO permissions (department_id, permission_key, enabled) VALUES
@@ -585,8 +671,12 @@ INSERT INTO permissions (department_id, permission_key, enabled) VALUES
 (1, 'workflow.override', TRUE);
 
 -- 6. AUTO_REORDER_CONFIG (mặc định)
-INSERT INTO auto_reorder_config (enabled, multiplier, default_vendor_code, updated_at) VALUES
-(FALSE, 2.0, NULL, CURDATE());
+
+
+-- 7. PROJECTS MẪU (để giải quyết lỗi khóa ngoại)
+INSERT INTO projects (code, name, client, commander, status, created_at, updated_at) VALUES
+('DA001', 'Dự án mẫu', 'Khách hàng A', 'Nguyễn Văn A', 'ACTIVE', CURDATE(), CURDATE()),
+('DA002', 'Dự án thử nghiệm', 'Khách hàng B', 'Trần Văn B', 'ACTIVE', CURDATE(), CURDATE());
 
 -- ================================================================
 -- KIỂM TRA
@@ -594,6 +684,7 @@ INSERT INTO auto_reorder_config (enabled, multiplier, default_vendor_code, updat
 
 SELECT '✅ Database reset thành công! (Phiên bản 2.0.27)' AS Message;
 SELECT '👤 Tài khoản admin: admin@mep.com / password' AS Credential;
-SELECT entity_type, COUNT(*) AS total, GROUP_CONCAT(DISTINCT `group`) AS groups FROM statuses GROUP BY entity_type ORDER BY entity_type;
+SELECT entity_type, COUNT(*) AS total, GROUP_CONCAT(DISTINCT `group`) AS `groups` FROM statuses GROUP BY entity_type ORDER BY entity_type;
 SELECT COUNT(*) AS total_workflows FROM workflows;
 SELECT COUNT(*) AS total_permissions FROM permissions;
+SELECT COUNT(*) AS total_projects FROM projects;

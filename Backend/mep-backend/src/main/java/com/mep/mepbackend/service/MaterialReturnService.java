@@ -132,14 +132,25 @@ public class MaterialReturnService {
             throw new RuntimeException("Workflow không có bước duyệt nào");
         }
 
+        // Nếu workflow có 1 bước → tự động duyệt luôn
         if (steps.size() == 1) {
             if (!currentUserUtil.hasPermission("materialreturn.approve")) {
                 throw new RuntimeException("Bạn không có quyền duyệt phiếu hoàn trả");
             }
+
+            // ✅ Quan trọng: Set status thành PENDING trước khi gọi approve()
+            Map<String, Object> firstStep = steps.get(0);
+            String statusCode = (String) firstStep.get("statusCode");
+            mr.setStatus(statusCode != null && !statusCode.isEmpty() ? statusCode : "PENDING");
+            mr.setApprovalStep(1);
+            mr.setUpdatedAt(LocalDate.now());
+            returnRepository.save(mr);
+
             approve(id);
             return;
         }
 
+        // Nhiều bước → chuyển sang PENDING bước 1
         Map<String, Object> firstStep = steps.get(0);
         String statusCode = (String) firstStep.get("statusCode");
         mr.setStatus(statusCode != null && !statusCode.isEmpty() ? statusCode : "PENDING");
@@ -215,6 +226,7 @@ public class MaterialReturnService {
 
         if (currentStep == steps.size()) {
             mr.setStatus("APPROVED");
+            mr.setApprovalStep(currentStep);
         } else {
             mr.setApprovalStep(currentStep + 1);
             String nextStatusCode = workflowService.getStatusForStep(wf.getId(), currentStep + 1);
@@ -270,6 +282,7 @@ public class MaterialReturnService {
         history.setStatusBefore(mr.getStatus());
 
         mr.setStatus(statusCode != null ? statusCode : "CONFIRMED");
+        mr.setApprovalStep(currentStep);
         mr.setConfirmedBy(currentUser.getName());
         mr.setCompletionDate(LocalDate.now());
         history.setStatusAfter(mr.getStatus());

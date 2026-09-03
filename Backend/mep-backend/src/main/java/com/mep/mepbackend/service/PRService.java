@@ -168,14 +168,25 @@ public class PRService {
             throw new RuntimeException("Workflow không có bước duyệt nào");
         }
 
+        // Nếu workflow có 1 bước → tự động duyệt luôn
         if (steps.size() == 1) {
             if (!currentUserUtil.hasPermission("pr.approve")) {
                 throw new RuntimeException("Bạn không có quyền duyệt PR");
             }
+
+            // ✅ Quan trọng: Set status thành PENDING trước khi gọi approve()
+            Map<String, Object> firstStep = steps.get(0);
+            String statusCode = (String) firstStep.get("statusCode");
+            pr.setStatus(statusCode != null && !statusCode.isEmpty() ? statusCode : "PENDING");
+            pr.setApprovalStep(1);
+            pr.setUpdatedAt(LocalDate.now());
+            prRepository.save(pr);
+
             approve(id);
             return;
         }
 
+        // Nhiều bước → chuyển sang PENDING bước 1
         Map<String, Object> firstStep = steps.get(0);
         String statusCode = (String) firstStep.get("statusCode");
         pr.setStatus(statusCode != null && !statusCode.isEmpty() ? statusCode : "PENDING");

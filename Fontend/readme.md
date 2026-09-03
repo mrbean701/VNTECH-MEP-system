@@ -392,12 +392,14 @@ Database:
 mep_db.sql – ALTER TABLE statuses ADD COLUMN group VARCHAR(50) NULL
 
 ⏳ Chưa triển khai (các phần còn lại)
-Phần	Mô tả	File cần sửa	Ưu tiên
-IV	Phòng ban (Department) – Tách Team	Team.java, TeamMember.java, TeamService, TeamController, admin-departments.js	🔴 Cao
-V	Dự án (Project) – Quản lý thành viên	ProjectMember.java, ProjectMemberService, ProjectMemberController, projects.js	🔴 Cao
-VI	Nhà cung cấp (Vendor) – Nhóm hàng, trạng thái	Vendor.java (thêm status), VendorGroup.java, vendors.js	🟡 Trung bình
-VII	MR – Modal chọn vật tư	item-selector-modal.js, mr.js, pr.js, po.js	🟡 Trung bình
-VIII	Vật tư (Item) – Nhiều tên cùng mã	Item.java (bỏ unique code, thêm isMain), items.js	🟢 Thấp
+Phần	    Mô tả	                                                                    File cần sửa	                                            Ưu tiên
+IV	    Phòng ban (Department) – Tách Team	                Team.java, TeamMember.java, TeamService, TeamController, admin-departments.js	        🔴 Cao
+V	    Dự án (Project) – Quản lý thành viên	            ProjectMember.java, ProjectMemberService, ProjectMemberController, projects.js	        🔴 Cao
+VI	    Nhà cung cấp (Vendor) – Nhóm hàng, trạng thái	    Vendor.java (thêm status), VendorGroup.java, vendors.js	                                🟡 Trung bình
+VII	    MR – Modal chọn vật tư	                            item-selector-modal.js, mr.js, pr.js, po.js	                                            🟡 Trung bình
+VIII	Vật tư (Item) – Nhiều tên cùng mã	                Item.java (bỏ unique code, thêm isMain), items.js	                                    🟢 Thấp
+
+
 📌 Ghi chú
 Phiên bản hiện tại: 2.0.27 (chưa chính thức triển khai trên server, vẫn đang ở môi trường phát triển)
 
