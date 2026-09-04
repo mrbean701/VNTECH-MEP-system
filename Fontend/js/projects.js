@@ -2,15 +2,33 @@
 // PROJECTS - Quản lý dự án (sử dụng API) - ĐÃ TÍCH HỢP PHÂN QUYỀN
 // ================================================================
 
+// ====== STATE CHO FILTER/SORT ======
+
 let projectDetailState = {
     projectId: null,
     view: 'list',
     detailId: null
 };
+
 let projectsPageState = {
     page: 1,
     perPage: 10
 };
+
+// ====== STATE ======
+const projectsState = {
+    page: 1,
+    perPage: 10,
+    filterText: '',
+    statusFilter: '',
+    sortBy: 'code',
+    sortOrder: 'asc'
+};
+
+const debouncedProjectsFilter = debounce(() => {
+    projectsState.page = 1;
+    renderProjects();
+}, 300);
 
 // ================================================================
 // RENDER DANH SÁCH DỰ ÁN
@@ -19,19 +37,48 @@ let projectsPageState = {
 async function renderProjects(page = null) {
     try {
         const projects = await api.getProjects();
-        const filter = document.getElementById('project-filter')?.value?.toLowerCase() || '';
-        const filtered = projects.filter(p =>
-            (p.code || '').toLowerCase().includes(filter) ||
-            (p.name || '').toLowerCase().includes(filter)
-        );
+        window._projectsCache = projects;
+        saveData('projects', projects);
 
-        if (page) projectsPageState.page = page;
+        if (page) projectsState.page = page;
+
+        // Filter
+        const keyword = projectsState.filterText.toLowerCase().trim();
+        let filtered = projects.filter(p => {
+            let matchKeyword = true;
+            if (keyword) {
+                const codeMatch = (p.code || '').toLowerCase().includes(keyword);
+                const nameMatch = (p.name || '').toLowerCase().includes(keyword);
+                const clientMatch = (p.client || '').toLowerCase().includes(keyword);
+                const commanderMatch = (p.commander || '').toLowerCase().includes(keyword);
+                matchKeyword = codeMatch || nameMatch || clientMatch || commanderMatch;
+            }
+            const matchStatus = projectsState.statusFilter ? p.status === projectsState.statusFilter : true;
+            return matchKeyword && matchStatus;
+        });
+
+        // Sort
+        const order = projectsState.sortOrder === 'asc' ? 1 : -1;
+        filtered.sort((a, b) => {
+            let valA = a[projectsState.sortBy] || '';
+            let valB = b[projectsState.sortBy] || '';
+            if (projectsState.sortBy === 'startDate' || projectsState.sortBy === 'endDate') {
+                valA = new Date(valA || 0);
+                valB = new Date(valB || 0);
+            } else if (typeof valA === 'string') {
+                valA = valA.toLowerCase();
+                valB = valB.toLowerCase();
+            }
+            if (valA < valB) return -1 * order;
+            if (valA > valB) return 1 * order;
+            return 0;
+        });
+
         const perPage = getPageSize('projects');
-        projectsPageState.perPage = perPage;
-        const paging = paginate(filtered, projectsPageState.page, perPage);
+        projectsState.perPage = perPage;
+        const paging = paginate(filtered, projectsState.page, perPage);
 
         const user = getUser();
-
         const canCreate = hasPermission('projects.create');
         const canEdit = hasPermission('projects.edit');
         const canDelete = hasPermission('projects.delete');
@@ -41,10 +88,29 @@ async function renderProjects(page = null) {
             btnCreate.style.display = canCreate ? 'inline-block' : 'none';
         }
 
+        const warehouses = await api.getWarehouses();
+
         let html = `
             <div class="filter-bar">
-                <input type="text" id="project-filter" placeholder="Tìm theo mã hoặc tên..." style="flex:1;" />
-                <button class="btn btn-sm" onclick="renderProjects()"><i class="fas fa-search"></i></button>
+                <input type="text" id="project-filter" placeholder="Tìm theo mã, tên, chủ đầu tư, chỉ huy..." style="flex:2;" value="${projectsState.filterText}">
+                <select id="project-status-filter" style="flex:1;">
+                    <option value="">Tất cả trạng thái</option>
+                    <option value="ACTIVE" ${projectsState.statusFilter === 'ACTIVE' ? 'selected' : ''}>Đang hoạt động</option>
+                    <option value="INACTIVE" ${projectsState.statusFilter === 'INACTIVE' ? 'selected' : ''}>Đã đóng</option>
+                    <option value="SUSPENDED" ${projectsState.statusFilter === 'SUSPENDED' ? 'selected' : ''}>Tạm dừng</option>
+                </select>
+                <select id="project-sort" style="flex:1;">
+                    <option value="code_asc" ${projectsState.sortBy === 'code' && projectsState.sortOrder === 'asc' ? 'selected' : ''}>Mã (A→Z)</option>
+                    <option value="code_desc" ${projectsState.sortBy === 'code' && projectsState.sortOrder === 'desc' ? 'selected' : ''}>Mã (Z→A)</option>
+                    <option value="name_asc" ${projectsState.sortBy === 'name' && projectsState.sortOrder === 'asc' ? 'selected' : ''}>Tên (A→Z)</option>
+                    <option value="name_desc" ${projectsState.sortBy === 'name' && projectsState.sortOrder === 'desc' ? 'selected' : ''}>Tên (Z→A)</option>
+                    <option value="client_asc" ${projectsState.sortBy === 'client' && projectsState.sortOrder === 'asc' ? 'selected' : ''}>Chủ đầu tư (A→Z)</option>
+                    <option value="client_desc" ${projectsState.sortBy === 'client' && projectsState.sortOrder === 'desc' ? 'selected' : ''}>Chủ đầu tư (Z→A)</option>
+                    <option value="startDate_asc" ${projectsState.sortBy === 'startDate' && projectsState.sortOrder === 'asc' ? 'selected' : ''}>Ngày bắt đầu (cũ→mới)</option>
+                    <option value="startDate_desc" ${projectsState.sortBy === 'startDate' && projectsState.sortOrder === 'desc' ? 'selected' : ''}>Ngày bắt đầu (mới→cũ)</option>
+                    <option value="status" ${projectsState.sortBy === 'status' ? 'selected' : ''}>Trạng thái</option>
+                </select>
+                <button class="btn btn-sm" onclick="resetProjectsFilters()"><i class="fas fa-undo"></i> Reset</button>
             </div>
             <div class="table-responsive">
                 <table>
@@ -66,12 +132,12 @@ async function renderProjects(page = null) {
             html += `<tr><td colspan="7" style="text-align:center; color:#999;">Không có dữ liệu</td></tr>`;
         }
 
-        const warehouses = await api.getWarehouses();
-
         for (const p of paging.items) {
             const statusBadge = p.status === 'ACTIVE'
                 ? '<span class="badge badge-active">Đang hoạt động</span>'
-                : '<span class="badge badge-inactive">Đã đóng</span>';
+                : p.status === 'SUSPENDED'
+                    ? '<span class="badge badge-pending">Tạm dừng</span>'
+                    : '<span class="badge badge-inactive">Đã đóng</span>';
 
             const wh = warehouses.find(w => w.projectId === p.id);
             const whStatus = wh
@@ -107,7 +173,34 @@ async function renderProjects(page = null) {
         html += buildPaginationHTML(paging, 'renderProjects', 'projects');
         document.getElementById('projects-container').innerHTML = html;
 
-        document.getElementById('project-filter')?.addEventListener('input', () => { projectsPageState.page = 1; renderProjects(); });
+        // Gắn sự kiện
+        const filterInput = document.getElementById('project-filter');
+        const statusSelect = document.getElementById('project-status-filter');
+        const sortSelect = document.getElementById('project-sort');
+
+        if (filterInput) {
+            filterInput.removeEventListener('input', debouncedProjectsFilter);
+            filterInput.addEventListener('input', function(e) {
+                projectsState.filterText = this.value;
+                debouncedProjectsFilter();
+            });
+        }
+        if (statusSelect) {
+            statusSelect.removeEventListener('change', debouncedProjectsFilter);
+            statusSelect.addEventListener('change', function(e) {
+                projectsState.statusFilter = this.value;
+                debouncedProjectsFilter();
+            });
+        }
+        if (sortSelect) {
+            sortSelect.removeEventListener('change', debouncedProjectsFilter);
+            sortSelect.addEventListener('change', function(e) {
+                const [sortBy, sortOrder] = this.value.split('_');
+                projectsState.sortBy = sortBy;
+                projectsState.sortOrder = sortOrder || 'asc';
+                debouncedProjectsFilter();
+            });
+        }
 
     } catch (error) {
         showError('Không thể tải danh sách dự án: ' + error.message);
@@ -115,6 +208,14 @@ async function renderProjects(page = null) {
     }
 }
 
+function resetProjectsFilters() {
+    projectsState.filterText = '';
+    projectsState.statusFilter = '';
+    projectsState.sortBy = 'code';
+    projectsState.sortOrder = 'asc';
+    projectsState.page = 1;
+    renderProjects();
+}
 // ================================================================
 // CRUD DỰ ÁN (giữ nguyên từ cũ)
 // ================================================================
@@ -216,27 +317,36 @@ async function updateProject(id) {
     try {
         const currentProject = await api.getProjectById(id);
         if (currentProject.status === 'ACTIVE' && newStatus === 'INACTIVE') {
-            if (!confirm(`Dự án "${name}" đang chuyển sang trạng thái NGỪNG HOẠT ĐỘNG.\n\nBạn có muốn đóng kho dự án này không?\n(Kho sẽ chuyển sang trạng thái NGỪNG HOẠT ĐỘNG)`)) {
-                closeModal();
-                await renderProjects();
-                return;
-            }
+            // Gọi hàm xử lý ngừng hoạt động
+            const updatedProject = {
+                code,
+                name,
+                client: document.getElementById('f-project-client').value.trim(),
+                commander: document.getElementById('f-project-commander').value.trim(),
+                startDate: document.getElementById('f-project-start').value,
+                endDate: document.getElementById('f-project-end').value,
+                status: newStatus,
+                note: document.getElementById('f-project-note').value.trim(),
+            };
+            // Lưu tạm để confirm
+            window._pendingProjectUpdate = { projectId: id, updatedProject };
+            await handleProjectInactivation(id, updatedProject);
+            // Không cần close modal ngay vì handle sẽ đóng
+        } else {
+            // Trường hợp khác: cập nhật bình thường
+            const updatedProject = {
+                code,
+                name,
+                client: document.getElementById('f-project-client').value.trim(),
+                commander: document.getElementById('f-project-commander').value.trim(),
+                startDate: document.getElementById('f-project-start').value,
+                endDate: document.getElementById('f-project-end').value,
+                status: newStatus,
+                note: document.getElementById('f-project-note').value.trim(),
+            };
+            await doUpdateProject(id, updatedProject);
+            closeModal();
         }
-
-        const updatedProject = {
-            code,
-            name,
-            client: document.getElementById('f-project-client').value.trim(),
-            commander: document.getElementById('f-project-commander').value.trim(),
-            startDate: document.getElementById('f-project-start').value,
-            endDate: document.getElementById('f-project-end').value,
-            status: newStatus,
-            note: document.getElementById('f-project-note').value.trim(),
-        };
-        await api.updateProject(id, updatedProject);
-        closeModal();
-        await renderProjects();
-        showSuccess('Cập nhật dự án thành công!');
     } catch (error) {
         showError('Lỗi khi cập nhật dự án: ' + error.message);
     }
@@ -1168,7 +1278,253 @@ async function saveWarehouseFromProject(projectId) {
     } catch (error) {
         showError('Lỗi khi tạo kho: ' + error.message);
     }
+}/**
+ * Xử lý khi dự án chuyển từ ACTIVE sang INACTIVE
+ * - Hiển thị danh sách kho của dự án
+ * - Kiểm tra tồn kho
+ * - Hỏi chuyển vật tư về kho tổng hay không
+ */
+async function handleProjectInactivation(projectId, updatedProject) {
+    try {
+        // Lấy danh sách kho của dự án
+        const allWarehouses = await api.getWarehouses();
+        const projectWarehouses = allWarehouses.filter(w => w.projectId === projectId);
+        
+        if (projectWarehouses.length === 0) {
+            // Không có kho nào, tiếp tục cập nhật dự án
+            return await doUpdateProject(projectId, updatedProject);
+        }
+
+        // Lấy tồn kho
+        const allInventory = await api.getInventory();
+        
+        // Tính tổng tồn cho từng kho
+        const warehouseInventory = projectWarehouses.map(wh => {
+            const invs = allInventory.filter(i => i.warehouseId === wh.id);
+            const totalQty = invs.reduce((sum, i) => sum + (i.quantity || 0), 0);
+            return {
+                ...wh,
+                totalQty,
+                itemCount: invs.length,
+                inventory: invs
+            };
+        });
+
+        const hasInventory = warehouseInventory.some(wh => wh.totalQty > 0);
+
+        // Xây dựng HTML modal
+        let whListHtml = warehouseInventory.map(wh => `
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 10px; border-bottom:1px solid #f0f0f0; cursor:pointer;" onclick="showWarehouseInventoryDetail(${wh.id}, '${wh.name}')">
+                <div>
+                    <strong>${wh.code}</strong> - ${wh.name}
+                    <span class="badge ${wh.status === 'ACTIVE' ? 'badge-status-active' : 'badge-status-inactive'}">${wh.status}</span>
+                </div>
+                <div>
+                    <span style="font-weight:600;">${wh.totalQty.toLocaleString()}</span> đvt
+                    <span style="font-size:12px; color:#888;">(${wh.itemCount} loại)</span>
+                </div>
+            </div>
+        `).join('');
+
+        let modalContent = `
+            <div style="margin-bottom:12px;">
+                <strong>Dự án:</strong> ${updatedProject.name} (${updatedProject.code})
+            </div>
+            <div style="margin-bottom:12px; color:#e67e22;">
+                <i class="fas fa-exclamation-triangle"></i> 
+                Bạn đang chuyển dự án sang trạng thái <strong>NGỪNG HOẠT ĐỘNG</strong>.
+                Các kho của dự án sẽ được xử lý như sau:
+            </div>
+            <div style="max-height:300px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:6px; padding:8px; margin-bottom:12px;">
+                <div style="font-weight:600; padding:4px 10px; background:#f8fafc; border-bottom:2px solid #e2e8f0;">
+                    <span style="flex:1;">Kho</span>
+                    <span style="float:right;">Tồn kho</span>
+                </div>
+                ${whListHtml}
+            </div>
+        `;
+
+        if (hasInventory) {
+            modalContent += `
+                <div style="background:#fef9e7; border:1px solid #fecba1; padding:12px; border-radius:8px; margin-bottom:12px;">
+                    <i class="fas fa-info-circle" style="color:#b45309;"></i>
+                    <strong>Phát hiện tồn kho trong các kho của dự án!</strong>
+                    <div style="margin-top:6px; font-size:14px;">
+                        Bạn có muốn chuyển toàn bộ vật tư về kho tổng trước khi ngừng hoạt động không?
+                    </div>
+                    <div style="margin-top:8px;">
+                        <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                            <input type="radio" name="transferOption" value="yes" checked> 
+                            <span>Chuyển vật tư về kho tổng <span style="color:#888; font-size:12px;">(tự động tạo STO)</span></span>
+                        </label>
+                        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-top:4px;">
+                            <input type="radio" name="transferOption" value="no"> 
+                            <span>Không chuyển, vẫn đổi trạng thái kho</span>
+                        </label>
+                    </div>
+                </div>
+            `;
+        } else {
+            modalContent += `
+                <div style="background:#f0fdf4; border:1px solid #bbf7d0; padding:12px; border-radius:8px; margin-bottom:12px;">
+                    <i class="fas fa-check-circle" style="color:#15803d;"></i>
+                    <span>Tất cả kho đều trống, có thể ngừng hoạt động ngay.</span>
+                </div>
+            `;
+        }
+
+        modalContent += `
+            <div class="modal-actions">
+                <button class="btn" onclick="confirmProjectInactivation(${projectId})">
+                    <i class="fas fa-check"></i> Xác nhận ngừng hoạt động
+                </button>
+                <button class="btn btn-danger" onclick="closeModal()">Hủy</button>
+            </div>
+        `;
+
+        // Lưu dữ liệu tạm để dùng trong confirm
+        window._pendingProjectInactivation = {
+            projectId,
+            updatedProject,
+            warehouses: projectWarehouses,
+            inventoryData: warehouseInventory
+        };
+
+        showModal('Xác nhận ngừng hoạt động dự án', modalContent);
+        
+        // Thêm sự kiện click vào kho để xem chi tiết tồn
+        // Hàm showWarehouseInventoryDetail được định nghĩa bên dưới
+
+    } catch (error) {
+        showError('Lỗi khi xử lý ngừng hoạt động dự án: ' + error.message);
+    }
 }
+
+/**
+ * Xem chi tiết tồn kho của một kho (hiện modal nhỏ)
+ */
+function showWarehouseInventoryDetail(warehouseId, warehouseName) {
+    const data = window._pendingProjectInactivation?.inventoryData?.find(w => w.id === warehouseId);
+    if (!data) {
+        showInfo('Không có dữ liệu tồn kho');
+        return;
+    }
+    const items = data.inventory || [];
+    if (items.length === 0) {
+        showInfo(`Kho ${warehouseName} trống`);
+        return;
+    }
+    let itemsHtml = items.map(inv => {
+        const item = window._itemsCache?.find(i => i.id === inv.itemId);
+        return `
+            <tr>
+                <td>${item ? item.code : 'N/A'}</td>
+                <td>${item ? item.name : 'N/A'}</td>
+                <td>${item ? item.unit : ''}</td>
+                <td style="text-align:right;">${inv.quantity || 0}</td>
+            </tr>
+        `;
+    }).join('');
+    showModal(`Chi tiết tồn kho - ${warehouseName}`, `
+        <div class="table-responsive">
+            <table>
+                <thead><tr><th>Mã</th><th>Tên</th><th>ĐVT</th><th>Số lượng</th></tr></thead>
+                <tbody>${itemsHtml}</tbody>
+            </table>
+        </div>
+        <div class="modal-actions">
+            <button class="btn btn-danger" onclick="closeModal()">Đóng</button>
+        </div>
+    `);
+}
+
+/**
+ * Xác nhận ngừng hoạt động dự án
+ */
+async function confirmProjectInactivation(projectId) {
+    const data = window._pendingProjectInactivation;
+    if (!data) {
+        showError('Dữ liệu không hợp lệ');
+        return;
+    }
+
+    // Lấy lựa chọn chuyển kho
+    const transferOption = document.querySelector('input[name="transferOption"]:checked')?.value || 'no';
+    const shouldTransfer = transferOption === 'yes';
+
+    try {
+        // Nếu chọn chuyển kho, kiểm tra có kho tổng không
+        if (shouldTransfer) {
+            const allWarehouses = await api.getWarehouses();
+            const centralWarehouses = allWarehouses.filter(w => w.type === 'CENTRAL' && w.status === 'ACTIVE');
+            if (centralWarehouses.length === 0) {
+                showWarning('Không có kho tổng nào đang hoạt động. Hãy tạo kho tổng trước khi chuyển.');
+                return;
+            }
+            // Chọn kho tổng đầu tiên làm kho đến
+            const targetWarehouse = centralWarehouses[0];
+            
+            // Chuyển hướng đến STO với thông báo
+            closeModal();
+            showSuccess(`Vui lòng tạo STO từ các kho của dự án đến kho tổng ${targetWarehouse.code} để chuyển vật tư.`);
+            navigateTo('inventory');
+            setTimeout(() => {
+                switchWarehouseTab('wh-sto');
+                // Có thể truyền tham số để pre-fill? Tạm thời chỉ chuyển tab.
+            }, 300);
+            
+            // Không cập nhật trạng thái kho ngay, để user tự xử lý STO
+            // Nhưng vẫn cập nhật dự án thành INACTIVE? 
+            // Có thể chưa cập nhật dự án ngay mà đợi user xử lý xong?
+            // Theo yêu cầu: nếu chọn "có", nhảy đến tab GRN/STO. Không đổi trạng thái kho ngay.
+            // Nhưng dự án vẫn nên được cập nhật? Thường thì vẫn cập nhật dự án, nhưng kho vẫn active cho đến khi STO hoàn tất.
+            // Tạm thời, tôi vẫn cập nhật dự án nhưng kho giữ nguyên.
+            // Sau khi STO hoàn tất, user có thể tự đóng kho.
+            // Vậy ta chỉ cần cập nhật dự án.
+            await doUpdateProject(projectId, data.updatedProject);
+            return;
+        }
+
+        // Không chuyển -> đóng tất cả kho của dự án
+        const warehouses = data.warehouses;
+        for (const wh of warehouses) {
+            wh.status = 'INACTIVE';
+            await api.updateWarehouse(wh.id, wh);
+        }
+        // Cập nhật dự án
+        await doUpdateProject(projectId, data.updatedProject);
+        closeModal();
+        showSuccess(`Đã ngừng hoạt động dự án và các kho liên quan.`);
+        
+        // Refresh lại danh sách kho nếu đang ở tab kho
+        if (currentWhTab === 'wh-list') {
+            switchWarehouseTab('wh-list');
+        }
+    } catch (error) {
+        showError('Lỗi khi ngừng hoạt động dự án: ' + error.message);
+    }
+}
+
+/**
+ * Hàm thực hiện cập nhật dự án (gọi API)
+ */
+async function doUpdateProject(id, projectData) {
+    try {
+        await api.updateProject(id, projectData);
+        await renderProjects();
+        // Nếu đang ở chi tiết dự án, reload
+        if (projectDetailState.projectId === id) {
+            const project = await api.getProjectById(id);
+            if (project) {
+                await renderProjectModal(project);
+            }
+        }
+        showSuccess(`Cập nhật dự án thành công!`);
+    } catch (error) {
+        showError('Lỗi khi cập nhật dự án: ' + error.message);
+    }
+}
+
 
 // ================================================================
 // CÁC HÀM HỖ TRỢ DUYỆT TỪ PROJECT
@@ -1233,5 +1589,10 @@ window.updateMemberRole = updateMemberRole;
 window.confirmLeaveProject = confirmLeaveProject;
 window.confirmLeaveProjectAction = confirmLeaveProjectAction;
 window.confirmDeleteProjectMember = confirmDeleteProjectMember;
+window.handleProjectInactivation = handleProjectInactivation;
+window.confirmProjectInactivation = confirmProjectInactivation;
+window.showWarehouseInventoryDetail = showWarehouseInventoryDetail;
+window.doUpdateProject = doUpdateProject;
+window.resetProjectsFilters = resetProjectsFilters;
 
 console.log('✅ Projects module updated with Project Members tab.');

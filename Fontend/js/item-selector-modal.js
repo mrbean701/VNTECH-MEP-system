@@ -1,29 +1,30 @@
 // ================================================================
 // ITEM SELECTOR MODAL - Chọn vật tư cho MR, PR, PO
-// Hỗ trợ modal cha (giữ lại nội dung khi đóng)
+// Hỗ trợ nhóm theo mã vật tư, hiển thị alias dạng badge + dropdown
+// Đóng dropdown bằng click ra ngoài: giữ nguyên alias đã chọn
+// Bấm nút "Đóng": reset về tên chính
 // ================================================================
 
 let _itemSelectorState = {
-    selectedItems: [],
+    selectedItems: [],       // [{itemId, quantity, displayName, itemCode, unit}]
     callback: null,
     filter: '',
     page: 1,
     perPage: 10,
     totalItems: 0,
     totalPages: 1,
-    items: [],
+    groupedItems: [],        // [{code, mainItem, aliasItems, allItems}]
     loading: false,
     mode: 'mr',
     _showingSelected: false,
-    _parentContent: ''        // Lưu nội dung modal cha (MR/PR/PO)
+    _parentContent: '',
+    _expandedAlias: null     // Lưu code đang mở dropdown alias
 };
 
 // ====== HÀM MỞ MODAL ======
-
 async function openItemSelector(options) {
     const { selectedItems = [], callback, mode = 'mr' } = options || {};
 
-    // Lưu nội dung modal cha (nếu có)
     const modalContent = document.getElementById('modal-content');
     if (modalContent) {
         _itemSelectorState._parentContent = modalContent.innerHTML;
@@ -32,7 +33,7 @@ async function openItemSelector(options) {
     _itemSelectorState.selectedItems = selectedItems.map(item => ({
         itemId: item.itemId,
         quantity: item.quantity || 1,
-        itemName: item.itemName || '',
+        displayName: item.displayName || item.itemName || '',
         itemCode: item.itemCode || '',
         unit: item.unit || '',
         standardPrice: item.standardPrice || 0
@@ -42,6 +43,7 @@ async function openItemSelector(options) {
     _itemSelectorState.filter = '';
     _itemSelectorState.page = 1;
     _itemSelectorState._showingSelected = false;
+    _itemSelectorState._expandedAlias = null;
 
     await _loadItems();
     _renderModal();
@@ -49,47 +51,41 @@ async function openItemSelector(options) {
     document.getElementById('modal').classList.add('active');
 }
 
-// ====== ĐÓNG MODAL VÀ KHÔI PHỤC MODAL CHA ======
-
+// ====== ĐÓNG MODAL ======
 function closeItemSelector() {
     const modal = document.getElementById('modal');
     const content = document.getElementById('modal-content');
     if (content && _itemSelectorState._parentContent) {
         content.innerHTML = _itemSelectorState._parentContent;
         _itemSelectorState._parentContent = '';
-        // Không gọi callback, không cập nhật dữ liệu
-        // Render lại danh sách cũ (nếu có)
-        _renderParentItems();
     }
-    // Không đóng modal, giữ modal mở
+    modal.classList.remove('active');
 }
 
-// ====== ĐÓNG MODAL (SAU KHI LƯU) – VẪN KHÔI PHỤC MODAL CHA ======
-
+// ====== ĐÓNG MODAL SAU KHI LƯU ======
 function closeItemSelectorAfterSave() {
     const modal = document.getElementById('modal');
     const content = document.getElementById('modal-content');
     if (content && _itemSelectorState._parentContent) {
         content.innerHTML = _itemSelectorState._parentContent;
         _itemSelectorState._parentContent = '';
-        // Gọi callback để cập nhật dữ liệu vào form
         if (typeof _itemSelectorState.callback === 'function') {
             const selected = _itemSelectorState.selectedItems.map(s => ({
                 itemId: s.itemId,
                 quantity: s.quantity,
-                itemName: s.itemName,
+                displayName: s.displayName,
                 itemCode: s.itemCode,
                 unit: s.unit,
                 standardPrice: s.standardPrice
             }));
             _itemSelectorState.callback(selected);
         }
-        // Render lại danh sách đã cập nhật
         _renderParentItems();
     }
-    // Không đóng modal, giữ modal mở
+    modal.classList.remove('active');
 }
 
+// ====== RENDER LẠI DANH SÁCH VẬT TƯ CỦA MODAL CHA ======
 function _renderParentItems() {
     if (_itemSelectorState.mode === 'mr' && typeof renderMRSelectedItems === 'function') {
         renderMRSelectedItems();
@@ -100,13 +96,13 @@ function _renderParentItems() {
     }
 }
 
-// ====== TẢI DỮ LIỆU VẬT TƯ ======
-
+// ====== TẢI DỮ LIỆU VẬT TƯ (NHÓM THEO CODE) ======
 async function _loadItems() {
     _itemSelectorState.loading = true;
     try {
         const allItems = await api.getItems();
         const filter = _itemSelectorState.filter.toLowerCase().trim();
+
         let filtered = allItems;
         if (filter) {
             filtered = allItems.filter(item =>
@@ -115,23 +111,33 @@ async function _loadItems() {
                 (item.itemGroup || '').toLowerCase().includes(filter)
             );
         }
-        const grouped = {};
+
+        const groups = {};
         filtered.forEach(item => {
-            if (!grouped[item.code]) grouped[item.code] = [];
-            grouped[item.code].push(item);
+            if (!groups[item.code]) {
+                groups[item.code] = [];
+            }
+            groups[item.code].push(item);
         });
-        const sortedItems = [];
-        Object.keys(grouped).forEach(code => {
-            const list = grouped[code];
-            const main = list.find(i => i.isMain === true) || list[0];
-            const aliases = list.filter(i => i !== main);
-            aliases.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-            sortedItems.push(main);
-            aliases.forEach(a => sortedItems.push(a));
+
+        const groupedItems = [];
+        Object.keys(groups).forEach(code => {
+            const items = groups[code];
+            const mainItem = items.find(i => i.isMain === true) || items[0];
+            const aliasItems = items.filter(i => i.id !== mainItem.id);
+            aliasItems.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+            groupedItems.push({
+                code: code,
+                mainItem: mainItem,
+                aliasItems: aliasItems,
+                allItems: items
+            });
         });
-        sortedItems.sort((a, b) => (a.code || '').localeCompare(b.code || ''));
-        _itemSelectorState.items = sortedItems;
-        _itemSelectorState.totalItems = sortedItems.length;
+
+        groupedItems.sort((a, b) => (a.code || '').localeCompare(b.code || ''));
+
+        _itemSelectorState.groupedItems = groupedItems;
+        _itemSelectorState.totalItems = groupedItems.length;
         const perPage = _itemSelectorState.perPage;
         _itemSelectorState.totalPages = Math.max(1, Math.ceil(_itemSelectorState.totalItems / perPage));
         if (_itemSelectorState.page > _itemSelectorState.totalPages) {
@@ -139,54 +145,148 @@ async function _loadItems() {
         }
     } catch (error) {
         showError('Không thể tải danh sách vật tư: ' + error.message);
-        _itemSelectorState.items = [];
+        _itemSelectorState.groupedItems = [];
         _itemSelectorState.totalItems = 0;
         _itemSelectorState.totalPages = 1;
     }
     _itemSelectorState.loading = false;
 }
 
-// ====== RENDER MODAL CHỌN VẬT TƯ ======
+// ====== TOGGLE DROPDOWN ALIAS (CHỈ MỞ/ĐÓNG, KHÔNG RESET) ======
+function toggleAliasDropdown(code) {
+    if (_itemSelectorState._expandedAlias === code) {
+        _itemSelectorState._expandedAlias = null;
+    } else {
+        _itemSelectorState._expandedAlias = code;
+    }
+    _renderModal();
+}
 
+// ====== RESET VỀ TÊN CHÍNH VÀ ĐÓNG DROPDOWN ======
+function resetAndCloseAliasDropdown(code) {
+    const group = _itemSelectorState.groupedItems.find(g => g.code === code);
+    if (group) {
+        const selectedIdx = _itemSelectorState.selectedItems.findIndex(s => s.itemCode === code);
+        if (selectedIdx !== -1) {
+            _itemSelectorState.selectedItems[selectedIdx] = {
+                itemId: group.mainItem.id,
+                quantity: _itemSelectorState.selectedItems[selectedIdx].quantity || 1,
+                displayName: group.mainItem.name,
+                itemCode: group.mainItem.code,
+                unit: group.mainItem.unit,
+                standardPrice: group.mainItem.standardPrice
+            };
+            _updateSelectedCount();
+        }
+    }
+    _itemSelectorState._expandedAlias = null;
+    _renderModal();
+}
+
+// ====== CHỌN ALIAS (GIỮ NGUYÊN DROPDOWN MỞ) ======
+function selectAlias(code, aliasId, aliasName) {
+    const group = _itemSelectorState.groupedItems.find(g => g.code === code);
+    if (!group) return;
+
+    const aliasItem = group.allItems.find(i => i.id === aliasId);
+    if (!aliasItem) return;
+
+    const existingIdx = _itemSelectorState.selectedItems.findIndex(s => s.itemCode === code);
+    if (existingIdx !== -1) {
+        _itemSelectorState.selectedItems[existingIdx] = {
+            itemId: aliasItem.id,
+            quantity: _itemSelectorState.selectedItems[existingIdx].quantity || 1,
+            displayName: aliasItem.name,
+            itemCode: aliasItem.code,
+            unit: aliasItem.unit,
+            standardPrice: aliasItem.standardPrice
+        };
+    } else {
+        _itemSelectorState.selectedItems.push({
+            itemId: aliasItem.id,
+            quantity: 1,
+            displayName: aliasItem.name,
+            itemCode: aliasItem.code,
+            unit: aliasItem.unit,
+            standardPrice: aliasItem.standardPrice
+        });
+    }
+
+    // Không đóng dropdown để user có thể tiếp tục chọn
+    _updateSelectedCount();
+    _renderModal();
+    showSuccess(`Đã chọn ${aliasItem.name}`);
+}
+
+// ====== RENDER MODAL CHỌN VẬT TƯ ======
 function _renderModal() {
     const state = _itemSelectorState;
-    const items = state.items;
+    const groupedItems = state.groupedItems;
     const selectedMap = {};
     state.selectedItems.forEach(s => {
-        selectedMap[s.itemId] = s;
+        selectedMap[s.itemCode] = s;
     });
 
     const perPage = state.perPage;
     const page = state.page;
     const start = (page - 1) * perPage;
-    const end = Math.min(start + perPage, items.length);
-    const pageItems = items.slice(start, end);
+    const end = Math.min(start + perPage, groupedItems.length);
+    const pageItems = groupedItems.slice(start, end);
 
     let itemsHtml = '';
     if (pageItems.length === 0) {
         itemsHtml = `<tr><td colspan="6" style="text-align:center; color:#999;">Không tìm thấy vật tư</td></tr>`;
     } else {
-        pageItems.forEach(item => {
-            const selected = selectedMap[item.id];
+        pageItems.forEach(group => {
+            const { code, mainItem, aliasItems } = group;
+            const selected = selectedMap[code];
             const checked = selected ? 'checked' : '';
             const qty = selected ? selected.quantity : 1;
-            const isMain = item.isMain === true;
-            const nameDisplay = isMain ? `<strong>${item.name}</strong> <span class="badge badge-info" style="font-size:10px;">Tên chính</span>` : 
-                `${item.name} <span style="font-size:11px; color:#888;">(tên phụ)</span>`;
-            const aliasCount = _itemSelectorState.items.filter(i => i.code === item.code).length - 1;
-            const aliasInfo = aliasCount > 0 ? `<span style="font-size:11px; color:#888;">+${aliasCount} tên khác</span>` : '';
+            const displayName = selected ? selected.displayName : mainItem.name;
+            const aliasCount = aliasItems.length;
+
+            let aliasDropdownHtml = '';
+            if (state._expandedAlias === code && aliasCount > 0) {
+                aliasDropdownHtml = `
+                    <div style="position:absolute; background:white; border:1px solid #ccc; border-radius:4px; padding:4px; z-index:100; min-width:150px; box-shadow:0 2px 8px rgba(0,0,0,0.15); margin-top:4px;">
+                        ${aliasItems.map(alias => `
+                            <div style="padding:4px 8px; cursor:pointer; border-bottom:1px solid #f0f0f0; ${alias.id === selected?.itemId ? 'background:#e8f4fd;' : ''}"
+                                 onclick="event.stopPropagation(); selectAlias('${code}', ${alias.id}, '${alias.name.replace(/'/g, "\\'")}')">
+                                ${alias.name} ${alias.id === selected?.itemId ? '✅' : ''}
+                            </div>
+                        `).join('')}
+                        <div style="padding:4px 8px; cursor:pointer; background:#f0f0f0; border-radius:0 0 4px 4px; color:#e74c3c;"
+                             onclick="event.stopPropagation(); resetAndCloseAliasDropdown('${code}')">
+                            <i class="fas fa-times"></i> Đóng (quay về tên chính)
+                        </div>
+                    </div>
+                `;
+            }
+
+            const aliasBadge = aliasCount > 0 ? `
+                <span style="cursor:pointer; color:#1a3c6e; font-size:12px; margin-left:8px; background:#f0f4f8; padding:2px 8px; border-radius:12px; border:1px solid #e2e8f0;"
+                      onclick="event.stopPropagation(); toggleAliasDropdown('${code}')">
+                    +${aliasCount} tên khác
+                    ${state._expandedAlias === code ? '▲' : '▼'}
+                </span>
+            ` : '';
+
             itemsHtml += `
-                <tr>
+                <tr style="position:relative;">
                     <td style="text-align:center;">
-                        <input type="checkbox" class="item-selector-checkbox" data-item-id="${item.id}" ${checked}>
+                        <input type="checkbox" class="item-selector-checkbox" data-item-code="${code}" ${checked}>
                     </td>
-                    <td><strong>${item.code}</strong> ${aliasInfo}</td>
-                    <td>${nameDisplay}</td>
-                    <td>${item.itemGroup || '--'}</td>
-                    <td>${item.unit || '--'}</td>
-                    <td style="text-align:right;">${(item.standardPrice || 0).toLocaleString()}</td>
+                    <td><strong>${code}</strong></td>
                     <td>
-                        <input type="number" class="item-selector-qty" data-item-id="${item.id}" value="${qty}" min="0.01" step="0.01" style="width:70px; padding:4px; border:1px solid #ccc; border-radius:4px;">
+                        ${displayName}
+                        ${aliasBadge}
+                        ${aliasDropdownHtml}
+                    </td>
+                    <td>${mainItem.itemGroup || '--'}</td>
+                    <td>${mainItem.unit || '--'}</td>
+                    <td style="text-align:right;">${(mainItem.standardPrice || 0).toLocaleString()}</td>
+                    <td>
+                        <input type="number" class="item-selector-qty" data-item-code="${code}" value="${qty}" min="0.01" step="0.01" style="width:70px; padding:4px; border:1px solid #ccc; border-radius:4px;">
                     </td>
                 </tr>
             `;
@@ -215,7 +315,7 @@ function _renderModal() {
         <h3><i class="fas fa-cubes"></i> Chọn vật tư</h3>
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
             <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; flex:1;">
-                <input type="text" id="item-selector-filter" placeholder="Tìm theo mã, tên, nhóm..." style="flex:1; min-width:200px; padding:8px; border:1px solid #ccc; border-radius:4px;">
+                <input type="text" id="item-selector-filter" placeholder="Tìm theo mã, tên, nhóm..." style="flex:1; min-width:200px; padding:8px; border:1px solid #ccc; border-radius:4px;" value="${state.filter}">
                 <button class="btn btn-sm" onclick="itemSelectorSearch()"><i class="fas fa-search"></i> Tìm</button>
                 <button class="btn btn-sm btn-success" onclick="itemSelectorSelectAll()"><i class="fas fa-check-double"></i> Chọn tất cả</button>
                 <button class="btn btn-sm btn-warning" onclick="itemSelectorDeselectAll()"><i class="fas fa-times"></i> Bỏ chọn</button>
@@ -258,7 +358,6 @@ function _renderModal() {
         </div>
     `;
 
-    // Gắn sự kiện tìm kiếm với debounce
     const searchInput = document.getElementById('item-selector-filter');
     if (searchInput) {
         const debouncedSearch = debounce(() => {
@@ -269,49 +368,64 @@ function _renderModal() {
         searchInput.addEventListener('input', debouncedSearch);
     }
 
-    // Gắn sự kiện cho checkbox
     document.querySelectorAll('.item-selector-checkbox').forEach(cb => {
         cb.addEventListener('change', function() {
-            const itemId = parseInt(this.dataset.itemId);
-            const qtyInput = document.querySelector(`.item-selector-qty[data-item-id="${itemId}"]`);
+            const code = this.dataset.itemCode;
+            const group = _itemSelectorState.groupedItems.find(g => g.code === code);
+            if (!group) return;
+
+            const qtyInput = document.querySelector(`.item-selector-qty[data-item-code="${code}"]`);
             const qty = parseFloat(qtyInput?.value) || 1;
+
             if (this.checked) {
-                const item = _itemSelectorState.items.find(i => i.id === itemId);
-                if (item) {
+                const existing = _itemSelectorState.selectedItems.find(s => s.itemCode === code);
+                if (existing) {
+                    existing.quantity = qty;
+                } else {
                     _itemSelectorState.selectedItems.push({
-                        itemId: item.id,
+                        itemId: group.mainItem.id,
                         quantity: qty,
-                        itemName: item.name,
-                        itemCode: item.code,
-                        unit: item.unit,
-                        standardPrice: item.standardPrice
+                        displayName: group.mainItem.name,
+                        itemCode: group.mainItem.code,
+                        unit: group.mainItem.unit,
+                        standardPrice: group.mainItem.standardPrice
                     });
                 }
             } else {
-                const idx = _itemSelectorState.selectedItems.findIndex(s => s.itemId === itemId);
+                const idx = _itemSelectorState.selectedItems.findIndex(s => s.itemCode === code);
                 if (idx !== -1) _itemSelectorState.selectedItems.splice(idx, 1);
             }
             _updateSelectedCount();
         });
     });
 
-    // Gắn sự kiện cho số lượng
     document.querySelectorAll('.item-selector-qty').forEach(input => {
         input.addEventListener('change', function() {
-            const itemId = parseInt(this.dataset.itemId);
+            const code = this.dataset.itemCode;
             const qty = parseFloat(this.value) || 1;
             if (qty <= 0) {
                 this.value = 1;
                 return;
             }
-            const selected = _itemSelectorState.selectedItems.find(s => s.itemId === itemId);
-            if (selected) selected.quantity = qty;
+            const selected = _itemSelectorState.selectedItems.find(s => s.itemCode === code);
+            if (selected) {
+                selected.quantity = qty;
+            }
         });
+    });
+
+    // Click ra ngoài để đóng dropdown (KHÔNG reset)
+    document.addEventListener('click', function(e) {
+        if (_itemSelectorState._expandedAlias) {
+            const code = _itemSelectorState._expandedAlias;
+            if (!e.target.closest('.alias-dropdown-container')) {
+                toggleAliasDropdown(code);
+            }
+        }
     });
 }
 
 // ====== CẬP NHẬT SỐ LƯỢNG ĐÃ CHỌN ======
-
 function _updateSelectedCount() {
     const countEl = document.getElementById('selected-count');
     if (countEl) {
@@ -324,7 +438,6 @@ function _updateSelectedCount() {
 }
 
 // ====== HIỂN THỊ MODAL DANH SÁCH ĐÃ CHỌN ======
-
 function showSelectedItemsModal() {
     const items = _itemSelectorState.selectedItems;
     if (items.length === 0) {
@@ -353,10 +466,10 @@ function showSelectedItemsModal() {
     `;
 
     items.forEach((item, index) => {
-        const allAliases = _itemSelectorState.items.filter(i => i.code === item.itemCode);
-        const aliasOptions = allAliases.map(alias => 
+        const group = _itemSelectorState.groupedItems.find(g => g.code === item.itemCode);
+        const aliasOptions = group ? group.allItems.map(alias =>
             `<option value="${alias.id}" ${alias.id === item.itemId ? 'selected' : ''}>${alias.name}</option>`
-        ).join('');
+        ).join('') : '';
 
         html += `
             <tr style="border-bottom:1px solid #f0f0f0;">
@@ -397,7 +510,6 @@ function showSelectedItemsModal() {
 }
 
 // ====== LƯU THAY ĐỔI TỪ MODAL DANH SÁCH ======
-
 function saveSelectedItems() {
     const rows = document.querySelectorAll('#modal-content tbody tr');
     const newItems = [];
@@ -407,21 +519,22 @@ function saveSelectedItems() {
         if (aliasSelect && qtyInput) {
             const itemId = parseInt(aliasSelect.value);
             const quantity = parseFloat(qtyInput.value) || 1;
-            const original = _itemSelectorState.selectedItems.find(s => s.itemId === itemId);
-            const item = _itemSelectorState.items.find(i => i.id === itemId);
-            if (item) {
+            let found = null;
+            for (const group of _itemSelectorState.groupedItems) {
+                const item = group.allItems.find(i => i.id === itemId);
+                if (item) {
+                    found = item;
+                    break;
+                }
+            }
+            if (found) {
                 newItems.push({
-                    itemId: itemId,
+                    itemId: found.id,
                     quantity: quantity,
-                    itemName: item.name,
-                    itemCode: item.code,
-                    unit: item.unit || '',
-                    standardPrice: item.standardPrice || 0
-                });
-            } else if (original) {
-                newItems.push({
-                    ...original,
-                    quantity: quantity
+                    displayName: found.name,
+                    itemCode: found.code,
+                    unit: found.unit,
+                    standardPrice: found.standardPrice
                 });
             }
         }
@@ -434,14 +547,12 @@ function saveSelectedItems() {
 }
 
 // ====== ĐÓNG MODAL DANH SÁCH (KHÔNG LƯU) ======
-
 function closeSelectedModal() {
     _itemSelectorState._showingSelected = false;
     _renderModal();
 }
 
 // ====== XÁC NHẬN CHỌN VẬT TƯ ======
-
 function confirmItemSelection() {
     const count = _itemSelectorState.selectedItems.length;
     if (count === 0) {
@@ -450,51 +561,39 @@ function confirmItemSelection() {
     }
 
     if (confirm(`Xác nhận chọn ${count} vật tư này?`)) {
-        // Lưu và đóng, khôi phục modal cha (giữ modal mở)
         closeItemSelectorAfterSave();
         showSuccess(`Đã chọn ${count} vật tư.`);
     }
-    // Nếu không confirm thì ở lại
 }
 
 // ====== HỦY TIẾN TRÌNH (QUAY LẠI) ======
-
 function cancelItemSelection() {
     if (confirm('Bạn có chắc muốn hủy tiến trình chọn vật tư? Các thay đổi sẽ không được lưu.')) {
-        // Đóng và khôi phục modal cha mà không gọi callback
         closeItemSelector();
     }
-    // Nếu không confirm thì ở lại
 }
 
 // ====== CÁC HÀM GLOBAL ======
 
-window.removeSelectedItem = function(itemId) {
-    const idx = _itemSelectorState.selectedItems.findIndex(s => s.itemId === itemId);
-    if (idx !== -1) _itemSelectorState.selectedItems.splice(idx, 1);
-    const cb = document.querySelector(`.item-selector-checkbox[data-item-id="${itemId}"]`);
-    if (cb) cb.checked = false;
-    _updateSelectedCount();
-};
-
 window.itemSelectorSelectAll = function() {
     const checkboxes = document.querySelectorAll('.item-selector-checkbox');
     checkboxes.forEach(cb => {
-        const itemId = parseInt(cb.dataset.itemId);
         if (!cb.checked) {
             cb.checked = true;
-            const item = _itemSelectorState.items.find(i => i.id === itemId);
-            if (item) {
-                const qtyInput = document.querySelector(`.item-selector-qty[data-item-id="${itemId}"]`);
+            const code = cb.dataset.itemCode;
+            const group = _itemSelectorState.groupedItems.find(g => g.code === code);
+            if (group) {
+                const qtyInput = document.querySelector(`.item-selector-qty[data-item-code="${code}"]`);
                 const qty = parseFloat(qtyInput?.value) || 1;
-                if (!_itemSelectorState.selectedItems.some(s => s.itemId === itemId)) {
+                const existing = _itemSelectorState.selectedItems.find(s => s.itemCode === code);
+                if (!existing) {
                     _itemSelectorState.selectedItems.push({
-                        itemId: item.id,
+                        itemId: group.mainItem.id,
                         quantity: qty,
-                        itemName: item.name,
-                        itemCode: item.code,
-                        unit: item.unit,
-                        standardPrice: item.standardPrice
+                        displayName: group.mainItem.name,
+                        itemCode: group.mainItem.code,
+                        unit: group.mainItem.unit,
+                        standardPrice: group.mainItem.standardPrice
                     });
                 }
             }
@@ -506,10 +605,10 @@ window.itemSelectorSelectAll = function() {
 window.itemSelectorDeselectAll = function() {
     const checkboxes = document.querySelectorAll('.item-selector-checkbox');
     checkboxes.forEach(cb => {
-        const itemId = parseInt(cb.dataset.itemId);
         if (cb.checked) {
             cb.checked = false;
-            const idx = _itemSelectorState.selectedItems.findIndex(s => s.itemId === itemId);
+            const code = cb.dataset.itemCode;
+            const idx = _itemSelectorState.selectedItems.findIndex(s => s.itemCode === code);
             if (idx !== -1) _itemSelectorState.selectedItems.splice(idx, 1);
         }
     });
@@ -538,7 +637,7 @@ window.itemSelectorPage = function(page) {
     _renderModal();
 };
 
-// Export
+// ====== EXPORT ======
 window.openItemSelector = openItemSelector;
 window.closeItemSelector = closeItemSelector;
 window.closeItemSelectorAfterSave = closeItemSelectorAfterSave;
@@ -547,11 +646,13 @@ window.itemSelectorSearch = itemSelectorSearch;
 window.itemSelectorSelectAll = itemSelectorSelectAll;
 window.itemSelectorDeselectAll = itemSelectorDeselectAll;
 window.clearAllSelected = clearAllSelected;
-window.removeSelectedItem = removeSelectedItem;
 window.confirmItemSelection = confirmItemSelection;
 window.cancelItemSelection = cancelItemSelection;
 window.showSelectedItemsModal = showSelectedItemsModal;
 window.saveSelectedItems = saveSelectedItems;
 window.closeSelectedModal = closeSelectedModal;
+window.selectAlias = selectAlias;
+window.toggleAliasDropdown = toggleAliasDropdown;
+window.resetAndCloseAliasDropdown = resetAndCloseAliasDropdown;
 
-console.log('✅ Item selector modal updated – retains parent modal content.');
+console.log('✅ Item selector modal updated – close alias dropdown by clicking outside keeps selection, only "Đóng" button resets to main name.');

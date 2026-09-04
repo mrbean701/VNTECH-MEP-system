@@ -4,7 +4,6 @@ import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-
 import java.time.LocalDate;
 
 @Entity
@@ -38,6 +37,4 @@ public class Department {
     @Column(name = "updated_at")
     private LocalDate updatedAt;
 
-    public Department(Object o, String bgd, String banGiámĐốc, long l, String admin, LocalDate now, Object o1) {
-    }
 }

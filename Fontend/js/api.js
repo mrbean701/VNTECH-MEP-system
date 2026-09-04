@@ -891,5 +891,4 @@ window.api = {
 window.invalidateCache = invalidateCache;
 window.updateVendorGroups = updateVendorGroups;
 
-
 console.log('✅ API layer loaded successfully');

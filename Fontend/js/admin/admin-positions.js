@@ -22,7 +22,6 @@ async function renderPositionsTab() {
     const positions = getPositionsData();
     const departments = getDepartmentsData();
 
-    // Chỉ ADMIN có quyền quản lý chức vụ
     const canManage = getUser()?.role === 'ADMIN';
 
     let html = `
@@ -34,53 +33,70 @@ async function renderPositionsTab() {
             <input type="text" id="position-filter" placeholder="Tìm chức vụ..." style="flex:1;">
             <button class="btn btn-sm" onclick="renderPositionsTab()"><i class="fas fa-search"></i></button>
         </div>
-        <div class="table-responsive">
-            <table>
-                <thead>
-                    <tr>
-                        <th>#</th>
-                        <th>Tên chức vụ</th>
-                        <th>Phòng ban</th>
-                        <th>Mô tả</th>
-                        <th>Trạng thái</th>
-                        <th>Hành động</th>
-                    </tr>
-                </thead>
-                <tbody>
     `;
 
-    const filter = document.getElementById('position-filter')?.value?.toLowerCase() || '';
-    const filtered = positions.filter(p => (p.name || '').toLowerCase().includes(filter));
+    // ✅ Kiểm tra nếu không có dữ liệu
+    if (!positions || positions.length === 0) {
+        html += `
+            <div style="padding:30px; text-align:center; background:#f8fafc; border-radius:8px; border:1px solid #e2e8f0;">
+                <i class="fas fa-id-badge" style="font-size:40px; color:#ccc; display:block; margin-bottom:12px;"></i>
+                <div style="font-size:16px; color:#666;">Chưa có chức vụ nào</div>
+                <div style="font-size:13px; color:#999; margin-top:4px;">Bấm "Thêm chức vụ" để tạo mới.</div>
+            </div>
+        `;
+    } else {
+        // Render bảng chức vụ bình thường
+        const filter = document.getElementById('position-filter')?.value?.toLowerCase() || '';
+        const filtered = positions.filter(p => (p.name || '').toLowerCase().includes(filter));
 
-    if (!filtered.length) {
-        html += `<tr><td colspan="6" style="text-align:center; color:#999;">Chưa có chức vụ nào.</td></tr>`;
+        html += `
+            <div class="table-responsive">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Tên chức vụ</th>
+                            <th>Phòng ban</th>
+                            <th>Mô tả</th>
+                            <th>Trạng thái</th>
+                            <th>Hành động</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+        `;
+
+        if (filtered.length === 0) {
+            html += `<tr><td colspan="6" style="text-align:center; color:#999;">Không tìm thấy chức vụ phù hợp</td></tr>`;
+        } else {
+            filtered.forEach((p, idx) => {
+                const dept = departments.find(d => d.id === p.departmentId);
+                html += `
+                    <tr>
+                        <td>${idx + 1}</td>
+                        <td style="font-weight:500;">${p.name}</td>
+                        <td>${dept ? dept.name : '--'}</td>
+                        <td>${p.description || '--'}</td>
+                        <td>${p.isActive === false ? '<span class="badge badge-draft">Ngừng</span>' : '<span class="badge badge-approved">Hoạt động</span>'}</td>
+                        <td>
+                            <button class="btn btn-info btn-sm" onclick="viewPosition(${p.id})"><i class="fas fa-eye"></i></button>
+                            ${canManage ? `
+                                <button class="btn btn-warning btn-sm" onclick="editPosition(${p.id})"><i class="fas fa-edit"></i></button>
+                                <button class="btn btn-danger btn-sm" onclick="deletePosition(${p.id})"><i class="fas fa-trash"></i></button>
+                            ` : ''}
+                        </td>
+                    </tr>
+                `;
+            });
+        }
+
+        html += `
+                    </tbody>
+                </table>
+            </div>
+        `;
     }
 
-    filtered.forEach((p, idx) => {
-        const dept = departments.find(d => d.id === p.departmentId);
-        html += `
-            <tr>
-                <td>${idx + 1}</td>
-                <td style="font-weight:500;">${p.name}</td>
-                <td>${dept ? dept.name : '--'}</td>
-                <td>${p.description || '--'}</td>
-                <td>${p.isActive === false ? '<span class="badge badge-draft">Ngừng</span>' : '<span class="badge badge-approved">Hoạt động</span>'}</td>
-                <td>
-                    <button class="btn btn-info btn-sm" onclick="viewPosition(${p.id})"><i class="fas fa-eye"></i></button>
-                    ${canManage ? `
-                        <button class="btn btn-warning btn-sm" onclick="editPosition(${p.id})"><i class="fas fa-edit"></i></button>
-                        <button class="btn btn-danger btn-sm" onclick="deletePosition(${p.id})"><i class="fas fa-trash"></i></button>
-                    ` : ''}
-                </td>
-            </tr>
-        `;
-    });
-
-    html += `
-                </tbody>
-            </table>
-        </div>
-    `;
+    // Gán sự kiện cho filter
     const container = document.getElementById('admin-tab-content');
     if (container) container.innerHTML = html;
     document.getElementById('position-filter')?.addEventListener('input', renderPositionsTab);

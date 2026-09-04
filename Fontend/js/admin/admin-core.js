@@ -142,6 +142,7 @@ function renderAdminUI(tab) {
             <div class="tab ${currentAdminTab === 'users' ? 'active' : ''}" onclick="switchAdminTab('users')">👤 Người dùng</div>
             <div class="tab ${currentAdminTab === 'departments' ? 'active' : ''}" onclick="switchAdminTab('departments')">🏢 Phòng ban</div>
             <div class="tab ${currentAdminTab === 'positions' ? 'active' : ''}" onclick="switchAdminTab('positions')">🏷️ Chức vụ</div>
+            <div class="tab ${currentAdminTab === 'teams' ? 'active' : ''}" onclick="switchAdminTab('teams')">👥 Đội nhóm</div>
             <div class="tab ${currentAdminTab === 'workflows' ? 'active' : ''}" onclick="switchAdminTab('workflows')">⚙️ Workflow</div>
             <div class="tab ${currentAdminTab === 'statuses' ? 'active' : ''}" onclick="switchAdminTab('statuses')">📊 Trạng thái</div>
             <div class="tab ${currentAdminTab === 'department-permissions' ? 'active' : ''}" onclick="switchAdminTab('department-permissions')">🏢 Phân quyền phòng ban</div>
@@ -164,6 +165,10 @@ function renderAdminUI(tab) {
             html += renderDepartmentPermissionsTab();
         } else if (currentAdminTab === 'user-permissions') {
             html += renderUserPermissionsTab();
+        } else if (currentAdminTab === 'teams') {
+            html += renderTeamsTab();
+        } else if (currentAdminTab === 'positions' && typeof renderPositionsTab === 'function') {
+           html += renderPositionsTab();
         }
     } catch (error) {
         console.error('Lỗi render tab admin:', error);
@@ -192,6 +197,30 @@ function renderAdminUI(tab) {
 
 function switchAdminTab(tab) {
     renderAdminUI(tab);
+}
+
+async function refreshAdminDepartments() {
+    try {
+        const data = await api.getDepartments();
+        _adminDepartments = Array.isArray(data) ? data : [];
+        saveData('departments', _adminDepartments);
+        console.log('✅ Departments refreshed:', _adminDepartments.length, 'items');
+    } catch (e) {
+        console.error('❌ Failed to refresh departments:', e);
+        _adminDepartments = getData('departments') || [];
+    }
+}
+
+async function refreshAdminPositions() {
+    try {
+        const data = await api.getPositions();
+        _adminPositions = Array.isArray(data) ? data : [];
+        saveData('positions', _adminPositions);
+        console.log('✅ Positions refreshed:', _adminPositions.length, 'items');
+    } catch (e) {
+        console.error('❌ Failed to refresh positions:', e);
+        _adminPositions = getData('positions') || [];
+    }
 }
 
 // Export

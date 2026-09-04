@@ -77,9 +77,10 @@ public class VendorController {
         vendorService.removeGroup(groupId);
     }
 
+    // ✅ SỬA: PUT /{vendorId}/groups trả về VendorDTO thay vì void
     @PutMapping("/{vendorId}/groups")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void updateGroups(@PathVariable Long vendorId, @RequestBody List<String> groupNames) {
+    public VendorDTO updateGroups(@PathVariable Long vendorId, @RequestBody List<String> groupNames) {
         vendorService.updateGroups(vendorId, groupNames);
+        return vendorService.getDTOById(vendorId);
     }
 }

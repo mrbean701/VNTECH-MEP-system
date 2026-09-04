@@ -1,59 +1,143 @@
 // ================================================================
 // WAREHOUSE - GRN & STO (SỬ DỤNG API) - ĐÃ TÍCH HỢP PHÂN QUYỀN
 // ================================================================
-
 let currentWhTab = 'wh-list';
+let showAllWarehouses = false;
+
+// ====== STATE CHO GRN ======
+const grnState = {
+    page: 1,
+    perPage: 10,
+    filterText: '',
+    statusFilter: '',
+    projectFilter: '',
+    warehouseFilter: '',
+    sortBy: 'createdAt',
+    sortOrder: 'desc'
+};
+
+// ====== STATE CHO STO ======
+const stoState = {
+    page: 1,
+    perPage: 10,
+    filterText: '',
+    statusFilter: '',
+    projectFilter: '',
+    fromWarehouseFilter: '',
+    toWarehouseFilter: '',
+    sortBy: 'createdAt',
+    sortOrder: 'desc'
+};
+
+const debouncedGRNFilter = debounce(() => {
+    grnState.page = 1;
+    switchWarehouseTab('wh-grn');
+}, 300);
+
+const debouncedSTOFilter = debounce(() => {
+    stoState.page = 1;
+    switchWarehouseTab('wh-sto');
+}, 300);
 
 // ================================================================
 // RENDER PAGE
 // ================================================================
-async function renderWarehousePage(tab) {
-    currentWhTab = tab || 'wh-list';
-    const container = document.getElementById('inventory-content');
-    
-    // Kiểm tra quyền view inventory
-    if (!hasPermission('inventory.view')) {
-        container.innerHTML = `
-            <div style="padding:20px; text-align:center; color:#e74c3c;">
-                <i class="fas fa-lock" style="font-size:24px; display:block; margin-bottom:10px;"></i>
-                Bạn không có quyền xem kho
-            </div>
-        `;
-        return;
-    }
+// Gắn sự kiện cho GRN
+const grnFilterInput = document.getElementById('grn-filter');
+const grnStatusSelect = document.getElementById('grn-status-filter');
+const grnProjectSelect = document.getElementById('grn-project-filter');
+const grnWarehouseSelect = document.getElementById('grn-warehouse-filter');
+const grnSortSelect = document.getElementById('grn-sort');
 
-    const canEditInventory = hasPermission('inventory.edit');
-    const canCreateGRN = hasPermission('grn.create');
-    const canCreateSTO = hasPermission('sto.create');
+if (grnFilterInput) {
+    grnFilterInput.removeEventListener('input', debouncedGRNFilter);
+    grnFilterInput.addEventListener('input', function(e) {
+        grnState.filterText = this.value;
+        debouncedGRNFilter();
+    });
+}
+if (grnStatusSelect) {
+    grnStatusSelect.removeEventListener('change', debouncedGRNFilter);
+    grnStatusSelect.addEventListener('change', function(e) {
+        grnState.statusFilter = this.value;
+        debouncedGRNFilter();
+    });
+}
+if (grnProjectSelect) {
+    grnProjectSelect.removeEventListener('change', debouncedGRNFilter);
+    grnProjectSelect.addEventListener('change', function(e) {
+        grnState.projectFilter = this.value;
+        debouncedGRNFilter();
+    });
+}
+if (grnWarehouseSelect) {
+    grnWarehouseSelect.removeEventListener('change', debouncedGRNFilter);
+    grnWarehouseSelect.addEventListener('change', function(e) {
+        grnState.warehouseFilter = this.value;
+        debouncedGRNFilter();
+    });
+}
+if (grnSortSelect) {
+    grnSortSelect.removeEventListener('change', debouncedGRNFilter);
+    grnSortSelect.addEventListener('change', function(e) {
+        const [sortBy, sortOrder] = this.value.split('_');
+        grnState.sortBy = sortBy;
+        grnState.sortOrder = sortOrder || 'desc';
+        debouncedGRNFilter();
+    });
+}
 
-    // Ẩn/hiện các nút trong header
-    const btnAddWH = document.querySelector('#page-inventory .page-header .btn[onclick*="showAddWarehouse"]');
-    if (btnAddWH) btnAddWH.style.display = (tab === 'wh-list' && canEditInventory) ? 'inline-block' : 'none';
+// Tương tự cho STO
+const stoFilterInput = document.getElementById('sto-filter');
+const stoStatusSelect = document.getElementById('sto-status-filter');
+const stoProjectSelect = document.getElementById('sto-project-filter');
+const stoFromWarehouseSelect = document.getElementById('sto-from-warehouse-filter');
+const stoToWarehouseSelect = document.getElementById('sto-to-warehouse-filter');
+const stoSortSelect = document.getElementById('sto-sort');
 
-    const btnAddGRN = document.querySelector('#page-inventory .page-header .btn[onclick*="showAddGRN"]');
-    if (btnAddGRN) btnAddGRN.style.display = (tab === 'wh-grn' && canCreateGRN) ? 'inline-block' : 'none';
-
-    const btnAddSTO = document.querySelector('#page-inventory .page-header .btn[onclick*="showAddSTO"]');
-    if (btnAddSTO) btnAddSTO.style.display = (tab === 'wh-sto' && canCreateSTO) ? 'inline-block' : 'none';
-
-    let html = `
-        <div class="tab-bar">
-            <div class="tab ${tab === 'wh-list' ? 'active' : ''}" onclick="switchWarehouseTab('wh-list')">📋 Danh sách kho</div>
-            <div class="tab ${tab === 'wh-grn' ? 'active' : ''}" onclick="switchWarehouseTab('wh-grn')">📥 Nhập kho (GRN)</div>
-            <div class="tab ${tab === 'wh-sto' ? 'active' : ''}" onclick="switchWarehouseTab('wh-sto')">📤 Chuyển kho (STO)</div>
-        </div>
-        <div id="wh-tab-content">
-    `;
-
-    if (tab === 'wh-list') {
-        html += await renderWarehouseListHTML();
-    } else if (tab === 'wh-grn') {
-        html += await renderGRNListHTML();
-    } else if (tab === 'wh-sto') {
-        html += await renderSTOListHTML();
-    }
-    html += `</div>`;
-    container.innerHTML = html;
+if (stoFilterInput) {
+    stoFilterInput.removeEventListener('input', debouncedSTOFilter);
+    stoFilterInput.addEventListener('input', function(e) {
+        stoState.filterText = this.value;
+        debouncedSTOFilter();
+    });
+}
+if (stoStatusSelect) {
+    stoStatusSelect.removeEventListener('change', debouncedSTOFilter);
+    stoStatusSelect.addEventListener('change', function(e) {
+        stoState.statusFilter = this.value;
+        debouncedSTOFilter();
+    });
+}
+if (stoProjectSelect) {
+    stoProjectSelect.removeEventListener('change', debouncedSTOFilter);
+    stoProjectSelect.addEventListener('change', function(e) {
+        stoState.projectFilter = this.value;
+        debouncedSTOFilter();
+    });
+}
+if (stoFromWarehouseSelect) {
+    stoFromWarehouseSelect.removeEventListener('change', debouncedSTOFilter);
+    stoFromWarehouseSelect.addEventListener('change', function(e) {
+        stoState.fromWarehouseFilter = this.value;
+        debouncedSTOFilter();
+    });
+}
+if (stoToWarehouseSelect) {
+    stoToWarehouseSelect.removeEventListener('change', debouncedSTOFilter);
+    stoToWarehouseSelect.addEventListener('change', function(e) {
+        stoState.toWarehouseFilter = this.value;
+        debouncedSTOFilter();
+    });
+}
+if (stoSortSelect) {
+    stoSortSelect.removeEventListener('change', debouncedSTOFilter);
+    stoSortSelect.addEventListener('change', function(e) {
+        const [sortBy, sortOrder] = this.value.split('_');
+        stoState.sortBy = sortBy;
+        stoState.sortOrder = sortOrder || 'desc';
+        debouncedSTOFilter();
+    });
 }
 
 // ================================================================
@@ -65,11 +149,27 @@ async function renderWarehouseListHTML() {
         const inventory = await api.getInventory();
         const canEditInventory = hasPermission('inventory.edit');
 
-        let html = `<div class="warehouse-grid">`;
-        if (!warehouses || warehouses.length === 0) {
-            html += `<p style="grid-column:1/-1;text-align:center;color:#999;">Chưa có kho nào</p>`;
+        let filteredWarehouses = warehouses;
+        if (!showAllWarehouses) {
+            filteredWarehouses = warehouses.filter(w => w.status === 'ACTIVE');
+        }
+
+        let html = `
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
+                <span style="font-size:14px; color:#888;">
+                    ${showAllWarehouses ? 'Hiển thị tất cả kho' : 'Chỉ hiển thị kho đang hoạt động'}
+                </span>
+                <button class="btn btn-sm" onclick="toggleWarehouseFilter()">
+                    ${showAllWarehouses ? '🔽 Chỉ hiện hoạt động' : '🔼 Hiện tất cả'}
+                </button>
+            </div>
+            <div class="warehouse-grid">
+        `;
+
+        if (!filteredWarehouses || filteredWarehouses.length === 0) {
+            html += `<p style="grid-column:1/-1;text-align:center;color:#999;">Không có kho nào ${showAllWarehouses ? '' : 'đang hoạt động'}</p>`;
         } else {
-            for (const w of warehouses) {
+            for (const w of filteredWarehouses) {
                 const itemCount = (inventory || []).filter(i => i.warehouseId === w.id).length;
                 const totalQty = (inventory || []).filter(i => i.warehouseId === w.id).reduce((s, i) => s + (i.quantity || 0), 0);
                 const icon = w.type === 'CENTRAL' ? 'fa-warehouse' : 'fa-building';
@@ -98,24 +198,15 @@ async function renderWarehouseListHTML() {
                 `;
             }
         }
+
         html += `</div>`;
         return html;
     } catch (error) {
-        showError('Không thể tải danh sách kho: ' + error.message);
-        return '<p style="color:red;">Lỗi tải dữ liệu</p>';
+        console.error('renderWarehouseListHTML error:', error);
+        return `<p style="color:red;">Lỗi tải dữ liệu kho: ${error.message}</p>`;
     }
 }
 
-async function getProjectNameById(projectId) {
-    if (!projectId) return 'Không áp dụng';
-    try {
-        const projects = await api.getProjects();
-        const p = projects.find(pr => pr.id === projectId);
-        return p ? p.name : 'Không tìm thấy';
-    } catch {
-        return 'Không tìm thấy';
-    }
-}
 
 // ====== XEM CHI TIẾT KHO ======
 async function viewWarehouseDetail(whId) {
@@ -197,7 +288,16 @@ async function viewWarehouseDetail(whId) {
 // ================================================================
 async function renderGRNListHTML() {
     try {
-        const grnList = await api.getGRNs();
+        const [grnList, projects, warehouses] = await Promise.all([
+            api.getGRNs(),
+            api.getProjects(),
+            api.getWarehouses()
+        ]);
+        window._projectsCache = projects;
+        window._warehousesCache = warehouses;
+        saveData('projects', projects);
+        saveData('warehouses', warehouses);
+
         const canCreateGRN = hasPermission('grn.create');
         const canEditGRN = hasPermission('grn.edit');
         const canDeleteGRN = hasPermission('grn.delete');
@@ -205,32 +305,96 @@ async function renderGRNListHTML() {
         const canQCGRN = hasPermission('grn.qc');
         const canCompleteGRN = hasPermission('grn.complete');
 
-        // Ẩn/hiện nút Tạo phiếu nhập
-        const btnAddGRN = document.querySelector('#page-inventory .page-header .btn[onclick*="showAddGRN"]');
-        if (btnAddGRN) btnAddGRN.style.display = canCreateGRN ? 'inline-block' : 'none';
+        const keyword = grnState.filterText.toLowerCase().trim();
+        let filtered = grnList.filter(g => {
+            let matchKeyword = true;
+            if (keyword) {
+                const codeMatch = (g.code || '').toLowerCase().includes(keyword);
+                const projectNameMatch = (g.projectName || '').toLowerCase().includes(keyword);
+                const projectCodeMatch = (g.projectCode || '').toLowerCase().includes(keyword);
+                const vendorNameMatch = (g.vendorName || '').toLowerCase().includes(keyword);
+                const warehouseNameMatch = getWarehouseName(g.warehouseId).toLowerCase().includes(keyword);
+                matchKeyword = codeMatch || projectNameMatch || projectCodeMatch || vendorNameMatch || warehouseNameMatch;
+            }
+            const matchStatus = grnState.statusFilter ? g.status === grnState.statusFilter : true;
+            let matchProject = true;
+            if (grnState.projectFilter) {
+                const selectedProject = projects.find(p => p.code === grnState.projectFilter || p.id === parseInt(grnState.projectFilter));
+                matchProject = selectedProject ? g.projectCode === selectedProject.code : false;
+            }
+            let matchWarehouse = true;
+            if (grnState.warehouseFilter) {
+                matchWarehouse = g.warehouseId === parseInt(grnState.warehouseFilter);
+            }
+            return matchKeyword && matchStatus && matchProject && matchWarehouse;
+        });
+
+        const order = grnState.sortOrder === 'asc' ? 1 : -1;
+        filtered.sort((a, b) => {
+            let valA = a[grnState.sortBy] || '';
+            let valB = b[grnState.sortBy] || '';
+            if (grnState.sortBy === 'projectName') {
+                valA = a.projectName || a.projectCode || '';
+                valB = b.projectName || b.projectCode || '';
+            } else if (grnState.sortBy === 'createdAt') {
+                valA = new Date(a.createdAt || 0);
+                valB = new Date(b.createdAt || 0);
+            } else if (grnState.sortBy === 'status') {
+                const statusOrder = { 'DRAFT': 0, 'RECEIVED': 1, 'QC_CHECKED': 2, 'COMPLETED': 3, 'REJECTED': 4 };
+                valA = statusOrder[a.status] || 0;
+                valB = statusOrder[b.status] || 0;
+            }
+            if (typeof valA === 'string') valA = valA.toLowerCase();
+            if (typeof valB === 'string') valB = valB.toLowerCase();
+            if (valA < valB) return -1 * order;
+            if (valA > valB) return 1 * order;
+            return 0;
+        });
+
+        const perPage = getPageSize('grn');
+        grnState.perPage = perPage;
+        const paging = paginate(filtered, grnState.page, perPage);
 
         let html = `
             <div class="filter-bar">
-                <input type="text" id="grn-filter" placeholder="Tìm theo mã..." style="flex:1;" />
-                <select id="grn-status-filter">
+                <input type="text" id="grn-filter" placeholder="Tìm theo mã, dự án, NCC, kho..." style="flex:2;" value="${grnState.filterText}">
+                <select id="grn-status-filter" style="flex:1;">
                     <option value="">Tất cả</option>
-                    <option value="DRAFT">DRAFT</option>
-                    <option value="RECEIVED">RECEIVED</option>
-                    <option value="QC_CHECKED">QC_CHECKED</option>
-                    <option value="COMPLETED">COMPLETED</option>
-                    <option value="CANCELLED">CANCELLED</option>
+                    <option value="DRAFT" ${grnState.statusFilter === 'DRAFT' ? 'selected' : ''}>DRAFT</option>
+                    <option value="RECEIVED" ${grnState.statusFilter === 'RECEIVED' ? 'selected' : ''}>RECEIVED</option>
+                    <option value="QC_CHECKED" ${grnState.statusFilter === 'QC_CHECKED' ? 'selected' : ''}>QC_CHECKED</option>
+                    <option value="COMPLETED" ${grnState.statusFilter === 'COMPLETED' ? 'selected' : ''}>COMPLETED</option>
+                    <option value="REJECTED" ${grnState.statusFilter === 'REJECTED' ? 'selected' : ''}>REJECTED</option>
                 </select>
-                <button class="btn btn-sm" onclick="renderGRN()"><i class="fas fa-search"></i></button>
+                <select id="grn-project-filter" style="flex:1;">
+                    <option value="">Tất cả dự án</option>
+                    ${projects.map(p => `<option value="${p.code}" ${grnState.projectFilter === p.code ? 'selected' : ''}>${p.code} - ${p.name}</option>`).join('')}
+                </select>
+                <select id="grn-warehouse-filter" style="flex:1;">
+                    <option value="">Tất cả kho</option>
+                    ${warehouses.map(w => `<option value="${w.id}" ${grnState.warehouseFilter == w.id ? 'selected' : ''}>${w.code} - ${w.name}</option>`).join('')}
+                </select>
+                <select id="grn-sort" style="flex:1;">
+                    <option value="createdAt_desc" ${grnState.sortBy === 'createdAt' && grnState.sortOrder === 'desc' ? 'selected' : ''}>Ngày tạo (mới nhất)</option>
+                    <option value="createdAt_asc" ${grnState.sortBy === 'createdAt' && grnState.sortOrder === 'asc' ? 'selected' : ''}>Ngày tạo (cũ nhất)</option>
+                    <option value="code_asc" ${grnState.sortBy === 'code' && grnState.sortOrder === 'asc' ? 'selected' : ''}>Mã (A→Z)</option>
+                    <option value="code_desc" ${grnState.sortBy === 'code' && grnState.sortOrder === 'desc' ? 'selected' : ''}>Mã (Z→A)</option>
+                    <option value="projectName_asc" ${grnState.sortBy === 'projectName' && grnState.sortOrder === 'asc' ? 'selected' : ''}>Dự án (A→Z)</option>
+                    <option value="projectName_desc" ${grnState.sortBy === 'projectName' && grnState.sortOrder === 'desc' ? 'selected' : ''}>Dự án (Z→A)</option>
+                    <option value="status" ${grnState.sortBy === 'status' ? 'selected' : ''}>Trạng thái</option>
+                </select>
+                <button class="btn btn-sm" onclick="resetGRNFilters()"><i class="fas fa-undo"></i> Reset</button>
             </div>
             <div class="table-responsive">
                 <table>
                     <thead><tr><th>Mã</th><th>PO</th><th>Dự án</th><th>Kho</th><th>NCC</th><th>Ngày nhập</th><th>Trạng thái</th><th>HĐ</th></tr></thead>
                     <tbody>
         `;
-        if (!grnList || grnList.length === 0) {
-            html += `<tr><td colspan="8" style="text-align:center;color:#999;">Chưa có phiếu nhập kho</td></tr>`;
+
+        if (!paging.items.length) {
+            html += `<tr><td colspan="8" style="text-align:center;color:#999;">Không có dữ liệu</td></tr>`;
         } else {
-            for (const g of grnList) {
+            for (const g of paging.items) {
                 const po = await getPOById(g.poId);
                 const projectId = po ? getProjectIdByCode(po.projectCode) : null;
                 const projectLink = projectId ?
@@ -243,7 +407,6 @@ async function renderGRNListHTML() {
                 const statusBadge = getStatusBadge(g.status);
 
                 let actions = `<button class="btn btn-info btn-sm" onclick="viewGRN(${g.id})"><i class="fas fa-eye"></i></button>`;
-
                 if (g.status === 'DRAFT' && canEditGRN) {
                     actions += ` <button class="btn btn-warning btn-sm" onclick="editGRN(${g.id})"><i class="fas fa-edit"></i></button>`;
                 }
@@ -272,6 +435,7 @@ async function renderGRNListHTML() {
                 </tr>`;
             }
         }
+
         html += `</tbody></table></div>`;
         return html;
     } catch (error) {
@@ -876,6 +1040,69 @@ async function confirmQCCheckGRN(id) {
     }
 }
 
+// ====== RENDER PAGE ======
+async function renderWarehousePage(tab) {
+    currentWhTab = tab || 'wh-list';
+    const container = document.getElementById('inventory-content');
+
+    if (!hasPermission('inventory.view')) {
+        container.innerHTML = `
+            <div style="padding:20px; text-align:center; color:#e74c3c;">
+                <i class="fas fa-lock" style="font-size:24px; display:block; margin-bottom:10px;"></i>
+                Bạn không có quyền xem kho
+            </div>
+        `;
+        return;
+    }
+
+    const canEditInventory = hasPermission('inventory.edit');
+    const canCreateGRN = hasPermission('grn.create');
+    const canCreateSTO = hasPermission('sto.create');
+
+    // Ẩn/hiện nút
+    const btnAddWH = document.querySelector('#page-inventory .page-header .btn[onclick*="showAddWarehouse"]');
+    if (btnAddWH) btnAddWH.style.display = (tab === 'wh-list' && canEditInventory) ? 'inline-block' : 'none';
+
+    const btnAddGRN = document.querySelector('#page-inventory .page-header .btn[onclick*="showAddGRN"]');
+    if (btnAddGRN) btnAddGRN.style.display = (tab === 'wh-grn' && canCreateGRN) ? 'inline-block' : 'none';
+
+    const btnAddSTO = document.querySelector('#page-inventory .page-header .btn[onclick*="showAddSTO"]');
+    if (btnAddSTO) btnAddSTO.style.display = (tab === 'wh-sto' && canCreateSTO) ? 'inline-block' : 'none';
+
+    let html = `
+        <div class="tab-bar">
+            <div class="tab ${tab === 'wh-list' ? 'active' : ''}" onclick="switchWarehouseTab('wh-list')">📋 Danh sách kho</div>
+            <div class="tab ${tab === 'wh-grn' ? 'active' : ''}" onclick="switchWarehouseTab('wh-grn')">📥 Nhập kho (GRN)</div>
+            <div class="tab ${tab === 'wh-sto' ? 'active' : ''}" onclick="switchWarehouseTab('wh-sto')">📤 Chuyển kho (STO)</div>
+        </div>
+        <div id="wh-tab-content">
+    `;
+
+    try {
+        if (tab === 'wh-list') {
+            html += await renderWarehouseListHTML();
+        } else if (tab === 'wh-grn') {
+            html += await renderGRNListHTML();
+        } else if (tab === 'wh-sto') {
+            html += await renderSTOListHTML();
+        }
+    } catch (error) {
+        console.error('renderWarehousePage error:', error);
+        html += `<div style="padding:20px; text-align:center; color:#e74c3c;">Lỗi tải dữ liệu: ${error.message}</div>`;
+    }
+
+    html += `</div>`;
+    container.innerHTML = html;
+
+    // Gắn sự kiện cho GRN và STO (nếu đang ở tab tương ứng)
+    if (tab === 'wh-grn') {
+        attachGRNEvents();
+    }
+    if (tab === 'wh-sto') {
+        attachSTOEvents();
+    }
+}
+
 // ====== HOÀN THÀNH GRN ======
 async function completeGRN(id) {
     if (!hasPermission('grn.complete')) {
@@ -927,12 +1154,144 @@ async function deleteGRN(id) {
     }
 }
 
+function attachGRNEvents() {
+    const filterInput = document.getElementById('grn-filter');
+    const statusSelect = document.getElementById('grn-status-filter');
+    const projectSelect = document.getElementById('grn-project-filter');
+    const warehouseSelect = document.getElementById('grn-warehouse-filter');
+    const sortSelect = document.getElementById('grn-sort');
+
+    if (filterInput) {
+        filterInput.removeEventListener('input', debouncedGRNFilter);
+        filterInput.addEventListener('input', function(e) {
+            grnState.filterText = this.value;
+            debouncedGRNFilter();
+        });
+    }
+    if (statusSelect) {
+        statusSelect.removeEventListener('change', debouncedGRNFilter);
+        statusSelect.addEventListener('change', function(e) {
+            grnState.statusFilter = this.value;
+            debouncedGRNFilter();
+        });
+    }
+    if (projectSelect) {
+        projectSelect.removeEventListener('change', debouncedGRNFilter);
+        projectSelect.addEventListener('change', function(e) {
+            grnState.projectFilter = this.value;
+            debouncedGRNFilter();
+        });
+    }
+    if (warehouseSelect) {
+        warehouseSelect.removeEventListener('change', debouncedGRNFilter);
+        warehouseSelect.addEventListener('change', function(e) {
+            grnState.warehouseFilter = this.value;
+            debouncedGRNFilter();
+        });
+    }
+    if (sortSelect) {
+        sortSelect.removeEventListener('change', debouncedGRNFilter);
+        sortSelect.addEventListener('change', function(e) {
+            const [sortBy, sortOrder] = this.value.split('_');
+            grnState.sortBy = sortBy;
+            grnState.sortOrder = sortOrder || 'desc';
+            debouncedGRNFilter();
+        });
+    }
+}
+
+function resetGRNFilters() {
+    grnState.filterText = '';
+    grnState.statusFilter = '';
+    grnState.projectFilter = '';
+    grnState.warehouseFilter = '';
+    grnState.sortBy = 'createdAt';
+    grnState.sortOrder = 'desc';
+    grnState.page = 1;
+    switchWarehouseTab('wh-grn');
+}
+
+function attachSTOEvents() {
+    const filterInput = document.getElementById('sto-filter');
+    const statusSelect = document.getElementById('sto-status-filter');
+    const projectSelect = document.getElementById('sto-project-filter');
+    const fromWarehouseSelect = document.getElementById('sto-from-warehouse-filter');
+    const toWarehouseSelect = document.getElementById('sto-to-warehouse-filter');
+    const sortSelect = document.getElementById('sto-sort');
+
+    if (filterInput) {
+        filterInput.removeEventListener('input', debouncedSTOFilter);
+        filterInput.addEventListener('input', function(e) {
+            stoState.filterText = this.value;
+            debouncedSTOFilter();
+        });
+    }
+    if (statusSelect) {
+        statusSelect.removeEventListener('change', debouncedSTOFilter);
+        statusSelect.addEventListener('change', function(e) {
+            stoState.statusFilter = this.value;
+            debouncedSTOFilter();
+        });
+    }
+    if (projectSelect) {
+        projectSelect.removeEventListener('change', debouncedSTOFilter);
+        projectSelect.addEventListener('change', function(e) {
+            stoState.projectFilter = this.value;
+            debouncedSTOFilter();
+        });
+    }
+    if (fromWarehouseSelect) {
+        fromWarehouseSelect.removeEventListener('change', debouncedSTOFilter);
+        fromWarehouseSelect.addEventListener('change', function(e) {
+            stoState.fromWarehouseFilter = this.value;
+            debouncedSTOFilter();
+        });
+    }
+    if (toWarehouseSelect) {
+        toWarehouseSelect.removeEventListener('change', debouncedSTOFilter);
+        toWarehouseSelect.addEventListener('change', function(e) {
+            stoState.toWarehouseFilter = this.value;
+            debouncedSTOFilter();
+        });
+    }
+    if (sortSelect) {
+        sortSelect.removeEventListener('change', debouncedSTOFilter);
+        sortSelect.addEventListener('change', function(e) {
+            const [sortBy, sortOrder] = this.value.split('_');
+            stoState.sortBy = sortBy;
+            stoState.sortOrder = sortOrder || 'desc';
+            debouncedSTOFilter();
+        });
+    }
+}
+
+function resetSTOFilters() {
+    stoState.filterText = '';
+    stoState.statusFilter = '';
+    stoState.projectFilter = '';
+    stoState.fromWarehouseFilter = '';
+    stoState.toWarehouseFilter = '';
+    stoState.sortBy = 'createdAt';
+    stoState.sortOrder = 'desc';
+    stoState.page = 1;
+    switchWarehouseTab('wh-sto');
+}
+
 // ================================================================
 // STO - CHUYỂN KHO
 // ================================================================
 async function renderSTOListHTML() {
     try {
-        const stoList = await api.getSTOs();
+        const [stoList, projects, warehouses] = await Promise.all([
+            api.getSTOs(),
+            api.getProjects(),
+            api.getWarehouses()
+        ]);
+        window._projectsCache = projects;
+        window._warehousesCache = warehouses;
+        saveData('projects', projects);
+        saveData('warehouses', warehouses);
+
         const canCreateSTO = hasPermission('sto.create');
         const canEditSTO = hasPermission('sto.edit');
         const canDeleteSTO = hasPermission('sto.delete');
@@ -940,32 +1299,103 @@ async function renderSTOListHTML() {
         const canApproveSTO = hasPermission('sto.approve');
         const canCompleteSTO = hasPermission('sto.complete');
 
-        // Ẩn/hiện nút Tạo phiếu chuyển
-        const btnAddSTO = document.querySelector('#page-inventory .page-header .btn[onclick*="showAddSTO"]');
-        if (btnAddSTO) btnAddSTO.style.display = canCreateSTO ? 'inline-block' : 'none';
+        const keyword = stoState.filterText.toLowerCase().trim();
+        let filtered = stoList.filter(s => {
+            let matchKeyword = true;
+            if (keyword) {
+                const codeMatch = (s.code || '').toLowerCase().includes(keyword);
+                const projectNameMatch = (s.projectName || '').toLowerCase().includes(keyword);
+                const projectCodeMatch = (s.projectCode || '').toLowerCase().includes(keyword);
+                const fromWhName = getWarehouseName(s.fromWarehouseId).toLowerCase().includes(keyword);
+                const toWhName = getWarehouseName(s.toWarehouseId).toLowerCase().includes(keyword);
+                matchKeyword = codeMatch || projectNameMatch || projectCodeMatch || fromWhName || toWhName;
+            }
+            const matchStatus = stoState.statusFilter ? s.status === stoState.statusFilter : true;
+            let matchProject = true;
+            if (stoState.projectFilter) {
+                const selectedProject = projects.find(p => p.code === stoState.projectFilter || p.id === parseInt(stoState.projectFilter));
+                matchProject = selectedProject ? s.projectCode === selectedProject.code : false;
+            }
+            let matchFromWarehouse = true;
+            if (stoState.fromWarehouseFilter) {
+                matchFromWarehouse = s.fromWarehouseId === parseInt(stoState.fromWarehouseFilter);
+            }
+            let matchToWarehouse = true;
+            if (stoState.toWarehouseFilter) {
+                matchToWarehouse = s.toWarehouseId === parseInt(stoState.toWarehouseFilter);
+            }
+            return matchKeyword && matchStatus && matchProject && matchFromWarehouse && matchToWarehouse;
+        });
+
+        const order = stoState.sortOrder === 'asc' ? 1 : -1;
+        filtered.sort((a, b) => {
+            let valA = a[stoState.sortBy] || '';
+            let valB = b[stoState.sortBy] || '';
+            if (stoState.sortBy === 'projectName') {
+                valA = a.projectName || a.projectCode || '';
+                valB = b.projectName || b.projectCode || '';
+            } else if (stoState.sortBy === 'createdAt') {
+                valA = new Date(a.createdAt || 0);
+                valB = new Date(b.createdAt || 0);
+            } else if (stoState.sortBy === 'status') {
+                const statusOrder = { 'DRAFT': 0, 'PENDING': 1, 'APPROVED': 2, 'COMPLETED': 3 };
+                valA = statusOrder[a.status] || 0;
+                valB = statusOrder[b.status] || 0;
+            }
+            if (typeof valA === 'string') valA = valA.toLowerCase();
+            if (typeof valB === 'string') valB = valB.toLowerCase();
+            if (valA < valB) return -1 * order;
+            if (valA > valB) return 1 * order;
+            return 0;
+        });
+
+        const perPage = getPageSize('sto');
+        stoState.perPage = perPage;
+        const paging = paginate(filtered, stoState.page, perPage);
 
         let html = `
             <div class="filter-bar">
-                <input type="text" id="sto-filter" placeholder="Tìm theo mã..." style="flex:1;" />
-                <select id="sto-status-filter">
+                <input type="text" id="sto-filter" placeholder="Tìm theo mã, dự án, kho..." style="flex:2;" value="${stoState.filterText}">
+                <select id="sto-status-filter" style="flex:1;">
                     <option value="">Tất cả</option>
-                    <option value="DRAFT">DRAFT</option>
-                    <option value="PENDING">PENDING</option>
-                    <option value="APPROVED">APPROVED</option>
-                    <option value="COMPLETED">COMPLETED</option>
-                    <option value="CANCELLED">CANCELLED</option>
+                    <option value="DRAFT" ${stoState.statusFilter === 'DRAFT' ? 'selected' : ''}>DRAFT</option>
+                    <option value="PENDING" ${stoState.statusFilter === 'PENDING' ? 'selected' : ''}>PENDING</option>
+                    <option value="APPROVED" ${stoState.statusFilter === 'APPROVED' ? 'selected' : ''}>APPROVED</option>
+                    <option value="COMPLETED" ${stoState.statusFilter === 'COMPLETED' ? 'selected' : ''}>COMPLETED</option>
                 </select>
-                <button class="btn btn-sm" onclick="renderSTO()"><i class="fas fa-search"></i></button>
+                <select id="sto-project-filter" style="flex:1;">
+                    <option value="">Tất cả dự án</option>
+                    ${projects.map(p => `<option value="${p.code}" ${stoState.projectFilter === p.code ? 'selected' : ''}>${p.code} - ${p.name}</option>`).join('')}
+                </select>
+                <select id="sto-from-warehouse-filter" style="flex:1;">
+                    <option value="">Tất cả kho đi</option>
+                    ${warehouses.map(w => `<option value="${w.id}" ${stoState.fromWarehouseFilter == w.id ? 'selected' : ''}>${w.code} - ${w.name}</option>`).join('')}
+                </select>
+                <select id="sto-to-warehouse-filter" style="flex:1;">
+                    <option value="">Tất cả kho đến</option>
+                    ${warehouses.map(w => `<option value="${w.id}" ${stoState.toWarehouseFilter == w.id ? 'selected' : ''}>${w.code} - ${w.name}</option>`).join('')}
+                </select>
+                <select id="sto-sort" style="flex:1;">
+                    <option value="createdAt_desc" ${stoState.sortBy === 'createdAt' && stoState.sortOrder === 'desc' ? 'selected' : ''}>Ngày tạo (mới nhất)</option>
+                    <option value="createdAt_asc" ${stoState.sortBy === 'createdAt' && stoState.sortOrder === 'asc' ? 'selected' : ''}>Ngày tạo (cũ nhất)</option>
+                    <option value="code_asc" ${stoState.sortBy === 'code' && stoState.sortOrder === 'asc' ? 'selected' : ''}>Mã (A→Z)</option>
+                    <option value="code_desc" ${stoState.sortBy === 'code' && stoState.sortOrder === 'desc' ? 'selected' : ''}>Mã (Z→A)</option>
+                    <option value="projectName_asc" ${stoState.sortBy === 'projectName' && stoState.sortOrder === 'asc' ? 'selected' : ''}>Dự án (A→Z)</option>
+                    <option value="projectName_desc" ${stoState.sortBy === 'projectName' && stoState.sortOrder === 'desc' ? 'selected' : ''}>Dự án (Z→A)</option>
+                    <option value="status" ${stoState.sortBy === 'status' ? 'selected' : ''}>Trạng thái</option>
+                </select>
+                <button class="btn btn-sm" onclick="resetSTOFilters()"><i class="fas fa-undo"></i> Reset</button>
             </div>
             <div class="table-responsive">
                 <table>
                     <thead><tr><th>Mã</th><th>Kho đi</th><th>Kho đến</th><th>Dự án</th><th>Ngày xuất</th><th>Trạng thái</th><th>HĐ</th></tr></thead>
                     <tbody>
         `;
-        if (!stoList || stoList.length === 0) {
+
+        if (!paging.items.length) {
             html += `<tr><td colspan="7" style="text-align:center;color:#999;">Chưa có phiếu chuyển kho</td></tr>`;
         } else {
-            for (const s of stoList) {
+            for (const s of paging.items) {
                 const projectId = getProjectIdByCode(s.projectCode);
                 const projectLink = projectId ?
                     `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="closeModal(); viewProject(${projectId});">${s.projectName || ''}</span>` :
@@ -979,7 +1409,7 @@ async function renderSTOListHTML() {
                     actions += ` <button class="btn btn-warning btn-sm" onclick="editSTO(${s.id})"><i class="fas fa-edit"></i></button>`;
                 }
                 if (s.status === 'DRAFT' && canSubmitSTO) {
-                    actions += ` <button class="btn btn-success btn-sm" onclick="submitSTO(${s.id})">Gửi duyệt</button>`;
+                    actions += ` <button class="btn btn-success btn-sm" onclick="submitSTO(${s.id})">Xác nhận</button>`;
                 }
                 if (s.status === 'PENDING' && canApproveSTO) {
                     actions += ` <button class="btn btn-success btn-sm" onclick="approveSTO(${s.id})">Duyệt</button>`;
@@ -1002,12 +1432,36 @@ async function renderSTOListHTML() {
                 </tr>`;
             }
         }
+
         html += `</tbody></table></div>`;
         return html;
     } catch (error) {
         showError('Lỗi tải STO: ' + error.message);
         return '<p style="color:red;">Lỗi tải dữ liệu</p>';
     }
+}
+
+function resetGRNFilters() {
+    grnState.filterText = '';
+    grnState.statusFilter = '';
+    grnState.projectFilter = '';
+    grnState.warehouseFilter = '';
+    grnState.sortBy = 'createdAt';
+    grnState.sortOrder = 'desc';
+    grnState.page = 1;
+    switchWarehouseTab('wh-grn');
+}
+
+function resetSTOFilters() {
+    stoState.filterText = '';
+    stoState.statusFilter = '';
+    stoState.projectFilter = '';
+    stoState.fromWarehouseFilter = '';
+    stoState.toWarehouseFilter = '';
+    stoState.sortBy = 'createdAt';
+    stoState.sortOrder = 'desc';
+    stoState.page = 1;
+    switchWarehouseTab('wh-sto');
 }
 
 function renderSTO() { switchWarehouseTab('wh-sto'); }
@@ -1664,12 +2118,28 @@ window.printSTO = function(id) {
     showInfo('Chức năng in STO đang được phát triển.');
 };
 
+function toggleWarehouseFilter() {
+    showAllWarehouses = !showAllWarehouses;
+    switchWarehouseTab('wh-list');
+}
+
+async function getProjectNameById(projectId) {
+    if (!projectId) return 'Không áp dụng';
+    try {
+        const projects = await api.getProjects();
+        const p = projects.find(pr => pr.id === projectId);
+        return p ? p.name : 'Không tìm thấy';
+    } catch {
+        return 'Không tìm thấy';
+    }
+}
+Object.defineProperty(window, 'currentWhTab', { get: () => currentWhTab });
+
 // ================================================================
 // EXPORT CÁC HÀM RA WINDOW
 // ================================================================
 window.renderWarehousePage = renderWarehousePage;
 window.renderWarehouseListHTML = renderWarehouseListHTML;
-Object.defineProperty(window, 'currentWhTab', { get: () => currentWhTab });
 window.viewWarehouseDetail = viewWarehouseDetail;
 window.renderGRN = renderGRN;
 window.viewGRN = viewGRN;
@@ -1707,5 +2177,11 @@ window.renderGRNProgress = renderGRNProgress;
 window.renderSTOProgress = renderSTOProgress;
 window.printGRN = printGRN;
 window.printSTO = printSTO;
+window.resetGRNFilters = resetGRNFilters;
+window.resetSTOFilters = resetSTOFilters;
+window.toggleWarehouseFilter = toggleWarehouseFilter;
+window.showAllWarehouses = showAllWarehouses;
+window.toggleWarehouseFilter = toggleWarehouseFilter;
+
 
 console.log('✅ Warehouse module updated with full permission checks.');

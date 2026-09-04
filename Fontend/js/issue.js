@@ -1,7 +1,24 @@
 // ================================================================
 // MATERIAL ISSUE - Cấp phát vật tư - ĐÃ TÍCH HỢP PHÂN QUYỀN
 // ================================================================
-let issuePageState = { page: 1, perPage: 10 };
+
+// ====== STATE ======
+const issueState = {
+    page: 1,
+    perPage: 10,
+    filterText: '',
+    statusFilter: '',
+    projectFilter: '',
+    warehouseFilter: '',
+    sortBy: 'createdAt',
+    sortOrder: 'desc'
+};
+
+// ====== DEBOUNCE FILTER ======
+const debouncedIssueFilter = debounce(() => {
+    issueState.page = 1;
+    renderIssues();
+}, 300);
 
 // ====== HÀM TẠO MÃ TỰ ĐỘNG ======
 function generateIssueCode() {
@@ -38,7 +55,6 @@ async function renderIssuePage() {
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     page.classList.add('active');
 
-    // Kiểm tra quyền xem
     if (!hasPermission('issue.view')) {
         document.getElementById('issue-container').innerHTML = `
             <div style="padding:20px; text-align:center; color:#e74c3c;">
@@ -52,6 +68,97 @@ async function renderIssuePage() {
     await renderIssues();
 }
 
+// ====== HÀM FILTER DỮ LIỆU ======
+function filterIssueData(issues, projects, warehouses) {
+    const { filterText, statusFilter, projectFilter, warehouseFilter } = issueState;
+    const keyword = filterText.toLowerCase().trim();
+
+    return issues.filter(issue => {
+        let matchKeyword = true;
+        if (keyword) {
+            const codeMatch = (issue.code || '').toLowerCase().includes(keyword);
+            const projectNameMatch = (issue.projectName || '').toLowerCase().includes(keyword);
+            const projectCodeMatch = (issue.projectCode || '').toLowerCase().includes(keyword);
+            const areaMatch = (issue.area || '').toLowerCase().includes(keyword);
+            const teamMatch = (issue.team || '').toLowerCase().includes(keyword);
+            const requesterMatch = (issue.requester || '').toLowerCase().includes(keyword);
+
+            let itemsMatch = false;
+            try {
+                if (issue.items) {
+                    const items = typeof issue.items === 'string' ? JSON.parse(issue.items) : issue.items;
+                    itemsMatch = items.some(item => {
+                        const itemName = item.displayName || getItemName(item.itemId) || '';
+                        const itemCode = getItemCode(item.itemId) || '';
+                        return itemName.toLowerCase().includes(keyword) ||
+                               itemCode.toLowerCase().includes(keyword);
+                    });
+                }
+            } catch (e) {}
+
+            matchKeyword = codeMatch || projectNameMatch || projectCodeMatch || 
+                           areaMatch || teamMatch || requesterMatch || itemsMatch;
+        }
+
+        const matchStatus = statusFilter ? issue.status === statusFilter : true;
+
+        let matchProject = true;
+        if (projectFilter) {
+            const selectedProject = projects.find(p => p.code === projectFilter || p.id === parseInt(projectFilter));
+            if (selectedProject) {
+                matchProject = issue.projectCode === selectedProject.code;
+            } else {
+                matchProject = false;
+            }
+        }
+
+        let matchWarehouse = true;
+        if (warehouseFilter) {
+            const selectedWarehouse = warehouses.find(w => w.id === parseInt(warehouseFilter) || w.code === warehouseFilter);
+            if (selectedWarehouse) {
+                matchWarehouse = issue.warehouseId === selectedWarehouse.id;
+            } else {
+                matchWarehouse = false;
+            }
+        }
+
+        return matchKeyword && matchStatus && matchProject && matchWarehouse;
+    });
+}
+
+// ====== HÀM SORT DỮ LIỆU ======
+function sortIssueData(data) {
+    const { sortBy, sortOrder } = issueState;
+    const order = sortOrder === 'asc' ? 1 : -1;
+
+    return [...data].sort((a, b) => {
+        let valA = a[sortBy] || '';
+        let valB = b[sortBy] || '';
+
+        if (sortBy === 'projectName') {
+            valA = a.projectName || a.projectCode || '';
+            valB = b.projectName || b.projectCode || '';
+        } else if (sortBy === 'createdAt') {
+            valA = new Date(a.createdAt || 0);
+            valB = new Date(b.createdAt || 0);
+        } else if (sortBy === 'date') {
+            valA = new Date(a.date || 0);
+            valB = new Date(b.date || 0);
+        } else if (sortBy === 'status') {
+            const statusOrder = { 'DRAFT': 0, 'PENDING': 1, 'APPROVED': 2, 'COMPLETED': 3, 'CONFIRMED': 4, 'REJECTED': 5 };
+            valA = statusOrder[a.status] || 0;
+            valB = statusOrder[b.status] || 0;
+        }
+
+        if (typeof valA === 'string') valA = valA.toLowerCase();
+        if (typeof valB === 'string') valB = valB.toLowerCase();
+
+        if (valA < valB) return -1 * order;
+        if (valA > valB) return 1 * order;
+        return 0;
+    });
+}
+
 // ====== RENDER DANH SÁCH ======
 async function renderIssues(page = null) {
     const container = document.getElementById('issue-container');
@@ -61,45 +168,63 @@ async function renderIssues(page = null) {
     }
 
     try {
-        const issues = await api.getIssues();
-        const filter = document.getElementById('issue-filter')?.value?.toLowerCase() || '';
-        const statusFilter = document.getElementById('issue-status-filter')?.value || '';
+        const [issues, projects, warehouses] = await Promise.all([
+            api.getIssues(),
+            api.getProjects(),
+            api.getWarehouses()
+        ]);
+        window._projectsCache = projects;
+        window._warehousesCache = warehouses;
+        saveData('projects', projects);
+        saveData('warehouses', warehouses);
 
-        const filtered = issues.filter(item => {
-            const matchCode = (item.code || '').toLowerCase().includes(filter);
-            const matchProject = (item.projectName || '').toLowerCase().includes(filter);
-            const matchStatus = statusFilter ? item.status === statusFilter : true;
-            return (matchCode || matchProject) && matchStatus;
-        });
+        if (page) issueState.page = page;
 
-        if (page) issuePageState.page = page;
+        let filtered = filterIssueData(issues, projects, warehouses);
+        filtered = sortIssueData(filtered);
+
         const perPage = getPageSize('issue');
-        issuePageState.perPage = perPage;
-        const paging = paginate(filtered, issuePageState.page, perPage);
+        issueState.perPage = perPage;
+        const paging = paginate(filtered, issueState.page, perPage);
 
-        // Kiểm tra quyền
         const canCreate = hasPermission('issue.create');
-
-        // Ẩn/hiện nút Tạo phiếu
         const btnCreate = document.getElementById('btn-create-issue');
         if (btnCreate) {
             btnCreate.style.display = canCreate ? 'inline-block' : 'none';
         }
 
-        // Tạo HTML (không có header)
         let html = `
             <div class="filter-bar">
-                <input type="text" id="issue-filter" placeholder="Tìm theo mã hoặc dự án..." style="flex:1;" />
-                <select id="issue-status-filter">
+                <input type="text" id="issue-filter" placeholder="Tìm theo mã, dự án, vật tư, khu vực..." style="flex:2;" value="${issueState.filterText}">
+                <select id="issue-status-filter" style="flex:1;">
                     <option value="">Tất cả</option>
-                    <option value="DRAFT">DRAFT</option>
-                    <option value="PENDING">PENDING</option>
-                    <option value="APPROVED">APPROVED</option>
-                    <option value="COMPLETED">COMPLETED</option>
-                    <option value="CONFIRMED">CONFIRMED</option>
-                    <option value="REJECTED">REJECTED</option>
+                    <option value="DRAFT" ${issueState.statusFilter === 'DRAFT' ? 'selected' : ''}>DRAFT</option>
+                    <option value="PENDING" ${issueState.statusFilter === 'PENDING' ? 'selected' : ''}>PENDING</option>
+                    <option value="APPROVED" ${issueState.statusFilter === 'APPROVED' ? 'selected' : ''}>APPROVED</option>
+                    <option value="COMPLETED" ${issueState.statusFilter === 'COMPLETED' ? 'selected' : ''}>COMPLETED</option>
+                    <option value="CONFIRMED" ${issueState.statusFilter === 'CONFIRMED' ? 'selected' : ''}>CONFIRMED</option>
+                    <option value="REJECTED" ${issueState.statusFilter === 'REJECTED' ? 'selected' : ''}>REJECTED</option>
                 </select>
-                <button class="btn btn-sm" onclick="renderIssues()"><i class="fas fa-search"></i></button>
+                <select id="issue-project-filter" style="flex:1;">
+                    <option value="">Tất cả dự án</option>
+                    ${projects.map(p => `<option value="${p.code}" ${issueState.projectFilter === p.code ? 'selected' : ''}>${p.code} - ${p.name}</option>`).join('')}
+                </select>
+                <select id="issue-warehouse-filter" style="flex:1;">
+                    <option value="">Tất cả kho</option>
+                    ${warehouses.map(w => `<option value="${w.id}" ${issueState.warehouseFilter == w.id ? 'selected' : ''}>${w.code} - ${w.name}</option>`).join('')}
+                </select>
+                <select id="issue-sort" style="flex:1;">
+                    <option value="createdAt_desc" ${issueState.sortBy === 'createdAt' && issueState.sortOrder === 'desc' ? 'selected' : ''}>Ngày tạo (mới nhất)</option>
+                    <option value="createdAt_asc" ${issueState.sortBy === 'createdAt' && issueState.sortOrder === 'asc' ? 'selected' : ''}>Ngày tạo (cũ nhất)</option>
+                    <option value="date_desc" ${issueState.sortBy === 'date' && issueState.sortOrder === 'desc' ? 'selected' : ''}>Ngày cấp (mới nhất)</option>
+                    <option value="date_asc" ${issueState.sortBy === 'date' && issueState.sortOrder === 'asc' ? 'selected' : ''}>Ngày cấp (cũ nhất)</option>
+                    <option value="code_asc" ${issueState.sortBy === 'code' && issueState.sortOrder === 'asc' ? 'selected' : ''}>Mã (A→Z)</option>
+                    <option value="code_desc" ${issueState.sortBy === 'code' && issueState.sortOrder === 'desc' ? 'selected' : ''}>Mã (Z→A)</option>
+                    <option value="projectName_asc" ${issueState.sortBy === 'projectName' && issueState.sortOrder === 'asc' ? 'selected' : ''}>Dự án (A→Z)</option>
+                    <option value="projectName_desc" ${issueState.sortBy === 'projectName' && issueState.sortOrder === 'desc' ? 'selected' : ''}>Dự án (Z→A)</option>
+                    <option value="status" ${issueState.sortBy === 'status' ? 'selected' : ''}>Trạng thái</option>
+                </select>
+                <button class="btn btn-sm" onclick="resetIssueFilters()"><i class="fas fa-undo"></i> Reset</button>
             </div>
             <div class="table-responsive">
                 <table>
@@ -141,31 +266,75 @@ async function renderIssues(page = null) {
             </tr>`;
         }
 
-                html += `
-                    </tbody>
-                </table>
-            </div>
-        `;
+        html += `</tbody></table></div>`;
         html += buildPaginationHTML(paging, 'renderIssues', 'issue');
-
         container.innerHTML = html;
 
-        // Gắn sự kiện cho filter
+        // Gắn sự kiện
         const filterInput = document.getElementById('issue-filter');
         const statusSelect = document.getElementById('issue-status-filter');
+        const projectSelect = document.getElementById('issue-project-filter');
+        const warehouseSelect = document.getElementById('issue-warehouse-filter');
+        const sortSelect = document.getElementById('issue-sort');
+
         if (filterInput) {
-            filterInput.removeEventListener('input', renderIssues);
-            filterInput.addEventListener('input', () => { issuePageState.page = 1; renderIssues(); });
+            filterInput.removeEventListener('input', debouncedIssueFilter);
+            filterInput.addEventListener('input', function(e) {
+                issueState.filterText = this.value;
+                debouncedIssueFilter();
+            });
         }
+
         if (statusSelect) {
-            statusSelect.removeEventListener('change', renderIssues);
-            statusSelect.addEventListener('change', () => { issuePageState.page = 1; renderIssues(); });
+            statusSelect.removeEventListener('change', debouncedIssueFilter);
+            statusSelect.addEventListener('change', function(e) {
+                issueState.statusFilter = this.value;
+                debouncedIssueFilter();
+            });
+        }
+
+        if (projectSelect) {
+            projectSelect.removeEventListener('change', debouncedIssueFilter);
+            projectSelect.addEventListener('change', function(e) {
+                issueState.projectFilter = this.value;
+                debouncedIssueFilter();
+            });
+        }
+
+        if (warehouseSelect) {
+            warehouseSelect.removeEventListener('change', debouncedIssueFilter);
+            warehouseSelect.addEventListener('change', function(e) {
+                issueState.warehouseFilter = this.value;
+                debouncedIssueFilter();
+            });
+        }
+
+        if (sortSelect) {
+            sortSelect.removeEventListener('change', debouncedIssueFilter);
+            sortSelect.addEventListener('change', function(e) {
+                const [sortBy, sortOrder] = this.value.split('_');
+                issueState.sortBy = sortBy;
+                issueState.sortOrder = sortOrder || 'desc';
+                debouncedIssueFilter();
+            });
         }
 
     } catch (error) {
         showError('Không thể tải danh sách cấp phát: ' + error.message);
         console.error('renderIssues error:', error);
     }
+}
+
+// ====== RESET FILTER ======
+function resetIssueFilters() {
+    issueState.filterText = '';
+    issueState.statusFilter = '';
+    issueState.projectFilter = '';
+    issueState.warehouseFilter = '';
+    issueState.sortBy = 'createdAt';
+    issueState.sortOrder = 'desc';
+    issueState.page = 1;
+    renderIssues();
 }
 
 // ====== HÀM LẤY ACTION ======
@@ -189,7 +358,6 @@ function getIssueActions(item) {
         actions += ` <button class="btn btn-danger btn-sm" onclick="deleteIssue(${item.id})"><i class="fas fa-trash"></i></button>`;
     }
 
-    // ✅ SỬA: Gửi duyệt → Xác nhận
     const canSubmit = hasPermission('issue.submit') && 
                      item.status === 'DRAFT' && 
                      (user?.role === 'ADMIN' || user?.id === item.createdBy);
@@ -216,10 +384,17 @@ function getIssueActions(item) {
     return actions || '-';
 }
 
+// ====== CÁC HÀM GIỮ NGUYÊN (CRUD, Modal, Xử lý) ======
+// [Tất cả các hàm sau đây được giữ nguyên từ file cũ]
+// showCreateIssueModal, buildIssueItemRows, addIssueItemRow, removeIssueItemRow,
+// collectIssueItemsFromForm, saveIssue, viewIssue, editIssue, updateIssue,
+// submitIssue, approveIssue, rejectIssue, getAvailableWarehousesForIssue,
+// showCompleteIssueModal, completeIssueWithWarehouse, completeIssue, confirmIssue,
+// deleteIssue, renderIssueProgress, exportIssues, printIssue
+
 // ====== TẠO PHIẾU (MODAL) ======
 function showCreateIssueModal() {
     Promise.all([api.getProjects(), api.getItems()]).then(([projects, items]) => {
-        // Cache items cho dropdown
         window._itemsCache = items;
 
         const projectOpts = projects.map(p => `<option value="${p.code}">${p.code} - ${p.name}</option>`).join('');
@@ -396,7 +571,7 @@ async function viewIssue(id) {
         const itemsHtml = items.map(it => `
             <tr>
                 <td>${getItemCode(it.itemId)}</td>
-                <td>${getItemName(it.itemId)}</td>
+                <td>${it.displayName || getItemName(it.itemId)}</td>
                 <td>${getItemUnit(it.itemId)}</td>
                 <td>${it.requestedQty}</td>
                 <td>${it.actualQty !== undefined ? it.actualQty : it.requestedQty}</td>
@@ -404,7 +579,6 @@ async function viewIssue(id) {
             </tr>
         `).join('');
 
-        // Lấy workflow steps từ workflowId của Issue
         let stepsConfig = [
             { id: 1, label: 'Tạo phiếu' },
             { id: 2, label: 'Duyệt' },
@@ -850,7 +1024,6 @@ function renderIssueProgress(status) {
 
 // ====== EXPORT EXCEL ======
 function exportIssues() {
-    // Sử dụng API để lấy dữ liệu
     api.getIssues().then(issues => {
         if (!issues || !issues.length) {
             showWarning('Không có dữ liệu để xuất!');
@@ -894,5 +1067,6 @@ window.deleteIssue = deleteIssue;
 window.showCompleteIssueModal = showCompleteIssueModal;
 window.completeIssueWithWarehouse = completeIssueWithWarehouse;
 window.printIssue = printIssue;
+window.resetIssueFilters = resetIssueFilters;
 
-console.log('✅ Issue module updated with full permission checks.');
+console.log('✅ Issue module updated with full permission checks, filter/sort, and debounce.');

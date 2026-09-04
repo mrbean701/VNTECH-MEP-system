@@ -1,14 +1,24 @@
 // ================================================================
-// PR (Purchase Request) - SỬ DỤNG API - ĐÃ TÍCH HỢP PHÂN QUYỀN
+// PR (Purchase Request) - SỬ DỤNG API - HỖ TRỢ WORKFLOW ĐỘNG
 // ================================================================
-let prPageState = { page: 1, perPage: 10 };
 
-// ================================================================
-// BIẾN TOÀN CỤC CHO ITEM SELECTOR
-// ================================================================
-let _prSelectedItems = [];
-let _prMode = 'create'; // 'create' hoặc 'edit'
-let _prEditId = null;
+// ====== STATE ======
+const prState = {
+    page: 1,
+    perPage: 10,
+    filterText: '',
+    statusFilter: '',
+    projectFilter: '',
+    vendorFilter: '',
+    sortBy: 'createdAt',
+    sortOrder: 'desc'
+};
+
+// ====== DEBOUNCE FILTER ======
+const debouncedPRFilter = debounce(() => {
+    prState.page = 1;
+    renderPR();
+}, 300);
 
 // ====== HÀM LẤY ACTION ======
 function getPRActions(pr) {
@@ -33,7 +43,6 @@ function getPRActions(pr) {
         actions += ` <button class="btn btn-danger btn-sm" onclick="deletePR(${pr.id})"><i class="fas fa-trash"></i></button>`;
     }
 
-    // ✅ SỬA: Gửi duyệt → Xác nhận
     const canSubmit = hasPermission('pr.submit') && 
                      pr.status === 'DRAFT' && 
                      (user?.role === 'ADMIN' || user?.id === pr.createdBy);
@@ -57,25 +66,117 @@ function getPRActions(pr) {
     return actions || '-';
 }
 
+// ====== HÀM FILTER DỮ LIỆU ======
+function filterPRData(prs, projects, vendors) {
+    const { filterText, statusFilter, projectFilter, vendorFilter } = prState;
+    const keyword = filterText.toLowerCase().trim();
+
+    return prs.filter(pr => {
+        let matchKeyword = true;
+        if (keyword) {
+            const codeMatch = (pr.code || '').toLowerCase().includes(keyword);
+            const projectNameMatch = (pr.projectName || '').toLowerCase().includes(keyword);
+            const projectCodeMatch = (pr.projectCode || '').toLowerCase().includes(keyword);
+            const vendorNameMatch = (pr.vendorName || '').toLowerCase().includes(keyword);
+            const vendorCodeMatch = (pr.vendorCode || '').toLowerCase().includes(keyword);
+
+            let itemsMatch = false;
+            try {
+                if (pr.items) {
+                    const items = typeof pr.items === 'string' ? JSON.parse(pr.items) : pr.items;
+                    itemsMatch = items.some(item => {
+                        const itemName = item.displayName || getItemName(item.itemId) || '';
+                        const itemCode = getItemCode(item.itemId) || '';
+                        return itemName.toLowerCase().includes(keyword) ||
+                               itemCode.toLowerCase().includes(keyword);
+                    });
+                }
+            } catch (e) {}
+
+            matchKeyword = codeMatch || projectNameMatch || projectCodeMatch || 
+                           vendorNameMatch || vendorCodeMatch || itemsMatch;
+        }
+
+        const matchStatus = statusFilter ? pr.status === statusFilter : true;
+
+        let matchProject = true;
+        if (projectFilter) {
+            const selectedProject = projects.find(p => p.code === projectFilter || p.id === parseInt(projectFilter));
+            if (selectedProject) {
+                matchProject = pr.projectCode === selectedProject.code;
+            } else {
+                matchProject = false;
+            }
+        }
+
+        let matchVendor = true;
+        if (vendorFilter) {
+            const selectedVendor = vendors.find(v => v.code === vendorFilter || v.id === parseInt(vendorFilter));
+            if (selectedVendor) {
+                matchVendor = pr.vendorCode === selectedVendor.code;
+            } else {
+                matchVendor = false;
+            }
+        }
+
+        return matchKeyword && matchStatus && matchProject && matchVendor;
+    });
+}
+
+// ====== HÀM SORT DỮ LIỆU ======
+function sortPRData(data) {
+    const { sortBy, sortOrder } = prState;
+    const order = sortOrder === 'asc' ? 1 : -1;
+
+    return [...data].sort((a, b) => {
+        let valA = a[sortBy] || '';
+        let valB = b[sortBy] || '';
+
+        if (sortBy === 'projectName') {
+            valA = a.projectName || a.projectCode || '';
+            valB = b.projectName || b.projectCode || '';
+        } else if (sortBy === 'vendorName') {
+            valA = a.vendorName || a.vendorCode || '';
+            valB = b.vendorName || b.vendorCode || '';
+        } else if (sortBy === 'createdAt') {
+            valA = new Date(a.createdAt || 0);
+            valB = new Date(b.createdAt || 0);
+        } else if (sortBy === 'status') {
+            const statusOrder = { 'DRAFT': 0, 'PENDING': 1, 'PENDING_PLANNING': 2, 'PLANNING_APPROVED': 3, 'PENDING_PROJECT': 4, 'PROJECT_APPROVED': 5, 'PENDING_CEO': 6, 'APPROVED': 7, 'REJECTED': 8 };
+            valA = statusOrder[a.status] || 0;
+            valB = statusOrder[b.status] || 0;
+        }
+
+        if (typeof valA === 'string') valA = valA.toLowerCase();
+        if (typeof valB === 'string') valB = valB.toLowerCase();
+
+        if (valA < valB) return -1 * order;
+        if (valA > valB) return 1 * order;
+        return 0;
+    });
+}
 
 // ====== RENDER DANH SÁCH PR ======
 async function renderPR(page = null) {
     try {
-        const prs = await api.getPRs();
-        const filter = document.getElementById('pr-filter')?.value?.toLowerCase() || '';
-        const statusFilter = document.getElementById('pr-status-filter')?.value || '';
+        const [prs, projects, vendors] = await Promise.all([
+            api.getPRs(),
+            api.getProjects(),
+            api.getVendors()
+        ]);
+        window._projectsCache = projects;
+        window._vendorsCache = vendors;
+        saveData('projects', projects);
+        saveData('vendors', vendors);
 
-        const filtered = prs.filter(p => {
-            const matchCode = (p.code || '').toLowerCase().includes(filter);
-            const matchProject = (p.projectName || p.projectCode || '').toLowerCase().includes(filter);
-            const matchStatus = statusFilter ? p.status === statusFilter : true;
-            return (matchCode || matchProject) && matchStatus;
-        });
+        if (page) prState.page = page;
 
-        if (page) prPageState.page = page;
+        let filtered = filterPRData(prs, projects, vendors);
+        filtered = sortPRData(filtered);
+
         const perPage = getPageSize('pr');
-        prPageState.perPage = perPage;
-        const paging = paginate(filtered, prPageState.page, perPage);
+        prState.perPage = perPage;
+        const paging = paginate(filtered, prState.page, perPage);
 
         const canCreate = hasPermission('pr.create');
         const btnCreate = document.getElementById('btn-create-pr');
@@ -85,20 +186,39 @@ async function renderPR(page = null) {
 
         let html = `
             <div class="filter-bar">
-                <input type="text" id="pr-filter" placeholder="Tìm theo mã hoặc dự án..." style="flex:1;" />
-                <select id="pr-status-filter">
-                    <option value="">Tất cả</option>
-                    <option value="DRAFT">DRAFT</option>
-                    <option value="PENDING">PENDING</option>
-                    <option value="PENDING_PLANNING">PENDING_PLANNING</option>
-                    <option value="PENDING_PROJECT">PENDING_PROJECT</option>
-                    <option value="PENDING_CEO">PENDING_CEO</option>
-                    <option value="PLANNING_APPROVED">PLANNING_APPROVED</option>
-                    <option value="PROJECT_APPROVED">PROJECT_APPROVED</option>
-                    <option value="APPROVED">APPROVED</option>
-                    <option value="REJECTED">REJECTED</option>
+                <input type="text" id="pr-filter" placeholder="Tìm theo mã, dự án, NCC, vật tư..." style="flex:2;" value="${prState.filterText}">
+                <select id="pr-status-filter" style="flex:1;">
+                    <option value="">Tất cả trạng thái</option>
+                    <option value="DRAFT" ${prState.statusFilter === 'DRAFT' ? 'selected' : ''}>DRAFT</option>
+                    <option value="PENDING" ${prState.statusFilter === 'PENDING' ? 'selected' : ''}>PENDING</option>
+                    <option value="PENDING_PLANNING" ${prState.statusFilter === 'PENDING_PLANNING' ? 'selected' : ''}>PENDING_PLANNING</option>
+                    <option value="PLANNING_APPROVED" ${prState.statusFilter === 'PLANNING_APPROVED' ? 'selected' : ''}>PLANNING_APPROVED</option>
+                    <option value="PENDING_PROJECT" ${prState.statusFilter === 'PENDING_PROJECT' ? 'selected' : ''}>PENDING_PROJECT</option>
+                    <option value="PROJECT_APPROVED" ${prState.statusFilter === 'PROJECT_APPROVED' ? 'selected' : ''}>PROJECT_APPROVED</option>
+                    <option value="PENDING_CEO" ${prState.statusFilter === 'PENDING_CEO' ? 'selected' : ''}>PENDING_CEO</option>
+                    <option value="APPROVED" ${prState.statusFilter === 'APPROVED' ? 'selected' : ''}>APPROVED</option>
+                    <option value="REJECTED" ${prState.statusFilter === 'REJECTED' ? 'selected' : ''}>REJECTED</option>
                 </select>
-                <button class="btn btn-sm" onclick="renderPR()"><i class="fas fa-search"></i></button>
+                <select id="pr-project-filter" style="flex:1;">
+                    <option value="">Tất cả dự án</option>
+                    ${projects.map(p => `<option value="${p.code}" ${prState.projectFilter === p.code ? 'selected' : ''}>${p.code} - ${p.name}</option>`).join('')}
+                </select>
+                <select id="pr-vendor-filter" style="flex:1;">
+                    <option value="">Tất cả NCC</option>
+                    ${vendors.map(v => `<option value="${v.code}" ${prState.vendorFilter === v.code ? 'selected' : ''}>${v.code} - ${v.name}</option>`).join('')}
+                </select>
+                <select id="pr-sort" style="flex:1;">
+                    <option value="createdAt_desc" ${prState.sortBy === 'createdAt' && prState.sortOrder === 'desc' ? 'selected' : ''}>Ngày tạo (mới nhất)</option>
+                    <option value="createdAt_asc" ${prState.sortBy === 'createdAt' && prState.sortOrder === 'asc' ? 'selected' : ''}>Ngày tạo (cũ nhất)</option>
+                    <option value="code_asc" ${prState.sortBy === 'code' && prState.sortOrder === 'asc' ? 'selected' : ''}>Mã (A→Z)</option>
+                    <option value="code_desc" ${prState.sortBy === 'code' && prState.sortOrder === 'desc' ? 'selected' : ''}>Mã (Z→A)</option>
+                    <option value="projectName_asc" ${prState.sortBy === 'projectName' && prState.sortOrder === 'asc' ? 'selected' : ''}>Dự án (A→Z)</option>
+                    <option value="projectName_desc" ${prState.sortBy === 'projectName' && prState.sortOrder === 'desc' ? 'selected' : ''}>Dự án (Z→A)</option>
+                    <option value="vendorName_asc" ${prState.sortBy === 'vendorName' && prState.sortOrder === 'asc' ? 'selected' : ''}>NCC (A→Z)</option>
+                    <option value="vendorName_desc" ${prState.sortBy === 'vendorName' && prState.sortOrder === 'desc' ? 'selected' : ''}>NCC (Z→A)</option>
+                    <option value="status" ${prState.sortBy === 'status' ? 'selected' : ''}>Trạng thái</option>
+                </select>
+                <button class="btn btn-sm" onclick="resetPRFilters()"><i class="fas fa-undo"></i> Reset</button>
             </div>
             <div class="table-responsive">
                 <table>
@@ -124,7 +244,10 @@ async function renderPR(page = null) {
             try {
                 if (p.items) {
                     const items = typeof p.items === 'string' ? JSON.parse(p.items) : p.items;
-                    itemsStr = items.map(it => `${getItemCode(it.itemId)} (${it.quantity})`).join(', ');
+                    itemsStr = items.map(it => {
+                        const name = it.displayName || getItemName(it.itemId) || 'N/A';
+                        return `${name} (${it.quantity})`;
+                    }).join(', ');
                 }
             } catch (e) { itemsStr = 'Lỗi parse'; }
 
@@ -134,11 +257,12 @@ async function renderPR(page = null) {
             const projectLink = projectId ?
                 `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="viewProject(${projectId})">${p.projectName || p.projectCode || '--'}</span>` :
                 (p.projectName || p.projectCode || '--');
+            const vendorName = p.vendorName || p.vendorCode || '--';
 
             html += `<tr>
                 <td style="cursor:pointer; color:#1a3c6e; font-weight:500;" onclick="viewPR(${p.id})">${p.code || '--'}</td>
                 <td>${projectLink}</td>
-                <td>${p.vendorName || p.vendorCode || '--'}</td>
+                <td>${vendorName}</td>
                 <td>${itemsStr}</td>
                 <td>${statusBadge}</td>
                 <td>${actions}</td>
@@ -149,19 +273,53 @@ async function renderPR(page = null) {
         html += buildPaginationHTML(paging, 'renderPR', 'pr');
         document.getElementById('pr-container').innerHTML = html;
 
+        // Gắn sự kiện
         const filterInput = document.getElementById('pr-filter');
         const statusSelect = document.getElementById('pr-status-filter');
-        if (filterInput) {
-            filterInput.removeEventListener('input', renderPR);
-const debouncedPRFilter = debounce(() => {
-    prPageState.page = 1;
-    renderPR();
-}, 300);
+        const projectSelect = document.getElementById('pr-project-filter');
+        const vendorSelect = document.getElementById('pr-vendor-filter');
+        const sortSelect = document.getElementById('pr-sort');
 
-filterInput?.addEventListener('input', debouncedPRFilter);        }
+        if (filterInput) {
+            filterInput.removeEventListener('input', debouncedPRFilter);
+            filterInput.addEventListener('input', function(e) {
+                prState.filterText = this.value;
+                debouncedPRFilter();
+            });
+        }
+
         if (statusSelect) {
-            statusSelect.removeEventListener('change', renderPR);
-            statusSelect.addEventListener('change', () => { prPageState.page = 1; renderPR(); });
+            statusSelect.removeEventListener('change', debouncedPRFilter);
+            statusSelect.addEventListener('change', function(e) {
+                prState.statusFilter = this.value;
+                debouncedPRFilter();
+            });
+        }
+
+        if (projectSelect) {
+            projectSelect.removeEventListener('change', debouncedPRFilter);
+            projectSelect.addEventListener('change', function(e) {
+                prState.projectFilter = this.value;
+                debouncedPRFilter();
+            });
+        }
+
+        if (vendorSelect) {
+            vendorSelect.removeEventListener('change', debouncedPRFilter);
+            vendorSelect.addEventListener('change', function(e) {
+                prState.vendorFilter = this.value;
+                debouncedPRFilter();
+            });
+        }
+
+        if (sortSelect) {
+            sortSelect.removeEventListener('change', debouncedPRFilter);
+            sortSelect.addEventListener('change', function(e) {
+                const [sortBy, sortOrder] = this.value.split('_');
+                prState.sortBy = sortBy;
+                prState.sortOrder = sortOrder || 'desc';
+                debouncedPRFilter();
+            });
         }
 
     } catch (error) {
@@ -170,85 +328,35 @@ filterInput?.addEventListener('input', debouncedPRFilter);        }
     }
 }
 
-// ====== CÁC HÀM KHÁC (giữ nguyên) ======
-// ... (viewPR, editPR, updatePR, submitPR, approvePR, rejectPR, deletePR, createPOFromPR, printPR, ...)
-
-// ====== TẠO PR MỚI ======
-// ====== TẠO PR MỚI (MODAL) ======
-async function showCreatePRModal(mr = null) {
-    try {
-        const projects = await api.getProjects();
-        const projectOpts = projects.map(p => 
-            `<option value="${p.code}" ${mr && p.code === mr.projectCode ? 'selected' : ''}>${p.code} - ${p.name}</option>`
-        ).join('');
-        const vendors = await api.getVendors();
-        const vendorOpts = vendors.map(v => 
-            `<option value="${v.code}" ${mr && v.code === mr.vendorCode ? 'selected' : ''}>${v.code} - ${v.name}</option>`
-        ).join('');
-
-        // Khởi tạo selected items từ MR nếu có
-        let initialItems = [];
-        if (mr && mr.items) {
-            try {
-                const items = typeof mr.items === 'string' ? JSON.parse(mr.items) : mr.items;
-                initialItems = items.map(it => ({
-                    itemId: it.itemId,
-                    quantity: it.quantity || 1,
-                    itemName: getItemName(it.itemId),
-                    itemCode: getItemCode(it.itemId),
-                    unit: getItemUnit(it.itemId)
-                }));
-            } catch (e) {}
-        }
-        _prSelectedItems = initialItems;
-        _prMode = 'create';
-        _prEditId = null;
-
-        showModal('Tạo Purchase Request (PR)', `
-            <div class="form-group"><label>Dự án</label>
-                <select id="f-pr-project">${projectOpts}</select>
-            </div>
-            <div class="form-group"><label>Nhà cung cấp</label>
-                <select id="f-pr-vendor"><option value="">-- Chọn --</option>${vendorOpts}</select>
-            </div>
-            <div class="form-group">
-                <label>Danh sách vật tư</label>
-                <button type="button" class="btn btn-sm btn-info" onclick="openItemSelectorForPR()">
-                    <i class="fas fa-plus"></i> Chọn vật tư
-                </button>
-                <div id="pr-selected-items-container" style="margin-top:8px; max-height:200px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:6px; padding:8px;">
-                    ${_renderPRSelectedItemsHTML()}
-                </div>
-            </div>
-            <div class="form-group"><label>Ghi chú</label><textarea id="f-pr-note" rows="2">${mr ? mr.note || '' : ''}</textarea></div>
-            <div class="modal-actions">
-                <button class="btn" onclick="savePRManual()">Lưu</button>
-                <button class="btn btn-danger" onclick="closeModal()">Hủy</button>
-            </div>
-        `);
-
-        // Gắn sự kiện cho input số lượng (nếu có)
-        setTimeout(() => {
-            _attachPRQuantityEvents();
-        }, 100);
-    } catch (error) {
-        showError('Lỗi tải dữ liệu: ' + error.message);
-    }
+// ====== RESET FILTER ======
+function resetPRFilters() {
+    prState.filterText = '';
+    prState.statusFilter = '';
+    prState.projectFilter = '';
+    prState.vendorFilter = '';
+    prState.sortBy = 'createdAt';
+    prState.sortOrder = 'desc';
+    prState.page = 1;
+    renderPR();
 }
+
+// ====== BIẾN TOÀN CỤC CHO ITEM SELECTOR ======
+let _prSelectedItems = [];
+let _prMode = 'create';
+let _prEditId = null;
 
 // ====== CALLBACK TỪ MODAL CHỌN VẬT TƯ ======
 function prItemSelectorCallback(selectedItems) {
     _prSelectedItems = selectedItems.map(item => ({
         itemId: item.itemId,
         quantity: item.quantity || 1,
-        itemName: item.itemName || getItemName(item.itemId),
+        itemName: item.displayName || item.itemName || getItemName(item.itemId),
         itemCode: item.itemCode || getItemCode(item.itemId),
         unit: item.unit || getItemUnit(item.itemId)
     }));
     renderPRSelectedItems();
 }
 
-// ====== RENDER DANH SÁCH VẬT TƯ ĐÃ CHỌN ======
 function renderPRSelectedItems() {
     const container = document.getElementById('pr-selected-items-container');
     if (!container) return;
@@ -291,7 +399,6 @@ function _onPRQtyChange(e) {
     }
 }
 
-// ====== XÓA MỘT VẬT TƯ ======
 function removePRItem(index) {
     if (_prSelectedItems && _prSelectedItems.length > index) {
         _prSelectedItems.splice(index, 1);
@@ -299,10 +406,69 @@ function removePRItem(index) {
     }
 }
 
-// ====== MỞ MODAL CHỌN VẬT TƯ CHO PR ======
 function openItemSelectorForPR() {
     const selected = _prSelectedItems || [];
     openItemSelectorHelper(selected, prItemSelectorCallback, 'pr');
+}
+
+// ====== TẠO PR MỚI ======
+async function showCreatePRModal(mr = null) {
+    try {
+        const projects = await api.getProjects();
+        const projectOpts = projects.map(p => 
+            `<option value="${p.code}" ${mr && p.code === mr.projectCode ? 'selected' : ''}>${p.code} - ${p.name}</option>`
+        ).join('');
+        const vendors = await api.getVendors();
+        const vendorOpts = vendors.map(v => 
+            `<option value="${v.code}" ${mr && v.code === mr.vendorCode ? 'selected' : ''}>${v.code} - ${v.name}</option>`
+        ).join('');
+
+        let initialItems = [];
+        if (mr && mr.items) {
+            try {
+                const items = typeof mr.items === 'string' ? JSON.parse(mr.items) : mr.items;
+                initialItems = items.map(it => ({
+                    itemId: it.itemId,
+                    quantity: it.quantity || 1,
+                    itemName: it.displayName || getItemName(it.itemId),
+                    itemCode: getItemCode(it.itemId),
+                    unit: getItemUnit(it.itemId)
+                }));
+            } catch (e) {}
+        }
+        _prSelectedItems = initialItems;
+        _prMode = 'create';
+        _prEditId = null;
+
+        showModal('Tạo Purchase Request (PR)', `
+            <div class="form-group"><label>Dự án</label>
+                <select id="f-pr-project">${projectOpts}</select>
+            </div>
+            <div class="form-group"><label>Nhà cung cấp</label>
+                <select id="f-pr-vendor"><option value="">-- Chọn --</option>${vendorOpts}</select>
+            </div>
+            <div class="form-group">
+                <label>Danh sách vật tư</label>
+                <button type="button" class="btn btn-sm btn-info" onclick="openItemSelectorForPR()">
+                    <i class="fas fa-plus"></i> Chọn vật tư
+                </button>
+                <div id="pr-selected-items-container" style="margin-top:8px; max-height:200px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:6px; padding:8px;">
+                    ${_renderPRSelectedItemsHTML()}
+                </div>
+            </div>
+            <div class="form-group"><label>Ghi chú</label><textarea id="f-pr-note" rows="2">${mr ? mr.note || '' : ''}</textarea></div>
+            <div class="modal-actions">
+                <button class="btn" onclick="savePRManual()">Lưu</button>
+                <button class="btn btn-danger" onclick="closeModal()">Hủy</button>
+            </div>
+        `);
+
+        setTimeout(() => {
+            _attachPRQuantityEvents();
+        }, 100);
+    } catch (error) {
+        showError('Lỗi tải dữ liệu: ' + error.message);
+    }
 }
 
 // ====== LƯU PR ======
@@ -315,7 +481,12 @@ async function savePRManual() {
     const projectCode = document.getElementById('f-pr-project').value;
     const vendorCode = document.getElementById('f-pr-vendor').value;
     const note = document.getElementById('f-pr-note').value.trim();
-    const items = _prSelectedItems || [];
+
+    const items = _prSelectedItems.map(item => ({
+        itemId: item.itemId,
+        quantity: item.quantity,
+        displayName: item.itemName
+    }));
 
     if (!projectCode || !vendorCode || items.length === 0) {
         showError('Vui lòng chọn dự án, nhà cung cấp và ít nhất một vật tư');
@@ -333,7 +504,7 @@ async function savePRManual() {
             projectName: proj ? proj.name : '',
             vendorCode,
             vendorName: vendor ? vendor.name : '',
-            items: JSON.stringify(items.map(it => ({ itemId: it.itemId, quantity: it.quantity }))),
+            items: JSON.stringify(items),
             note
         };
 
@@ -365,9 +536,15 @@ async function viewPR(id) {
             }
         } catch (e) { items = []; }
 
-        const itemsHtml = buildItemsTable(items);
-        
-        // Lấy workflow steps từ workflowId của PR
+        const itemsHtml = items.map(it => `
+            <tr>
+                <td>${getItemCode(it.itemId)}</td>
+                <td>${it.displayName || getItemName(it.itemId)}</td>
+                <td>${getItemUnit(it.itemId)}</td>
+                <td>${it.quantity}</td>
+            </tr>
+        `).join('');
+
         let stepsConfig = [
             { id: 1, label: 'Phòng Kế hoạch' },
             { id: 2, label: 'Phòng Dự án' },
@@ -385,26 +562,7 @@ async function viewPR(id) {
                 }
             } catch (e) {
                 console.warn('Không lấy được workflow steps:', e);
-                try {
-                    const workflowSteps = await api.getStepsWithStatus('pr');
-                    if (workflowSteps && workflowSteps.length > 0) {
-                        stepsConfig = workflowSteps.map(s => ({
-                            id: s.step,
-                            label: s.label || `Bước ${s.step}`
-                        }));
-                    }
-                } catch (e2) {}
             }
-        } else {
-            try {
-                const workflowSteps = await api.getStepsWithStatus('pr');
-                if (workflowSteps && workflowSteps.length > 0) {
-                    stepsConfig = workflowSteps.map(s => ({
-                        id: s.step,
-                        label: s.label || `Bước ${s.step}`
-                    }));
-                }
-            } catch (e) {}
         }
 
         const approvalHtml = renderApprovalProgress(pr.status, pr.approvalStep || 1, stepsConfig);
@@ -413,6 +571,15 @@ async function viewPR(id) {
             `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="closeModal(); viewProject(${projectId});">${pr.projectName || pr.projectCode || '--'}</span>` :
             (pr.projectName || pr.projectCode || '--');
         const totalAmount = items.reduce((sum, it) => sum + ((it.price || 0) * (it.quantity || 0)), 0);
+
+        const itemsTable = `
+            <div class="table-responsive">
+                <table>
+                    <thead><tr><th>Mã</th><th>Tên</th><th>ĐVT</th><th>Số lượng</th></tr></thead>
+                    <tbody>${itemsHtml}</tbody>
+                </table>
+            </div>
+        `;
 
         showModal('Chi tiết PR', `
             <div class="detail-grid">
@@ -424,7 +591,7 @@ async function viewPR(id) {
                 <div><span class="label">Trạng thái:</span> <span class="value">${getStatusBadge(pr.status)}</span></div>
                 ${totalAmount > 0 ? `<div><span class="label">Tổng tiền:</span> <span class="value">${totalAmount.toLocaleString()} VND</span></div>` : ''}
                 <div style="grid-column:1/-1;"><span class="label">Tiến độ duyệt:</span><br>${approvalHtml}</div>
-                <div style="grid-column:1/-1;"><span class="label">Danh sách vật tư:</span><br>${itemsHtml}</div>
+                <div style="grid-column:1/-1;"><span class="label">Danh sách vật tư:</span><br>${itemsTable}</div>
                 <div style="grid-column:1/-1;"><span class="label">Ghi chú:</span> <span class="value">${pr.note || ''}</span></div>
             </div>
             <div class="modal-actions">
@@ -456,24 +623,6 @@ async function editPR(id) {
             return;
         }
 
-        // Khởi tạo selected items từ dữ liệu cũ
-        let initialItems = [];
-        try {
-            if (pr.items) {
-                const items = typeof pr.items === 'string' ? JSON.parse(pr.items) : pr.items;
-                initialItems = items.map(it => ({
-                    itemId: it.itemId,
-                    quantity: it.quantity || 1,
-                    itemName: getItemName(it.itemId),
-                    itemCode: getItemCode(it.itemId),
-                    unit: getItemUnit(it.itemId)
-                }));
-            }
-        } catch (e) {}
-        _prSelectedItems = initialItems;
-        _prMode = 'edit';
-        _prEditId = id;
-
         const projects = await api.getProjects();
         const projectOpts = projects.map(p =>
             `<option value="${p.code}" ${p.code === pr.projectCode ? 'selected' : ''}>${p.code} - ${p.name}</option>`
@@ -482,6 +631,23 @@ async function editPR(id) {
         const vendorOpts = vendors.map(v =>
             `<option value="${v.code}" ${v.code === pr.vendorCode ? 'selected' : ''}>${v.code} - ${v.name}</option>`
         ).join('');
+
+        let itemsData = [];
+        try {
+            if (pr.items) {
+                const items = typeof pr.items === 'string' ? JSON.parse(pr.items) : pr.items;
+                itemsData = items.map(it => ({
+                    itemId: it.itemId,
+                    quantity: it.quantity || 1,
+                    itemName: it.displayName || getItemName(it.itemId),
+                    itemCode: getItemCode(it.itemId),
+                    unit: getItemUnit(it.itemId)
+                }));
+            }
+        } catch (e) {}
+        _prSelectedItems = itemsData;
+        _prMode = 'edit';
+        _prEditId = id;
 
         showModal('Sửa Purchase Request', `
             <div class="form-group"><label>Dự án</label>
@@ -519,7 +685,12 @@ async function updatePR(id) {
     const projectCode = document.getElementById('f-pr-project').value;
     const vendorCode = document.getElementById('f-pr-vendor').value;
     const note = document.getElementById('f-pr-note').value.trim();
-    const items = _prSelectedItems || [];
+
+    const items = _prSelectedItems.map(item => ({
+        itemId: item.itemId,
+        quantity: item.quantity,
+        displayName: item.itemName
+    }));
 
     if (!projectCode || !vendorCode || items.length === 0) {
         showError('Vui lòng chọn dự án, NCC và ít nhất một vật tư');
@@ -537,7 +708,7 @@ async function updatePR(id) {
             projectName: proj ? proj.name : '',
             vendorCode,
             vendorName: vendor ? vendor.name : '',
-            items: JSON.stringify(items.map(it => ({ itemId: it.itemId, quantity: it.quantity }))),
+            items: JSON.stringify(items),
             note
         };
 
@@ -664,9 +835,12 @@ window.getPRActions = getPRActions;
 window.savePRManual = savePRManual;
 window.showCreatePRFromMRModal = showCreatePRFromMRModal;
 window.showCreatePRModal = showCreatePRModal;
+window.resetPRFilters = resetPRFilters;
+
+// Item selector functions
 window.prItemSelectorCallback = prItemSelectorCallback;
 window.renderPRSelectedItems = renderPRSelectedItems;
 window.removePRItem = removePRItem;
 window.openItemSelectorForPR = openItemSelectorForPR;
 
-console.log('✅ PR module updated with permission checks (header removed).');
+console.log('✅ PR module updated with multi-field search, sort, and advanced filters.');

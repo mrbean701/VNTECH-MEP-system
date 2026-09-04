@@ -2,49 +2,104 @@
 // ITEMS - Quản lý danh mục vật tư (hỗ trợ alias)
 // ================================================================
 let itemsPageState = { page: 1, perPage: 10 };
+// ====== STATE ======
+const itemsState = {
+    page: 1,
+    perPage: 10,
+    filterText: '',
+    statusFilter: '',
+    groupFilter: '',
+    sortBy: 'code',
+    sortOrder: 'asc'
+};
+
+const debouncedItemsFilter = debounce(() => {
+    itemsState.page = 1;
+    renderItems();
+}, 300);
 
 // ====== RENDER DANH SÁCH VẬT TƯ ======
 async function renderItems(page = null) {
     try {
-        const items = await api.getItems();
-        if (typeof updateItemsCache === 'function') {
-            updateItemsCache(items);
-        } else {
-            window._itemsCache = items || [];
-        }
+        const allItems = await api.getItems();
+        if (page) itemsState.page = page;
 
-        const filter = document.getElementById('item-filter')?.value?.toLowerCase() || '';
-        const filtered = items.filter(it =>
-            (it.code || '').toLowerCase().includes(filter) ||
-            (it.name || '').toLowerCase().includes(filter)
-        );
+        // Filter
+        const keyword = itemsState.filterText.toLowerCase().trim();
+        let filtered = allItems.filter(item => {
+            let matchKeyword = true;
+            if (keyword) {
+                const codeMatch = (item.code || '').toLowerCase().includes(keyword);
+                const nameMatch = (item.name || '').toLowerCase().includes(keyword);
+                const groupMatch = (item.itemGroup || '').toLowerCase().includes(keyword);
+                const modelMatch = (item.model || '').toLowerCase().includes(keyword);
+                // Tìm trong alias (các item cùng code)
+                const aliasItems = allItems.filter(i => i.code === item.code && i.id !== item.id);
+                const aliasMatch = aliasItems.some(a => (a.name || '').toLowerCase().includes(keyword));
+                matchKeyword = codeMatch || nameMatch || groupMatch || modelMatch || aliasMatch;
+            }
+            const matchStatus = itemsState.statusFilter ? item.status === itemsState.statusFilter : true;
+            const matchGroup = itemsState.groupFilter ? item.itemGroup === itemsState.groupFilter : true;
+            return matchKeyword && matchStatus && matchGroup;
+        });
 
-        if (page) itemsPageState.page = page;
+        // Sort
+        const order = itemsState.sortOrder === 'asc' ? 1 : -1;
+        filtered.sort((a, b) => {
+            let valA = a[itemsState.sortBy] || '';
+            let valB = b[itemsState.sortBy] || '';
+            if (typeof valA === 'string') valA = valA.toLowerCase();
+            if (typeof valB === 'string') valB = valB.toLowerCase();
+            if (valA < valB) return -1 * order;
+            if (valA > valB) return 1 * order;
+            return 0;
+        });
+
         const perPage = getPageSize('items');
-        itemsPageState.perPage = perPage;
-        const paging = paginate(filtered, itemsPageState.page, perPage);
+        itemsState.perPage = perPage;
+        const paging = paginate(filtered, itemsState.page, perPage);
 
-        const user = getUser();
         const canCreate = hasPermission('items.create');
         const canEdit = hasPermission('items.edit');
         const canDelete = hasPermission('items.delete');
 
         const btnAdd = document.getElementById('btn-add-item');
-        if (btnAdd) {
-            btnAdd.style.display = canCreate ? 'inline-block' : 'none';
-        }
+        if (btnAdd) btnAdd.style.display = canCreate ? 'inline-block' : 'none';
 
-        // Nhóm item theo code để hiển thị alias
+        // Nhóm theo code để hiển thị alias
         const grouped = {};
         paging.items.forEach(item => {
             if (!grouped[item.code]) grouped[item.code] = [];
             grouped[item.code].push(item);
         });
 
+        // Lấy danh sách nhóm để lọc
+        const groups = [...new Set(allItems.map(i => i.itemGroup).filter(Boolean))];
+
         let html = `
             <div class="filter-bar">
-                <input type="text" id="item-filter" placeholder="Tìm theo mã hoặc tên..." style="flex:1;" />
-                <button class="btn btn-sm" onclick="renderItems()"><i class="fas fa-search"></i></button>
+                <input type="text" id="item-filter" placeholder="Tìm theo mã, tên, nhóm, model, alias..." style="flex:2;" value="${itemsState.filterText}">
+                <select id="item-status-filter" style="flex:1;">
+                    <option value="">Tất cả trạng thái</option>
+                    <option value="ACTIVE" ${itemsState.statusFilter === 'ACTIVE' ? 'selected' : ''}>Sử dụng</option>
+                    <option value="INACTIVE" ${itemsState.statusFilter === 'INACTIVE' ? 'selected' : ''}>Ngừng</option>
+                </select>
+                <select id="item-group-filter" style="flex:1;">
+                    <option value="">Tất cả nhóm</option>
+                    ${groups.map(g => `<option value="${g}" ${itemsState.groupFilter === g ? 'selected' : ''}>${g}</option>`).join('')}
+                </select>
+                <select id="item-sort" style="flex:1;">
+                    <option value="code_asc" ${itemsState.sortBy === 'code' && itemsState.sortOrder === 'asc' ? 'selected' : ''}>Mã (A→Z)</option>
+                    <option value="code_desc" ${itemsState.sortBy === 'code' && itemsState.sortOrder === 'desc' ? 'selected' : ''}>Mã (Z→A)</option>
+                    <option value="name_asc" ${itemsState.sortBy === 'name' && itemsState.sortOrder === 'asc' ? 'selected' : ''}>Tên (A→Z)</option>
+                    <option value="name_desc" ${itemsState.sortBy === 'name' && itemsState.sortOrder === 'desc' ? 'selected' : ''}>Tên (Z→A)</option>
+                    <option value="itemGroup_asc" ${itemsState.sortBy === 'itemGroup' && itemsState.sortOrder === 'asc' ? 'selected' : ''}>Nhóm (A→Z)</option>
+                    <option value="itemGroup_desc" ${itemsState.sortBy === 'itemGroup' && itemsState.sortOrder === 'desc' ? 'selected' : ''}>Nhóm (Z→A)</option>
+                    <option value="standardPrice_asc" ${itemsState.sortBy === 'standardPrice' && itemsState.sortOrder === 'asc' ? 'selected' : ''}>Giá (thấp→cao)</option>
+                    <option value="standardPrice_desc" ${itemsState.sortBy === 'standardPrice' && itemsState.sortOrder === 'desc' ? 'selected' : ''}>Giá (cao→thấp)</option>
+                    <option value="status" ${itemsState.sortBy === 'status' ? 'selected' : ''}>Trạng thái</option>
+                </select>
+                <button class="btn btn-sm" onclick="resetItemsFilters()"><i class="fas fa-undo"></i> Reset</button>
             </div>
             <div class="table-responsive">
                 <table>
@@ -102,12 +157,57 @@ async function renderItems(page = null) {
         html += buildPaginationHTML(paging, 'renderItems', 'items');
         document.getElementById('items-container').innerHTML = html;
 
-        document.getElementById('item-filter')?.addEventListener('input', () => { itemsPageState.page = 1; renderItems(); });
+        // Gắn sự kiện
+        const filterInput = document.getElementById('item-filter');
+        const statusSelect = document.getElementById('item-status-filter');
+        const groupSelect = document.getElementById('item-group-filter');
+        const sortSelect = document.getElementById('item-sort');
+
+        if (filterInput) {
+            filterInput.removeEventListener('input', debouncedItemsFilter);
+            filterInput.addEventListener('input', function(e) {
+                itemsState.filterText = this.value;
+                debouncedItemsFilter();
+            });
+        }
+        if (statusSelect) {
+            statusSelect.removeEventListener('change', debouncedItemsFilter);
+            statusSelect.addEventListener('change', function(e) {
+                itemsState.statusFilter = this.value;
+                debouncedItemsFilter();
+            });
+        }
+        if (groupSelect) {
+            groupSelect.removeEventListener('change', debouncedItemsFilter);
+            groupSelect.addEventListener('change', function(e) {
+                itemsState.groupFilter = this.value;
+                debouncedItemsFilter();
+            });
+        }
+        if (sortSelect) {
+            sortSelect.removeEventListener('change', debouncedItemsFilter);
+            sortSelect.addEventListener('change', function(e) {
+                const [sortBy, sortOrder] = this.value.split('_');
+                itemsState.sortBy = sortBy;
+                itemsState.sortOrder = sortOrder || 'asc';
+                debouncedItemsFilter();
+            });
+        }
 
     } catch (error) {
         showError('Không thể tải danh sách vật tư: ' + error.message);
         console.error('renderItems error:', error);
     }
+}
+
+function resetItemsFilters() {
+    itemsState.filterText = '';
+    itemsState.statusFilter = '';
+    itemsState.groupFilter = '';
+    itemsState.sortBy = 'code';
+    itemsState.sortOrder = 'asc';
+    itemsState.page = 1;
+    renderItems();
 }
 
 // ====== THÊM DÒNG TÊN KHÁC ======
@@ -459,5 +559,6 @@ window.saveItemWithAliases = saveItemWithAliases;
 window.updateItemWithAliases = updateItemWithAliases;
 window.addItemAliasInput = addItemAliasInput;
 window.removeItemAliasInput = removeItemAliasInput;
+window.resetItemsFilters = resetItemsFilters;
 
 console.log('✅ Items module updated with alias support.');

@@ -1,7 +1,7 @@
 -- ================================================================
--- RESET DATABASE - CHỈ ADMIN + WORKFLOW MẪU + STATUS + PERMISSIONS
--- PHIÊN BẢN 2.0.27 (Ngày 03/09/2025)
--- BAO GỒM: PHẦN I → VI
+-- RESET DATABASE - MEP SYSTEM
+-- PHIÊN BẢN 2.1.0 (Ngày 04/09/2026)
+-- BAO GỒM: Tất cả cập nhật mới nhất
 -- ================================================================
 
 DROP DATABASE IF EXISTS mep_db;
@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at DATE NULL,
     INDEX idx_email (email),
     INDEX idx_role (`role`)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 2. DEPARTMENTS
 CREATE TABLE IF NOT EXISTS departments (
@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS departments (
     created_at DATE NULL,
     updated_at DATE NULL,
     INDEX idx_code (`code`)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 3. PROJECTS
 CREATE TABLE IF NOT EXISTS projects (
@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS projects (
     updated_at DATE NULL,
     INDEX idx_code (`code`),
     INDEX idx_status (`status`)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 4. VENDORS
 CREATE TABLE IF NOT EXISTS vendors (
@@ -77,9 +77,9 @@ CREATE TABLE IF NOT EXISTS vendors (
     updated_at DATE NULL,
     INDEX idx_code (`code`),
     INDEX idx_status (`status`)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 5. VENDOR_GROUPS (MỚI - PHẦN VI)
+-- 5. VENDOR_GROUPS
 CREATE TABLE IF NOT EXISTS vendor_groups (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     vendor_id BIGINT NOT NULL,
@@ -90,10 +90,10 @@ CREATE TABLE IF NOT EXISTS vendor_groups (
     CONSTRAINT fk_vendor_groups_vendor FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 6. ITEMS
+-- 6. ITEMS (Hỗ trợ alias - nhiều tên cùng mã)
 CREATE TABLE IF NOT EXISTS items (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
-    `code` VARCHAR(50) UNIQUE NOT NULL,
+    `code` VARCHAR(50) NOT NULL,               -- ✅ KHÔNG UNIQUE
     `name` VARCHAR(200) NOT NULL,
     item_group VARCHAR(100) NULL,
     model VARCHAR(100) NULL,
@@ -101,11 +101,12 @@ CREATE TABLE IF NOT EXISTS items (
     standard_price DECIMAL(15,2) DEFAULT 0,
     `status` VARCHAR(20) DEFAULT 'ACTIVE',
     note TEXT NULL,
+    is_main BOOLEAN DEFAULT TRUE,              -- ✅ Đánh dấu tên chính
     created_at DATE NULL,
     updated_at DATE NULL,
-    INDEX idx_code (`code`),
-    INDEX idx_status (`status`)
-);
+    KEY idx_code (`code`),
+    KEY idx_status (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 7. MR
 CREATE TABLE IF NOT EXISTS mr (
@@ -128,9 +129,9 @@ CREATE TABLE IF NOT EXISTS mr (
     INDEX idx_code (`code`),
     INDEX idx_project_code (project_code),
     INDEX idx_status (`status`)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 8. PR
+-- 8. PR (Hỗ trợ trạng thái PARTIALLY_FULFILLED)
 CREATE TABLE IF NOT EXISTS pr (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     `code` VARCHAR(50) UNIQUE NOT NULL,
@@ -140,7 +141,7 @@ CREATE TABLE IF NOT EXISTS pr (
     vendor_code VARCHAR(50) NULL,
     vendor_name VARCHAR(200) NULL,
     items JSON NOT NULL,
-    `status` VARCHAR(20) DEFAULT 'DRAFT',
+    `status` VARCHAR(30) DEFAULT 'DRAFT',      -- ✅ Thêm PARTIALLY_FULFILLED
     approval_step INT DEFAULT 1,
     created_by BIGINT NULL,
     created_by_name VARCHAR(100) NULL,
@@ -152,7 +153,7 @@ CREATE TABLE IF NOT EXISTS pr (
     INDEX idx_project_code (project_code),
     INDEX idx_status (`status`),
     INDEX idx_mr_id (mr_id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 9. PO
 CREATE TABLE IF NOT EXISTS po (
@@ -176,7 +177,7 @@ CREATE TABLE IF NOT EXISTS po (
     INDEX idx_project_code (project_code),
     INDEX idx_status (`status`),
     INDEX idx_pr_id (pr_id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 10. WAREHOUSES
 CREATE TABLE IF NOT EXISTS warehouses (
@@ -194,7 +195,7 @@ CREATE TABLE IF NOT EXISTS warehouses (
     INDEX idx_code (`code`),
     INDEX idx_project_id (project_id),
     INDEX idx_status (`status`)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 11. INVENTORY
 CREATE TABLE IF NOT EXISTS inventory (
@@ -206,7 +207,7 @@ CREATE TABLE IF NOT EXISTS inventory (
     UNIQUE KEY uk_warehouse_item (warehouse_id, item_id),
     INDEX idx_warehouse_id (warehouse_id),
     INDEX idx_item_id (item_id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 12. GRN
 CREATE TABLE IF NOT EXISTS grn (
@@ -237,7 +238,7 @@ CREATE TABLE IF NOT EXISTS grn (
     INDEX idx_po_id (po_id),
     INDEX idx_warehouse_id (warehouse_id),
     INDEX idx_status (`status`)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 13. STO
 CREATE TABLE IF NOT EXISTS sto (
@@ -266,7 +267,7 @@ CREATE TABLE IF NOT EXISTS sto (
     INDEX idx_from_warehouse (from_warehouse_id),
     INDEX idx_to_warehouse (to_warehouse_id),
     INDEX idx_status (`status`)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 14. ISSUES
 CREATE TABLE IF NOT EXISTS issues (
@@ -295,7 +296,7 @@ CREATE TABLE IF NOT EXISTS issues (
     INDEX idx_code (`code`),
     INDEX idx_project_code (project_code),
     INDEX idx_status (`status`)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 15. MATERIAL_RETURNS
 CREATE TABLE IF NOT EXISTS material_returns (
@@ -323,7 +324,7 @@ CREATE TABLE IF NOT EXISTS material_returns (
     INDEX idx_project_code (project_code),
     INDEX idx_warehouse_id (warehouse_id),
     INDEX idx_status (`status`)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 16. MIN_STOCK
 CREATE TABLE IF NOT EXISTS min_stock (
@@ -337,7 +338,7 @@ CREATE TABLE IF NOT EXISTS min_stock (
     UNIQUE KEY uk_warehouse_item (warehouse_id, item_id),
     INDEX idx_warehouse_id (warehouse_id),
     INDEX idx_item_id (item_id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 17. AUTO_REORDER_CONFIG
 CREATE TABLE IF NOT EXISTS auto_reorder_config (
@@ -349,7 +350,7 @@ CREATE TABLE IF NOT EXISTS auto_reorder_config (
     note TEXT NULL,
     created_by BIGINT NULL,
     updated_at DATE NULL
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 18. WORKFLOWS
 CREATE TABLE IF NOT EXISTS workflows (
@@ -366,7 +367,7 @@ CREATE TABLE IF NOT EXISTS workflows (
     INDEX idx_workflows_module (module),
     INDEX idx_workflows_active (is_active),
     INDEX idx_workflows_module_active (module, is_active)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 19. STATUSES
 CREATE TABLE IF NOT EXISTS statuses (
@@ -379,13 +380,13 @@ CREATE TABLE IF NOT EXISTS statuses (
     is_final BOOLEAN DEFAULT FALSE,
     sort_order INT DEFAULT 0,
     color VARCHAR(20) NULL,
-    `group` VARCHAR(50) NULL,
+    status_group VARCHAR(50) NULL,           -- ✅ Đã đổi tên từ group
     created_at DATE NULL,
     updated_at DATE NULL,
     INDEX idx_statuses_entity_type (entity_type),
     INDEX idx_statuses_code (code),
-    INDEX idx_statuses_group (`group`)
-);
+    INDEX idx_statuses_group (status_group)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 20. WORKFLOW_STEP_STATUS
 CREATE TABLE IF NOT EXISTS workflow_step_status (
@@ -397,7 +398,7 @@ CREATE TABLE IF NOT EXISTS workflow_step_status (
     INDEX idx_wf_step_status_workflow (workflow_id),
     INDEX idx_wf_step_status_step (step),
     INDEX idx_wf_step_status_code (status_code)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 21. PERMISSIONS
 CREATE TABLE IF NOT EXISTS permissions (
@@ -408,7 +409,7 @@ CREATE TABLE IF NOT EXISTS permissions (
     enabled BOOLEAN DEFAULT TRUE,
     UNIQUE KEY uk_dept_permission (department_id, permission_key),
     INDEX idx_department (department_id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 22. USER_PERMISSIONS
 CREATE TABLE IF NOT EXISTS user_permissions (
@@ -418,7 +419,7 @@ CREATE TABLE IF NOT EXISTS user_permissions (
     enabled BOOLEAN DEFAULT TRUE,
     UNIQUE KEY uk_user_permission (user_id, permission_key),
     INDEX idx_user_id (user_id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 23. AUTO_REORDER_RULES
 CREATE TABLE IF NOT EXISTS auto_reorder_rules (
@@ -440,7 +441,7 @@ CREATE TABLE IF NOT EXISTS auto_reorder_rules (
     updated_at DATETIME NULL,
     INDEX idx_item_id (item_id),
     INDEX idx_warehouse_id (warehouse_id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 24. ACTIVITY_LOGS
 CREATE TABLE IF NOT EXISTS activity_logs (
@@ -455,9 +456,37 @@ CREATE TABLE IF NOT EXISTS activity_logs (
     ip_address VARCHAR(45) NULL,
     user_agent TEXT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ===== BẢNG MỚI (PHẦN IV - TEAM) =====
+-- 25. AUDIT_LOGS
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    action VARCHAR(50) NULL,
+    entity_type VARCHAR(100) NULL,
+    entity_id VARCHAR(100) NULL,
+    description VARCHAR(200) NULL,
+    performed_by VARCHAR(100) NULL,
+    performed_by_id BIGINT NULL,
+    performed_at DATETIME NULL,
+    details TEXT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 26. APPROVAL_HISTORY
+CREATE TABLE IF NOT EXISTS approval_history (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    entity_type VARCHAR(50) NOT NULL,
+    entity_id BIGINT NOT NULL,
+    workflow_id BIGINT NULL,
+    step INT NOT NULL,
+    approver_id BIGINT NULL,
+    approver_name VARCHAR(100) NULL,
+    status_before VARCHAR(50) NULL,
+    status_after VARCHAR(50) NULL,
+    note TEXT NULL,
+    approved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 27. TEAMS
 CREATE TABLE IF NOT EXISTS teams (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     `name` VARCHAR(100) NOT NULL,
@@ -467,6 +496,7 @@ CREATE TABLE IF NOT EXISTS teams (
     INDEX idx_name (`name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 28. TEAM_MEMBERS
 CREATE TABLE IF NOT EXISTS team_members (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     team_id BIGINT NOT NULL,
@@ -483,7 +513,7 @@ CREATE TABLE IF NOT EXISTS team_members (
     INDEX idx_user_id (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ===== BẢNG MỚI (PHẦN V - PROJECT MEMBERS) =====
+-- 29. PROJECT_MEMBERS
 CREATE TABLE IF NOT EXISTS project_members (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     project_id BIGINT NOT NULL,
@@ -501,9 +531,22 @@ CREATE TABLE IF NOT EXISTS project_members (
     INDEX idx_left_at (left_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 30. POSITIONS
+CREATE TABLE IF NOT EXISTS positions (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    `name` VARCHAR(100) UNIQUE NOT NULL,
+    department_id BIGINT NULL,
+    description TEXT NULL,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at DATE NULL,
+    updated_at DATE NULL,
+    INDEX idx_name (`name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ================================================================
 -- KHÓA NGOẠI
 -- ================================================================
+
 ALTER TABLE users ADD CONSTRAINT fk_users_department
     FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL;
 
@@ -540,7 +583,7 @@ INSERT INTO departments (code, name, manager_id, manager_name, parent_id, create
 INSERT INTO users (email, password, name, role, department_id, position, created_at, updated_at) VALUES
 ('admin@mep.com', '$2a$10$3dvJVZpby4ubWv7J/mn/a.zW.6Mu6ydQ/yV3lwC61BEXZLg1U48t.', 'Admin', 'ADMIN', 1, 'Quản trị hệ thống', CURDATE(), CURDATE());
 
--- 3. STATUSES
+-- 3. STATUSES (CẬP NHẬT VỚI status_group)
 DELIMITER $$
 DROP PROCEDURE IF EXISTS InsertStatusIfNotExists $$
 CREATE PROCEDURE InsertStatusIfNotExists(
@@ -552,12 +595,12 @@ CREATE PROCEDURE InsertStatusIfNotExists(
     IN p_is_final BOOLEAN,
     IN p_sort_order INT,
     IN p_color VARCHAR(20),
-    IN p_group VARCHAR(50)
+    IN p_status_group VARCHAR(50)
 )
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM statuses WHERE code = p_code) THEN
-        INSERT INTO statuses (entity_type, name, code, description, is_default, is_final, sort_order, color, `group`, created_at, updated_at)
-        VALUES (p_entity_type, p_name, p_code, p_description, p_is_default, p_is_final, p_sort_order, p_color, p_group, CURDATE(), CURDATE());
+        INSERT INTO statuses (entity_type, name, code, description, is_default, is_final, sort_order, color, status_group, created_at, updated_at)
+        VALUES (p_entity_type, p_name, p_code, p_description, p_is_default, p_is_final, p_sort_order, p_color, p_status_group, CURDATE(), CURDATE());
     END IF;
 END $$
 DELIMITER ;
@@ -568,7 +611,7 @@ CALL InsertStatusIfNotExists('mr', 'Chờ duyệt', 'PENDING', 'Đã gửi duy�
 CALL InsertStatusIfNotExists('mr', 'Đã duyệt', 'APPROVED', 'Đã được duyệt', FALSE, FALSE, 2, '#22c55e', 'order');
 CALL InsertStatusIfNotExists('mr', 'Từ chối', 'REJECTED', 'Bị từ chối', FALSE, TRUE, 3, '#ef4444', 'order');
 
--- PR
+-- PR (Thêm PARTIALLY_FULFILLED)
 CALL InsertStatusIfNotExists('pr', 'Nháp', 'DRAFT', 'Nháp', TRUE, FALSE, 0, '#6b7280', 'order');
 CALL InsertStatusIfNotExists('pr', 'Chờ duyệt KH', 'PENDING_PLANNING', 'Chờ KH duyệt', FALSE, FALSE, 1, '#f59e0b', 'order');
 CALL InsertStatusIfNotExists('pr', 'KH đã duyệt', 'PLANNING_APPROVED', 'KH đã duyệt', FALSE, FALSE, 2, '#3b82f6', 'order');
@@ -577,6 +620,7 @@ CALL InsertStatusIfNotExists('pr', 'DA đã duyệt', 'PROJECT_APPROVED', 'DA đ
 CALL InsertStatusIfNotExists('pr', 'Chờ duyệt CEO', 'PENDING_CEO', 'Chờ CEO duyệt', FALSE, FALSE, 5, '#f59e0b', 'order');
 CALL InsertStatusIfNotExists('pr', 'Đã duyệt', 'APPROVED', 'Đã duyệt', FALSE, FALSE, 6, '#22c55e', 'order');
 CALL InsertStatusIfNotExists('pr', 'Từ chối', 'REJECTED', 'Từ chối', FALSE, TRUE, 7, '#ef4444', 'order');
+CALL InsertStatusIfNotExists('pr', 'Chưa hoàn thành', 'PARTIALLY_FULFILLED', 'Chưa hoàn thành tất cả PO', FALSE, FALSE, 8, '#f59e0b', 'order');
 
 -- PO
 CALL InsertStatusIfNotExists('po', 'Nháp', 'DRAFT', 'Nháp', TRUE, FALSE, 0, '#6b7280', 'order');
@@ -616,7 +660,6 @@ CALL InsertStatusIfNotExists('materialreturn', 'Đã nhận', 'APPROVED', 'Thủ
 CALL InsertStatusIfNotExists('materialreturn', 'Đã xác nhận', 'CONFIRMED', 'Đã xác nhận', FALSE, TRUE, 3, '#22c55e', 'warehouse');
 CALL InsertStatusIfNotExists('materialreturn', 'Từ chối', 'REJECTED', 'Từ chối', FALSE, TRUE, 4, '#ef4444', 'warehouse');
 
--- ===== CÁC ENTITY TYPE MỚI (PHẦN III) =====
 -- User
 CALL InsertStatusIfNotExists('user', 'Hoạt động', 'ACTIVE', 'User đang hoạt động', TRUE, FALSE, 0, '#22c55e', 'user');
 CALL InsertStatusIfNotExists('user', 'Bị khóa', 'LOCKED', 'User bị khóa', FALSE, TRUE, 1, '#ef4444', 'user');
@@ -670,11 +713,12 @@ INSERT INTO permissions (department_id, permission_key, enabled) VALUES
 (1, 'admin.view', TRUE),
 (1, 'workflow.override', TRUE);
 
--- 6. AUTO_REORDER_CONFIG (mặc định)
+-- 6. AUTO_REORDER_CONFIG
+INSERT INTO auto_reorder_config (enabled, multiplier, default_vendor_code, updated_at) VALUES
+(FALSE, 2.0, NULL, CURDATE());
 
-
--- 7. PROJECTS MẪU (để giải quyết lỗi khóa ngoại)
-INSERT INTO projects (code, name, client, commander, status, created_at, updated_at) VALUES
+-- 7. PROJECTS MẪU
+INSERT INTO projects (code, name, client, commander, status, created_at, updated_at) VALUESapproval_history
 ('DA001', 'Dự án mẫu', 'Khách hàng A', 'Nguyễn Văn A', 'ACTIVE', CURDATE(), CURDATE()),
 ('DA002', 'Dự án thử nghiệm', 'Khách hàng B', 'Trần Văn B', 'ACTIVE', CURDATE(), CURDATE());
 
@@ -682,9 +726,9 @@ INSERT INTO projects (code, name, client, commander, status, created_at, updated
 -- KIỂM TRA
 -- ================================================================
 
-SELECT '✅ Database reset thành công! (Phiên bản 2.0.27)' AS Message;
+SELECT '✅ Database reset thành công! (Phiên bản 2.1.0)' AS Message;
 SELECT '👤 Tài khoản admin: admin@mep.com / password' AS Credential;
-SELECT entity_type, COUNT(*) AS total, GROUP_CONCAT(DISTINCT `group`) AS `groups` FROM statuses GROUP BY entity_type ORDER BY entity_type;
+SELECT entity_type, COUNT(*) AS total, GROUP_CONCAT(DISTINCT status_group) AS `groups` FROM statuses GROUP BY entity_type ORDER BY entity_type;
 SELECT COUNT(*) AS total_workflows FROM workflows;
 SELECT COUNT(*) AS total_permissions FROM permissions;
 SELECT COUNT(*) AS total_projects FROM projects;

@@ -1,7 +1,24 @@
 // ================================================================
 // MATERIAL RETURN - Hoàn trả vật tư - ĐÃ TÍCH HỢP PHÂN QUYỀN
 // ================================================================
-let returnPageState = { page: 1, perPage: 10 };
+
+// ====== STATE ======
+const materialReturnState = {
+    page: 1,
+    perPage: 10,
+    filterText: '',
+    statusFilter: '',
+    projectFilter: '',
+    warehouseFilter: '',
+    sortBy: 'createdAt',
+    sortOrder: 'desc'
+};
+
+// ====== DEBOUNCE FILTER ======
+const debouncedReturnFilter = debounce(() => {
+    materialReturnState.page = 1;
+    renderMaterialReturns();
+}, 300);
 
 // ====== HÀM TẠO MÃ TỰ ĐỘNG ======
 function generateReturnCode() {
@@ -38,7 +55,6 @@ async function renderMaterialReturnPage() {
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     page.classList.add('active');
 
-    // Kiểm tra quyền xem
     if (!hasPermission('materialreturn.view')) {
         document.getElementById('material-return-container').innerHTML = `
             <div style="padding:20px; text-align:center; color:#e74c3c;">
@@ -52,6 +68,96 @@ async function renderMaterialReturnPage() {
     await renderMaterialReturns();
 }
 
+// ====== HÀM FILTER DỮ LIỆU ======
+function filterReturnData(returns, projects, warehouses) {
+    const { filterText, statusFilter, projectFilter, warehouseFilter } = materialReturnState;
+    const keyword = filterText.toLowerCase().trim();
+
+    return returns.filter(item => {
+        let matchKeyword = true;
+        if (keyword) {
+            const codeMatch = (item.code || '').toLowerCase().includes(keyword);
+            const projectNameMatch = (item.projectName || '').toLowerCase().includes(keyword);
+            const projectCodeMatch = (item.projectCode || '').toLowerCase().includes(keyword);
+            const returnFromMatch = (item.returnFrom || '').toLowerCase().includes(keyword);
+            const returnerMatch = (item.returner || '').toLowerCase().includes(keyword);
+
+            let itemsMatch = false;
+            try {
+                if (item.items) {
+                    const items = typeof item.items === 'string' ? JSON.parse(item.items) : item.items;
+                    itemsMatch = items.some(it => {
+                        const itemName = it.displayName || getItemName(it.itemId) || '';
+                        const itemCode = getItemCode(it.itemId) || '';
+                        return itemName.toLowerCase().includes(keyword) ||
+                               itemCode.toLowerCase().includes(keyword);
+                    });
+                }
+            } catch (e) {}
+
+            matchKeyword = codeMatch || projectNameMatch || projectCodeMatch || 
+                           returnFromMatch || returnerMatch || itemsMatch;
+        }
+
+        const matchStatus = statusFilter ? item.status === statusFilter : true;
+
+        let matchProject = true;
+        if (projectFilter) {
+            const selectedProject = projects.find(p => p.code === projectFilter || p.id === parseInt(projectFilter));
+            if (selectedProject) {
+                matchProject = item.projectCode === selectedProject.code;
+            } else {
+                matchProject = false;
+            }
+        }
+
+        let matchWarehouse = true;
+        if (warehouseFilter) {
+            const selectedWarehouse = warehouses.find(w => w.id === parseInt(warehouseFilter) || w.code === warehouseFilter);
+            if (selectedWarehouse) {
+                matchWarehouse = item.warehouseId === selectedWarehouse.id;
+            } else {
+                matchWarehouse = false;
+            }
+        }
+
+        return matchKeyword && matchStatus && matchProject && matchWarehouse;
+    });
+}
+
+// ====== HÀM SORT DỮ LIỆU ======
+function sortReturnData(data) {
+    const { sortBy, sortOrder } = materialReturnState;
+    const order = sortOrder === 'asc' ? 1 : -1;
+
+    return [...data].sort((a, b) => {
+        let valA = a[sortBy] || '';
+        let valB = b[sortBy] || '';
+
+        if (sortBy === 'projectName') {
+            valA = a.projectName || a.projectCode || '';
+            valB = b.projectName || b.projectCode || '';
+        } else if (sortBy === 'createdAt') {
+            valA = new Date(a.createdAt || 0);
+            valB = new Date(b.createdAt || 0);
+        } else if (sortBy === 'returnDate') {
+            valA = new Date(a.returnDate || 0);
+            valB = new Date(b.returnDate || 0);
+        } else if (sortBy === 'status') {
+            const statusOrder = { 'DRAFT': 0, 'PENDING': 1, 'APPROVED': 2, 'CONFIRMED': 3, 'REJECTED': 4 };
+            valA = statusOrder[a.status] || 0;
+            valB = statusOrder[b.status] || 0;
+        }
+
+        if (typeof valA === 'string') valA = valA.toLowerCase();
+        if (typeof valB === 'string') valB = valB.toLowerCase();
+
+        if (valA < valB) return -1 * order;
+        if (valA > valB) return 1 * order;
+        return 0;
+    });
+}
+
 // ====== RENDER DANH SÁCH ======
 async function renderMaterialReturns(page = null) {
     const container = document.getElementById('material-return-container');
@@ -61,44 +167,62 @@ async function renderMaterialReturns(page = null) {
     }
 
     try {
-        const returns = await api.getMaterialReturns();
-        const filter = document.getElementById('return-filter')?.value?.toLowerCase() || '';
-        const statusFilter = document.getElementById('return-status-filter')?.value || '';
+        const [returns, projects, warehouses] = await Promise.all([
+            api.getMaterialReturns(),
+            api.getProjects(),
+            api.getWarehouses()
+        ]);
+        window._projectsCache = projects;
+        window._warehousesCache = warehouses;
+        saveData('projects', projects);
+        saveData('warehouses', warehouses);
 
-        const filtered = returns.filter(item => {
-            const matchCode = (item.code || '').toLowerCase().includes(filter);
-            const matchProject = (item.projectName || '').toLowerCase().includes(filter);
-            const matchStatus = statusFilter ? item.status === statusFilter : true;
-            return (matchCode || matchProject) && matchStatus;
-        });
+        if (page) materialReturnState.page = page;
 
-        if (page) returnPageState.page = page;
+        let filtered = filterReturnData(returns, projects, warehouses);
+        filtered = sortReturnData(filtered);
+
         const perPage = getPageSize('return');
-        returnPageState.perPage = perPage;
-        const paging = paginate(filtered, returnPageState.page, perPage);
+        materialReturnState.perPage = perPage;
+        const paging = paginate(filtered, materialReturnState.page, perPage);
 
-        // Kiểm tra quyền
         const canCreate = hasPermission('materialreturn.create');
-
-        // Ẩn/hiện nút Tạo phiếu
         const btnCreate = document.getElementById('btn-create-return');
         if (btnCreate) {
             btnCreate.style.display = canCreate ? 'inline-block' : 'none';
         }
 
-        // Tạo HTML (không có header)
         let html = `
             <div class="filter-bar">
-                <input type="text" id="return-filter" placeholder="Tìm theo mã hoặc dự án..." style="flex:1;" />
-                <select id="return-status-filter">
+                <input type="text" id="return-filter" placeholder="Tìm theo mã, dự án, vật tư..." style="flex:2;" value="${materialReturnState.filterText}">
+                <select id="return-status-filter" style="flex:1;">
                     <option value="">Tất cả</option>
-                    <option value="DRAFT">DRAFT</option>
-                    <option value="PENDING">PENDING</option>
-                    <option value="APPROVED">APPROVED</option>
-                    <option value="CONFIRMED">CONFIRMED</option>
-                    <option value="REJECTED">REJECTED</option>
+                    <option value="DRAFT" ${materialReturnState.statusFilter === 'DRAFT' ? 'selected' : ''}>DRAFT</option>
+                    <option value="PENDING" ${materialReturnState.statusFilter === 'PENDING' ? 'selected' : ''}>PENDING</option>
+                    <option value="APPROVED" ${materialReturnState.statusFilter === 'APPROVED' ? 'selected' : ''}>APPROVED</option>
+                    <option value="CONFIRMED" ${materialReturnState.statusFilter === 'CONFIRMED' ? 'selected' : ''}>CONFIRMED</option>
+                    <option value="REJECTED" ${materialReturnState.statusFilter === 'REJECTED' ? 'selected' : ''}>REJECTED</option>
                 </select>
-                <button class="btn btn-sm" onclick="renderMaterialReturns()"><i class="fas fa-search"></i></button>
+                <select id="return-project-filter" style="flex:1;">
+                    <option value="">Tất cả dự án</option>
+                    ${projects.map(p => `<option value="${p.code}" ${materialReturnState.projectFilter === p.code ? 'selected' : ''}>${p.code} - ${p.name}</option>`).join('')}
+                </select>
+                <select id="return-warehouse-filter" style="flex:1;">
+                    <option value="">Tất cả kho</option>
+                    ${warehouses.map(w => `<option value="${w.id}" ${materialReturnState.warehouseFilter == w.id ? 'selected' : ''}>${w.code} - ${w.name}</option>`).join('')}
+                </select>
+                <select id="return-sort" style="flex:1;">
+                    <option value="createdAt_desc" ${materialReturnState.sortBy === 'createdAt' && materialReturnState.sortOrder === 'desc' ? 'selected' : ''}>Ngày tạo (mới nhất)</option>
+                    <option value="createdAt_asc" ${materialReturnState.sortBy === 'createdAt' && materialReturnState.sortOrder === 'asc' ? 'selected' : ''}>Ngày tạo (cũ nhất)</option>
+                    <option value="returnDate_desc" ${materialReturnState.sortBy === 'returnDate' && materialReturnState.sortOrder === 'desc' ? 'selected' : ''}>Ngày trả (mới nhất)</option>
+                    <option value="returnDate_asc" ${materialReturnState.sortBy === 'returnDate' && materialReturnState.sortOrder === 'asc' ? 'selected' : ''}>Ngày trả (cũ nhất)</option>
+                    <option value="code_asc" ${materialReturnState.sortBy === 'code' && materialReturnState.sortOrder === 'asc' ? 'selected' : ''}>Mã (A→Z)</option>
+                    <option value="code_desc" ${materialReturnState.sortBy === 'code' && materialReturnState.sortOrder === 'desc' ? 'selected' : ''}>Mã (Z→A)</option>
+                    <option value="projectName_asc" ${materialReturnState.sortBy === 'projectName' && materialReturnState.sortOrder === 'asc' ? 'selected' : ''}>Dự án (A→Z)</option>
+                    <option value="projectName_desc" ${materialReturnState.sortBy === 'projectName' && materialReturnState.sortOrder === 'desc' ? 'selected' : ''}>Dự án (Z→A)</option>
+                    <option value="status" ${materialReturnState.sortBy === 'status' ? 'selected' : ''}>Trạng thái</option>
+                </select>
+                <button class="btn btn-sm" onclick="resetReturnFilters()"><i class="fas fa-undo"></i> Reset</button>
             </div>
             <div class="table-responsive">
                 <table>
@@ -143,31 +267,75 @@ async function renderMaterialReturns(page = null) {
             </tr>`;
         }
 
-                html += `
-                    </tbody>
-                </table>
-            </div>
-        `;
+        html += `</tbody></table></div>`;
         html += buildPaginationHTML(paging, 'renderMaterialReturns', 'return');
-
         container.innerHTML = html;
 
-        // Gắn sự kiện cho filter
+        // Gắn sự kiện
         const filterInput = document.getElementById('return-filter');
         const statusSelect = document.getElementById('return-status-filter');
+        const projectSelect = document.getElementById('return-project-filter');
+        const warehouseSelect = document.getElementById('return-warehouse-filter');
+        const sortSelect = document.getElementById('return-sort');
+
         if (filterInput) {
-            filterInput.removeEventListener('input', renderMaterialReturns);
-            filterInput.addEventListener('input', () => { returnPageState.page = 1; renderMaterialReturns(); });
+            filterInput.removeEventListener('input', debouncedReturnFilter);
+            filterInput.addEventListener('input', function(e) {
+                materialReturnState.filterText = this.value;
+                debouncedReturnFilter();
+            });
         }
+
         if (statusSelect) {
-            statusSelect.removeEventListener('change', renderMaterialReturns);
-            statusSelect.addEventListener('change', () => { returnPageState.page = 1; renderMaterialReturns(); });
+            statusSelect.removeEventListener('change', debouncedReturnFilter);
+            statusSelect.addEventListener('change', function(e) {
+                materialReturnState.statusFilter = this.value;
+                debouncedReturnFilter();
+            });
+        }
+
+        if (projectSelect) {
+            projectSelect.removeEventListener('change', debouncedReturnFilter);
+            projectSelect.addEventListener('change', function(e) {
+                materialReturnState.projectFilter = this.value;
+                debouncedReturnFilter();
+            });
+        }
+
+        if (warehouseSelect) {
+            warehouseSelect.removeEventListener('change', debouncedReturnFilter);
+            warehouseSelect.addEventListener('change', function(e) {
+                materialReturnState.warehouseFilter = this.value;
+                debouncedReturnFilter();
+            });
+        }
+
+        if (sortSelect) {
+            sortSelect.removeEventListener('change', debouncedReturnFilter);
+            sortSelect.addEventListener('change', function(e) {
+                const [sortBy, sortOrder] = this.value.split('_');
+                materialReturnState.sortBy = sortBy;
+                materialReturnState.sortOrder = sortOrder || 'desc';
+                debouncedReturnFilter();
+            });
         }
 
     } catch (error) {
         showError('Không thể tải danh sách hoàn trả: ' + error.message);
         console.error('renderMaterialReturns error:', error);
     }
+}
+
+// ====== RESET FILTER ======
+function resetReturnFilters() {
+    materialReturnState.filterText = '';
+    materialReturnState.statusFilter = '';
+    materialReturnState.projectFilter = '';
+    materialReturnState.warehouseFilter = '';
+    materialReturnState.sortBy = 'createdAt';
+    materialReturnState.sortOrder = 'desc';
+    materialReturnState.page = 1;
+    renderMaterialReturns();
 }
 
 // ====== HÀM LẤY ACTION ======
@@ -213,15 +381,87 @@ function getReturnActions(item) {
     return actions || '-';
 }
 
+// ====== BIẾN TOÀN CỤC CHO ITEM SELECTOR ======
+let _returnSelectedItems = [];
+let _returnMode = 'create';
+let _returnEditId = null;
+
+// ====== CALLBACK TỪ MODAL CHỌN VẬT TƯ ======
+function returnItemSelectorCallback(selectedItems) {
+    _returnSelectedItems = selectedItems.map(item => ({
+        itemId: item.itemId,
+        quantity: item.quantity || 1,
+        itemName: item.displayName || item.itemName || getItemName(item.itemId),
+        itemCode: item.itemCode || getItemCode(item.itemId),
+        unit: item.unit || getItemUnit(item.itemId)
+    }));
+    renderReturnSelectedItems();
+}
+
+function renderReturnSelectedItems() {
+    const container = document.getElementById('return-selected-items-container');
+    if (!container) return;
+    container.innerHTML = _renderReturnSelectedItemsHTML();
+    _attachReturnQuantityEvents();
+}
+
+function _renderReturnSelectedItemsHTML() {
+    const items = _returnSelectedItems || [];
+    if (items.length === 0) {
+        return '<div style="color:#999; text-align:center; padding:8px;">Chưa chọn vật tư nào</div>';
+    }
+    let html = '';
+    items.forEach((item, index) => {
+        html += `
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:4px 8px; margin-bottom:4px; background:#f0f4f8; border-radius:4px;">
+                <span><strong>${item.itemCode}</strong> - ${item.itemName} (${item.unit})</span>
+                <span>Số lượng: <input type="number" class="return-item-qty" data-index="${index}" value="${item.quantity}" style="width:70px; padding:4px; border:1px solid #ccc; border-radius:4px;" min="0.01" step="0.01"></span>
+                <button type="button" class="btn btn-sm btn-danger" onclick="removeReturnItem(${index})"><i class="fas fa-times"></i></button>
+            </div>
+        `;
+    });
+    return html;
+}
+
+function _attachReturnQuantityEvents() {
+    document.querySelectorAll('.return-item-qty').forEach(input => {
+        input.removeEventListener('change', _onReturnQtyChange);
+        input.addEventListener('change', _onReturnQtyChange);
+    });
+}
+
+function _onReturnQtyChange(e) {
+    const idx = parseInt(this.dataset.index);
+    const val = parseFloat(this.value) || 1;
+    if (val > 0 && _returnSelectedItems[idx]) {
+        _returnSelectedItems[idx].quantity = val;
+    } else {
+        this.value = _returnSelectedItems[idx]?.quantity || 1;
+    }
+}
+
+function removeReturnItem(index) {
+    if (_returnSelectedItems && _returnSelectedItems.length > index) {
+        _returnSelectedItems.splice(index, 1);
+        renderReturnSelectedItems();
+    }
+}
+
+function openItemSelectorForReturn() {
+    const selected = _returnSelectedItems || [];
+    openItemSelectorHelper(selected, returnItemSelectorCallback, 'materialreturn');
+}
+
 // ====== TẠO PHIẾU (MODAL) ======
 function showCreateMaterialReturnModal() {
     Promise.all([api.getProjects(), api.getWarehouses(), api.getItems()]).then(([projects, warehouses, items]) => {
-        // Cache items cho dropdown
         window._itemsCache = items;
 
         const projectOpts = projects.map(p => `<option value="${p.code}">${p.code} - ${p.name}</option>`).join('');
         const whOpts = warehouses.map(w => `<option value="${w.id}">${w.code} - ${w.name}</option>`).join('');
-        const itemOpts = items.map(i => `<option value="${i.id}">${i.code} - ${i.name}</option>`).join('');
+        _returnSelectedItems = [];
+        _returnMode = 'create';
+        _returnEditId = null;
 
         showModal('Tạo phiếu hoàn trả vật tư', `
             <div class="form-group">
@@ -246,8 +486,11 @@ function showCreateMaterialReturnModal() {
             </div>
             <div class="form-group">
                 <label>Danh sách vật tư</label>
-                <div id="return-items-container">
-                    ${buildReturnItemRows([{itemId: '', requestedQty: '', condition: '', note: ''}])}
+                <button type="button" class="btn btn-sm btn-info" onclick="openItemSelectorForReturn()">
+                    <i class="fas fa-plus"></i> Chọn vật tư
+                </button>
+                <div id="return-selected-items-container" style="margin-top:8px; max-height:200px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:6px; padding:8px;">
+                    ${_renderReturnSelectedItemsHTML()}
                 </div>
             </div>
             <div class="form-group">
@@ -259,85 +502,11 @@ function showCreateMaterialReturnModal() {
                 <button class="btn btn-danger" onclick="closeModal()">Hủy</button>
             </div>
         `);
+
+        setTimeout(() => {
+            _attachReturnQuantityEvents();
+        }, 100);
     }).catch(err => showError('Không thể tải dữ liệu: ' + err.message));
-}
-
-// ====== BUILD DÒNG VẬT TƯ ======
-function buildReturnItemRows(itemsData) {
-    const allItems = window._itemsCache || [];
-    if (!itemsData || itemsData.length === 0) {
-        itemsData = [{ itemId: '', requestedQty: '', condition: '', note: '' }];
-    }
-    let html = '';
-    itemsData.forEach((item, index) => {
-        const selected = item.itemId || '';
-        html += `<div class="item-row" data-index="${index}">
-            <select class="return-item-select" data-name="items[${index}].itemId">
-                <option value="">-- Chọn --</option>
-                ${allItems.map(it => `<option value="${it.id}" ${it.id == selected ? 'selected' : ''}>${it.code} - ${it.name}</option>`).join('')}
-            </select>
-            <input type="number" class="return-item-qty" data-name="items[${index}].requestedQty" value="${item.requestedQty || ''}" placeholder="SL đề nghị" style="width:100px;">
-            <input type="text" class="return-item-condition" data-name="items[${index}].condition" value="${item.condition || ''}" placeholder="Tình trạng" style="width:120px;">
-            <input type="text" class="return-item-note" data-name="items[${index}].note" value="${item.note || ''}" placeholder="Ghi chú" style="width:150px;">
-            <button type="button" class="remove-item" onclick="removeReturnItemRow(this)"><i class="fas fa-minus"></i></button>
-        </div>`;
-    });
-    html += `<button type="button" class="btn-add-item" onclick="addReturnItemRow(this)"><i class="fas fa-plus"></i> Thêm vật tư</button>`;
-    return html;
-}
-
-function addReturnItemRow(btn) {
-    const container = btn.parentElement;
-    const index = container.querySelectorAll('.item-row').length;
-    const allItems = window._itemsCache || [];
-    let opts = allItems.map(it => `<option value="${it.id}">${it.code} - ${it.name}</option>`).join('');
-    const row = document.createElement('div');
-    row.className = 'item-row';
-    row.dataset.index = index;
-    row.innerHTML = `
-        <select class="return-item-select"><option value="">-- Chọn --</option>${opts}</select>
-        <input type="number" class="return-item-qty" placeholder="SL đề nghị" style="width:100px;">
-        <input type="text" class="return-item-condition" placeholder="Tình trạng" style="width:120px;">
-        <input type="text" class="return-item-note" placeholder="Ghi chú" style="width:150px;">
-        <button type="button" class="remove-item" onclick="removeReturnItemRow(this)"><i class="fas fa-minus"></i></button>
-    `;
-    container.insertBefore(row, btn);
-}
-
-function removeReturnItemRow(btn) {
-    const row = btn.parentElement;
-    const container = row.parentElement;
-    if (container.querySelectorAll('.item-row').length <= 1) {
-        showWarning('Cần ít nhất một dòng');
-        return;
-    }
-    row.remove();
-    container.querySelectorAll('.item-row').forEach((r, i) => {
-        r.dataset.index = i;
-    });
-}
-
-function collectReturnItemsFromForm(container) {
-    const rows = container.querySelectorAll('.item-row');
-    const items = [];
-    rows.forEach(row => {
-        const sel = row.querySelector('.return-item-select');
-        const qty = row.querySelector('.return-item-qty');
-        const condition = row.querySelector('.return-item-condition');
-        const note = row.querySelector('.return-item-note');
-        const itemId = parseInt(sel.value);
-        const requestedQty = parseFloat(qty.value);
-        if (itemId && !isNaN(requestedQty) && requestedQty > 0) {
-            items.push({
-                itemId,
-                requestedQty,
-                actualQty: requestedQty,
-                condition: condition.value || '',
-                note: note.value || ''
-            });
-        }
-    });
-    return items;
 }
 
 // ====== LƯU PHIẾU ======
@@ -353,8 +522,15 @@ async function saveMaterialReturn() {
     const returnFrom = document.getElementById('f-return-from').value.trim();
     const returner = document.getElementById('f-return-returner').value.trim();
     const note = document.getElementById('f-return-note').value.trim();
-    const container = document.getElementById('return-items-container');
-    const items = collectReturnItemsFromForm(container);
+
+    const items = _returnSelectedItems.map(item => ({
+        itemId: item.itemId,
+        requestedQty: item.quantity,
+        actualQty: item.quantity,
+        displayName: item.itemName,
+        condition: item.condition || '',
+        note: item.note || ''
+    }));
 
     if (!projectCode || !returnDate || !warehouseId || items.length === 0) {
         showError('Vui lòng chọn dự án, ngày trả, kho và ít nhất một vật tư');
@@ -379,6 +555,7 @@ async function saveMaterialReturn() {
 
         await api.createMaterialReturn(newReturn);
         closeModal();
+        _returnSelectedItems = [];
         await renderMaterialReturns();
         showSuccess('Tạo phiếu hoàn trả thành công! (Trạng thái DRAFT)');
     } catch (error) {
@@ -403,7 +580,7 @@ async function viewMaterialReturn(id) {
         const itemsHtml = items.map(it => `
             <tr>
                 <td>${getItemCode(it.itemId)}</td>
-                <td>${getItemName(it.itemId)}</td>
+                <td>${it.displayName || getItemName(it.itemId)}</td>
                 <td>${getItemUnit(it.itemId)}</td>
                 <td>${it.requestedQty}</td>
                 <td>${it.actualQty !== undefined ? it.actualQty : it.requestedQty}</td>
@@ -412,7 +589,6 @@ async function viewMaterialReturn(id) {
             </tr>
         `).join('');
 
-        // Lấy workflow steps từ workflowId của Material Return
         let stepsConfig = [
             { id: 1, label: 'Tạo phiếu' },
             { id: 2, label: 'Thủ kho nhận' },
@@ -439,6 +615,15 @@ async function viewMaterialReturn(id) {
             (item.projectName || item.projectCode || '');
         const whName = getWarehouseName(item.warehouseId);
 
+        const itemsTable = `
+            <div class="table-responsive">
+                <table>
+                    <thead><tr><th>Mã</th><th>Tên</th><th>ĐVT</th><th>SL đề nghị</th><th>SL thực trả</th><th>Tình trạng</th><th>Ghi chú</th></tr></thead>
+                    <tbody>${itemsHtml}</tbody>
+                </table>
+            </div>
+        `;
+
         showModal('Chi tiết phiếu hoàn trả', `
             <div class="detail-grid">
                 <div><span class="label">Mã phiếu:</span> <span class="value">${item.code}</span></div>
@@ -451,14 +636,7 @@ async function viewMaterialReturn(id) {
                 <div><span class="label">Ngày tạo:</span> <span class="value">${item.createdAt || ''}</span></div>
                 ${item.completionDate ? `<div><span class="label">Ngày hoàn tất:</span> <span class="value">${item.completionDate}</span></div>` : ''}
                 <div style="grid-column:1/-1;"><span class="label">Tiến độ thực hiện:</span><br>${progressHtml}</div>
-                <div style="grid-column:1/-1;"><span class="label">Chi tiết vật tư:</span>
-                    <div class="table-responsive">
-                        <table>
-                            <thead><tr><th>Mã</th><th>Tên</th><th>ĐVT</th><th>SL đề nghị</th><th>SL thực trả</th><th>Tình trạng</th><th>Ghi chú</th></tr></thead>
-                            <tbody>${itemsHtml}</tbody>
-                        </table>
-                    </div>
-                </div>
+                <div style="grid-column:1/-1;"><span class="label">Chi tiết vật tư:</span><br>${itemsTable}</div>
                 <div style="grid-column:1/-1;"><span class="label">Ghi chú:</span> <span class="value">${item.note || ''}</span></div>
             </div>
             <div class="modal-actions">
@@ -499,7 +677,25 @@ async function editMaterialReturn(id) {
             `<option value="${w.id}" ${w.id === item.warehouseId ? 'selected' : ''}>${w.code} - ${w.name}</option>`
         ).join('');
 
-        const itemsData = item.items ? JSON.parse(item.items) : [{ itemId: '', requestedQty: '', condition: '', note: '' }];
+        let itemsData = [];
+        try {
+            if (item.items) {
+                const items = typeof item.items === 'string' ? JSON.parse(item.items) : item.items;
+                itemsData = items.map(it => ({
+                    itemId: it.itemId,
+                    requestedQty: it.requestedQty || 0,
+                    actualQty: it.actualQty || 0,
+                    itemName: it.displayName || getItemName(it.itemId),
+                    itemCode: getItemCode(it.itemId),
+                    unit: getItemUnit(it.itemId),
+                    condition: it.condition || '',
+                    note: it.note || ''
+                }));
+            }
+        } catch (e) {}
+        _returnSelectedItems = itemsData;
+        _returnMode = 'edit';
+        _returnEditId = id;
 
         showModal('Sửa phiếu hoàn trả', `
             <div class="form-group">
@@ -524,8 +720,11 @@ async function editMaterialReturn(id) {
             </div>
             <div class="form-group">
                 <label>Danh sách vật tư</label>
-                <div id="return-items-container">
-                    ${buildReturnItemRows(itemsData)}
+                <button type="button" class="btn btn-sm btn-info" onclick="openItemSelectorForReturn()">
+                    <i class="fas fa-plus"></i> Chọn vật tư
+                </button>
+                <div id="return-selected-items-container" style="margin-top:8px; max-height:200px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:6px; padding:8px;">
+                    ${_renderReturnSelectedItemsHTML()}
                 </div>
             </div>
             <div class="form-group">
@@ -537,6 +736,10 @@ async function editMaterialReturn(id) {
                 <button class="btn btn-danger" onclick="closeModal()">Hủy</button>
             </div>
         `);
+
+        setTimeout(() => {
+            _attachReturnQuantityEvents();
+        }, 100);
     } catch (error) {
         showError('Lỗi khi tải phiếu: ' + error.message);
     }
@@ -549,8 +752,15 @@ async function updateMaterialReturn(id) {
     const returnFrom = document.getElementById('f-return-from').value.trim();
     const returner = document.getElementById('f-return-returner').value.trim();
     const note = document.getElementById('f-return-note').value.trim();
-    const container = document.getElementById('return-items-container');
-    const items = collectReturnItemsFromForm(container);
+
+    const items = _returnSelectedItems.map(item => ({
+        itemId: item.itemId,
+        requestedQty: item.requestedQty || item.quantity || 0,
+        actualQty: item.actualQty || item.quantity || 0,
+        displayName: item.itemName || getItemName(item.itemId),
+        condition: item.condition || '',
+        note: item.note || ''
+    }));
 
     if (!projectCode || !returnDate || !warehouseId || items.length === 0) {
         showError('Vui lòng chọn đầy đủ thông tin và ít nhất một vật tư');
@@ -567,13 +777,14 @@ async function updateMaterialReturn(id) {
             returnDate,
             warehouseId,
             returnFrom: returnFrom || 'Công trường',
-            items: JSON.stringify(items.map(it => ({ ...it, actualQty: it.requestedQty }))),
+            items: JSON.stringify(items),
             returner: returner,
             note
         };
 
         await api.updateMaterialReturn(id, updatedReturn);
         closeModal();
+        _returnSelectedItems = [];
         await renderMaterialReturns();
         showSuccess('Cập nhật phiếu hoàn trả thành công!');
     } catch (error) {
@@ -674,7 +885,6 @@ async function updateMaterialReturnApproval(id) {
     if (hasError) return;
 
     try {
-        // Cập nhật item và chuyển sang APPROVED
         await api.approveMaterialReturn(id, JSON.stringify(newItems));
         closeModal();
         await renderMaterialReturns();
@@ -789,5 +999,12 @@ window.confirmMaterialReturn = confirmMaterialReturn;
 window.rejectMaterialReturn = rejectMaterialReturn;
 window.deleteMaterialReturn = deleteMaterialReturn;
 window.printMaterialReturn = printMaterialReturn;
+window.resetReturnFilters = resetReturnFilters;
 
-console.log('✅ Material Return module updated with full permission checks.');
+// Item selector functions
+window.returnItemSelectorCallback = returnItemSelectorCallback;
+window.renderReturnSelectedItems = renderReturnSelectedItems;
+window.removeReturnItem = removeReturnItem;
+window.openItemSelectorForReturn = openItemSelectorForReturn;
+
+console.log('✅ Material Return module updated with multi-field search, sort, and advanced filters.');

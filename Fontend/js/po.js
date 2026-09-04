@@ -1,10 +1,24 @@
 // ================================================================
-// PO (Purchase Order) - SỬ DỤNG API - ĐÃ TÍCH HỢP PHÂN QUYỀN
+// PO (Purchase Order) - SỬ DỤNG API - HỖ TRỢ WORKFLOW ĐỘNG
 // ================================================================
-let poPageState = { page: 1, perPage: 10 };
-let _poSelectedItems = [];
-let _poMode = 'create';
-let _poEditId = null;
+
+// ====== STATE ======
+const poState = {
+    page: 1,
+    perPage: 10,
+    filterText: '',
+    statusFilter: '',
+    projectFilter: '',
+    vendorFilter: '',
+    sortBy: 'createdAt',
+    sortOrder: 'desc'
+};
+
+// ====== DEBOUNCE FILTER ======
+const debouncedPOFilter = debounce(() => {
+    poState.page = 1;
+    renderPO();
+}, 300);
 
 // ====== HÀM LẤY ACTION ======
 function getPOActions(po) {
@@ -27,7 +41,6 @@ function getPOActions(po) {
         actions += ` <button class="btn btn-danger btn-sm" onclick="deletePO(${po.id})"><i class="fas fa-trash"></i></button>`;
     }
 
-    // ✅ SỬA: Gửi duyệt → Xác nhận
     const canSubmit = hasPermission('po.submit') && 
                      po.status === 'DRAFT' && 
                      (user?.role === 'ADMIN' || user?.id === po.createdBy);
@@ -44,46 +57,159 @@ function getPOActions(po) {
     return actions || '-';
 }
 
+// ====== HÀM FILTER DỮ LIỆU ======
+function filterPOData(pos, projects, vendors) {
+    const { filterText, statusFilter, projectFilter, vendorFilter } = poState;
+    const keyword = filterText.toLowerCase().trim();
+
+    return pos.filter(po => {
+        let matchKeyword = true;
+        if (keyword) {
+            const codeMatch = (po.code || '').toLowerCase().includes(keyword);
+            const projectNameMatch = (po.projectName || '').toLowerCase().includes(keyword);
+            const projectCodeMatch = (po.projectCode || '').toLowerCase().includes(keyword);
+            const vendorNameMatch = (po.vendorName || '').toLowerCase().includes(keyword);
+            const vendorCodeMatch = (po.vendorCode || '').toLowerCase().includes(keyword);
+
+            let itemsMatch = false;
+            try {
+                if (po.items) {
+                    const items = typeof po.items === 'string' ? JSON.parse(po.items) : po.items;
+                    itemsMatch = items.some(item => {
+                        const itemName = item.displayName || getItemName(item.itemId) || '';
+                        const itemCode = getItemCode(item.itemId) || '';
+                        return itemName.toLowerCase().includes(keyword) ||
+                               itemCode.toLowerCase().includes(keyword);
+                    });
+                }
+            } catch (e) {}
+
+            matchKeyword = codeMatch || projectNameMatch || projectCodeMatch || 
+                           vendorNameMatch || vendorCodeMatch || itemsMatch;
+        }
+
+        const matchStatus = statusFilter ? po.status === statusFilter : true;
+
+        let matchProject = true;
+        if (projectFilter) {
+            const selectedProject = projects.find(p => p.code === projectFilter || p.id === parseInt(projectFilter));
+            if (selectedProject) {
+                matchProject = po.projectCode === selectedProject.code;
+            } else {
+                matchProject = false;
+            }
+        }
+
+        let matchVendor = true;
+        if (vendorFilter) {
+            const selectedVendor = vendors.find(v => v.code === vendorFilter || v.id === parseInt(vendorFilter));
+            if (selectedVendor) {
+                matchVendor = po.vendorCode === selectedVendor.code;
+            } else {
+                matchVendor = false;
+            }
+        }
+
+        return matchKeyword && matchStatus && matchProject && matchVendor;
+    });
+}
+
+// ====== HÀM SORT DỮ LIỆU ======
+function sortPOData(data) {
+    const { sortBy, sortOrder } = poState;
+    const order = sortOrder === 'asc' ? 1 : -1;
+
+    return [...data].sort((a, b) => {
+        let valA = a[sortBy] || '';
+        let valB = b[sortBy] || '';
+
+        if (sortBy === 'projectName') {
+            valA = a.projectName || a.projectCode || '';
+            valB = b.projectName || b.projectCode || '';
+        } else if (sortBy === 'vendorName') {
+            valA = a.vendorName || a.vendorCode || '';
+            valB = b.vendorName || b.vendorCode || '';
+        } else if (sortBy === 'createdAt') {
+            valA = new Date(a.createdAt || 0);
+            valB = new Date(b.createdAt || 0);
+        } else if (sortBy === 'status') {
+            const statusOrder = { 'DRAFT': 0, 'PENDING': 1, 'PENDING_PLANNING': 2, 'PLANNING_APPROVED': 3, 'PENDING_PROJECT': 4, 'PROJECT_APPROVED': 5, 'PENDING_CEO': 6, 'APPROVED': 7, 'REJECTED': 8 };
+            valA = statusOrder[a.status] || 0;
+            valB = statusOrder[b.status] || 0;
+        }
+
+        if (typeof valA === 'string') valA = valA.toLowerCase();
+        if (typeof valB === 'string') valB = valB.toLowerCase();
+
+        if (valA < valB) return -1 * order;
+        if (valA > valB) return 1 * order;
+        return 0;
+    });
+}
+
 // ====== RENDER DANH SÁCH PO ======
 async function renderPO(page = null) {
     try {
-        const pos = await api.getPOs();
-        const filter = document.getElementById('po-filter')?.value?.toLowerCase() || '';
-        const statusFilter = document.getElementById('po-status-filter')?.value || '';
+        const [pos, projects, vendors] = await Promise.all([
+            api.getPOs(),
+            api.getProjects(),
+            api.getVendors()
+        ]);
+        window._projectsCache = projects;
+        window._vendorsCache = vendors;
+        saveData('projects', projects);
+        saveData('vendors', vendors);
 
-        const filtered = pos.filter(p => {
-            const matchCode = (p.code || '').toLowerCase().includes(filter);
-            const matchProject = (p.projectName || p.projectCode || '').toLowerCase().includes(filter);
-            const matchStatus = statusFilter ? p.status === statusFilter : true;
-            return (matchCode || matchProject) && matchStatus;
-        });
+        if (page) poState.page = page;
 
-        if (page) poPageState.page = page;
+        let filtered = filterPOData(pos, projects, vendors);
+        filtered = sortPOData(filtered);
+
         const perPage = getPageSize('po');
-        poPageState.perPage = perPage;
-        const paging = paginate(filtered, poPageState.page, perPage);
+        poState.perPage = perPage;
+        const paging = paginate(filtered, poState.page, perPage);
 
-        // ===== KIỂM TRA QUYỀN =====
         const canCreate = hasPermission('po.create');
-
-        // Ẩn/hiện nút "Tạo PO"
         const btnCreate = document.getElementById('btn-create-po');
         if (btnCreate) {
             btnCreate.style.display = canCreate ? 'inline-block' : 'none';
         }
 
-        // ===== TẠO NỘI DUNG (chỉ filter + bảng, KHÔNG có header) =====
         let html = `
             <div class="filter-bar">
-                <input type="text" id="po-filter" placeholder="Tìm theo mã hoặc dự án..." style="flex:1;" />
-                <select id="po-status-filter">
-                    <option value="">Tất cả</option>
-                    <option value="DRAFT">DRAFT</option>
-                    <option value="PENDING">PENDING</option>
-                    <option value="APPROVED">APPROVED</option>
-                    <option value="REJECTED">REJECTED</option>
+                <input type="text" id="po-filter" placeholder="Tìm theo mã, dự án, NCC, vật tư..." style="flex:2;" value="${poState.filterText}">
+                <select id="po-status-filter" style="flex:1;">
+                    <option value="">Tất cả trạng thái</option>
+                    <option value="DRAFT" ${poState.statusFilter === 'DRAFT' ? 'selected' : ''}>DRAFT</option>
+                    <option value="PENDING" ${poState.statusFilter === 'PENDING' ? 'selected' : ''}>PENDING</option>
+                    <option value="PENDING_PLANNING" ${poState.statusFilter === 'PENDING_PLANNING' ? 'selected' : ''}>PENDING_PLANNING</option>
+                    <option value="PLANNING_APPROVED" ${poState.statusFilter === 'PLANNING_APPROVED' ? 'selected' : ''}>PLANNING_APPROVED</option>
+                    <option value="PENDING_PROJECT" ${poState.statusFilter === 'PENDING_PROJECT' ? 'selected' : ''}>PENDING_PROJECT</option>
+                    <option value="PROJECT_APPROVED" ${poState.statusFilter === 'PROJECT_APPROVED' ? 'selected' : ''}>PROJECT_APPROVED</option>
+                    <option value="PENDING_CEO" ${poState.statusFilter === 'PENDING_CEO' ? 'selected' : ''}>PENDING_CEO</option>
+                    <option value="APPROVED" ${poState.statusFilter === 'APPROVED' ? 'selected' : ''}>APPROVED</option>
+                    <option value="REJECTED" ${poState.statusFilter === 'REJECTED' ? 'selected' : ''}>REJECTED</option>
                 </select>
-                <button class="btn btn-sm" onclick="renderPO()"><i class="fas fa-search"></i></button>
+                <select id="po-project-filter" style="flex:1;">
+                    <option value="">Tất cả dự án</option>
+                    ${projects.map(p => `<option value="${p.code}" ${poState.projectFilter === p.code ? 'selected' : ''}>${p.code} - ${p.name}</option>`).join('')}
+                </select>
+                <select id="po-vendor-filter" style="flex:1;">
+                    <option value="">Tất cả NCC</option>
+                    ${vendors.map(v => `<option value="${v.code}" ${poState.vendorFilter === v.code ? 'selected' : ''}>${v.code} - ${v.name}</option>`).join('')}
+                </select>
+                <select id="po-sort" style="flex:1;">
+                    <option value="createdAt_desc" ${poState.sortBy === 'createdAt' && poState.sortOrder === 'desc' ? 'selected' : ''}>Ngày tạo (mới nhất)</option>
+                    <option value="createdAt_asc" ${poState.sortBy === 'createdAt' && poState.sortOrder === 'asc' ? 'selected' : ''}>Ngày tạo (cũ nhất)</option>
+                    <option value="code_asc" ${poState.sortBy === 'code' && poState.sortOrder === 'asc' ? 'selected' : ''}>Mã (A→Z)</option>
+                    <option value="code_desc" ${poState.sortBy === 'code' && poState.sortOrder === 'desc' ? 'selected' : ''}>Mã (Z→A)</option>
+                    <option value="projectName_asc" ${poState.sortBy === 'projectName' && poState.sortOrder === 'asc' ? 'selected' : ''}>Dự án (A→Z)</option>
+                    <option value="projectName_desc" ${poState.sortBy === 'projectName' && poState.sortOrder === 'desc' ? 'selected' : ''}>Dự án (Z→A)</option>
+                    <option value="vendorName_asc" ${poState.sortBy === 'vendorName' && poState.sortOrder === 'asc' ? 'selected' : ''}>NCC (A→Z)</option>
+                    <option value="vendorName_desc" ${poState.sortBy === 'vendorName' && poState.sortOrder === 'desc' ? 'selected' : ''}>NCC (Z→A)</option>
+                    <option value="status" ${poState.sortBy === 'status' ? 'selected' : ''}>Trạng thái</option>
+                </select>
+                <button class="btn btn-sm" onclick="resetPOFilters()"><i class="fas fa-undo"></i> Reset</button>
             </div>
             <div class="table-responsive">
                 <table>
@@ -109,7 +235,10 @@ async function renderPO(page = null) {
             try {
                 if (p.items) {
                     const items = typeof p.items === 'string' ? JSON.parse(p.items) : p.items;
-                    itemsStr = items.map(it => `${getItemCode(it.itemId)} (${it.quantity})`).join(', ');
+                    itemsStr = items.map(it => {
+                        const name = it.displayName || getItemName(it.itemId) || 'N/A';
+                        return `${name} (${it.quantity})`;
+                    }).join(', ');
                 }
             } catch (e) { itemsStr = 'Lỗi parse'; }
 
@@ -119,35 +248,69 @@ async function renderPO(page = null) {
             const projectLink = projectId ?
                 `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="viewProject(${projectId})">${p.projectName || p.projectCode || '--'}</span>` :
                 (p.projectName || p.projectCode || '--');
+            const vendorName = p.vendorName || p.vendorCode || '--';
 
             html += `<tr>
                 <td style="cursor:pointer; color:#1a3c6e; font-weight:500;" onclick="viewPO(${p.id})">${p.code || '--'}</td>
                 <td>${projectLink}</td>
-                <td>${p.vendorName || p.vendorCode || '--'}</td>
+                <td>${vendorName}</td>
                 <td>${itemsStr}</td>
                 <td>${statusBadge}</td>
                 <td>${actions}</td>
             </tr>`;
         }
 
-                html += `</tbody></table></div>`;
+        html += `</tbody></table></div>`;
         html += buildPaginationHTML(paging, 'renderPO', 'po');
         document.getElementById('po-container').innerHTML = html;
 
-        // Gắn sự kiện cho filter
+        // Gắn sự kiện
         const filterInput = document.getElementById('po-filter');
         const statusSelect = document.getElementById('po-status-filter');
-        if (filterInput) {
-            filterInput.removeEventListener('input', renderPO);
-const debouncedPOFilter = debounce(() => {
-    poPageState.page = 1;
-    renderPO();
-}, 300);
+        const projectSelect = document.getElementById('po-project-filter');
+        const vendorSelect = document.getElementById('po-vendor-filter');
+        const sortSelect = document.getElementById('po-sort');
 
-filterInput?.addEventListener('input', debouncedPOFilter);        }
+        if (filterInput) {
+            filterInput.removeEventListener('input', debouncedPOFilter);
+            filterInput.addEventListener('input', function(e) {
+                poState.filterText = this.value;
+                debouncedPOFilter();
+            });
+        }
+
         if (statusSelect) {
-            statusSelect.removeEventListener('change', renderPO);
-            statusSelect.addEventListener('change', () => { poPageState.page = 1; renderPO(); });
+            statusSelect.removeEventListener('change', debouncedPOFilter);
+            statusSelect.addEventListener('change', function(e) {
+                poState.statusFilter = this.value;
+                debouncedPOFilter();
+            });
+        }
+
+        if (projectSelect) {
+            projectSelect.removeEventListener('change', debouncedPOFilter);
+            projectSelect.addEventListener('change', function(e) {
+                poState.projectFilter = this.value;
+                debouncedPOFilter();
+            });
+        }
+
+        if (vendorSelect) {
+            vendorSelect.removeEventListener('change', debouncedPOFilter);
+            vendorSelect.addEventListener('change', function(e) {
+                poState.vendorFilter = this.value;
+                debouncedPOFilter();
+            });
+        }
+
+        if (sortSelect) {
+            sortSelect.removeEventListener('change', debouncedPOFilter);
+            sortSelect.addEventListener('change', function(e) {
+                const [sortBy, sortOrder] = this.value.split('_');
+                poState.sortBy = sortBy;
+                poState.sortOrder = sortOrder || 'desc';
+                debouncedPOFilter();
+            });
         }
 
     } catch (error) {
@@ -156,71 +319,29 @@ filterInput?.addEventListener('input', debouncedPOFilter);        }
     }
 }
 
-// ====== TẠO PO MỚI ======
-async function showCreatePOModal(pr = null) {
-    try {
-        const projects = await api.getProjects();
-        const projectOpts = projects.map(p => 
-            `<option value="${p.code}" ${pr && p.code === pr.projectCode ? 'selected' : ''}>${p.code} - ${p.name}</option>`
-        ).join('');
-        const vendors = await api.getVendors();
-        const vendorOpts = vendors.map(v => 
-            `<option value="${v.code}" ${pr && v.code === pr.vendorCode ? 'selected' : ''}>${v.code} - ${v.name}</option>`
-        ).join('');
-
-        let initialItems = [];
-        if (pr && pr.items) {
-            try {
-                const items = typeof pr.items === 'string' ? JSON.parse(pr.items) : pr.items;
-                initialItems = items.map(it => ({
-                    itemId: it.itemId,
-                    quantity: it.quantity || 1,
-                    itemName: getItemName(it.itemId),
-                    itemCode: getItemCode(it.itemId),
-                    unit: getItemUnit(it.itemId)
-                }));
-            } catch (e) {}
-        }
-        _poSelectedItems = initialItems;
-        _poMode = 'create';
-        _poEditId = null;
-
-        showModal('Tạo Purchase Order (PO)', `
-            <div class="form-group"><label>Dự án</label>
-                <select id="f-po-project">${projectOpts}</select>
-            </div>
-            <div class="form-group"><label>Nhà cung cấp</label>
-                <select id="f-po-vendor">${vendorOpts}</select>
-            </div>
-            <div class="form-group">
-                <label>Danh sách vật tư</label>
-                <button type="button" class="btn btn-sm btn-info" onclick="openItemSelectorForPO()">
-                    <i class="fas fa-plus"></i> Chọn vật tư
-                </button>
-                <div id="po-selected-items-container" style="margin-top:8px; max-height:200px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:6px; padding:8px;">
-                    ${_renderPOSelectedItemsHTML()}
-                </div>
-            </div>
-            <div class="form-group"><label>Ghi chú</label><textarea id="f-po-note" rows="2">${pr ? pr.note || '' : ''}</textarea></div>
-            <div class="modal-actions">
-                <button class="btn" onclick="savePOManual()">Lưu</button>
-                <button class="btn btn-danger" onclick="closeModal()">Hủy</button>
-            </div>
-        `);
-
-        setTimeout(() => {
-            _attachPOQuantityEvents();
-        }, 100);
-    } catch (error) {
-        showError('Lỗi tải dữ liệu: ' + error.message);
-    }
+// ====== RESET FILTER ======
+function resetPOFilters() {
+    poState.filterText = '';
+    poState.statusFilter = '';
+    poState.projectFilter = '';
+    poState.vendorFilter = '';
+    poState.sortBy = 'createdAt';
+    poState.sortOrder = 'desc';
+    poState.page = 1;
+    renderPO();
 }
 
+// ====== BIẾN TOÀN CỤC CHO ITEM SELECTOR ======
+let _poSelectedItems = [];
+let _poMode = 'create';
+let _poEditId = null;
+
+// ====== CALLBACK TỪ MODAL CHỌN VẬT TƯ ======
 function poItemSelectorCallback(selectedItems) {
     _poSelectedItems = selectedItems.map(item => ({
         itemId: item.itemId,
         quantity: item.quantity || 1,
-        itemName: item.itemName || getItemName(item.itemId),
+        itemName: item.displayName || item.itemName || getItemName(item.itemId),
         itemCode: item.itemCode || getItemCode(item.itemId),
         unit: item.unit || getItemUnit(item.itemId)
     }));
@@ -281,6 +402,66 @@ function openItemSelectorForPO() {
     openItemSelectorHelper(selected, poItemSelectorCallback, 'po');
 }
 
+// ====== TẠO PO MỚI ======
+async function showCreatePOModal(pr = null) {
+    try {
+        const projects = await api.getProjects();
+        const projectOpts = projects.map(p => 
+            `<option value="${p.code}" ${pr && p.code === pr.projectCode ? 'selected' : ''}>${p.code} - ${p.name}</option>`
+        ).join('');
+        const vendors = await api.getVendors();
+        const vendorOpts = vendors.map(v => 
+            `<option value="${v.code}" ${pr && v.code === pr.vendorCode ? 'selected' : ''}>${v.code} - ${v.name}</option>`
+        ).join('');
+
+        let initialItems = [];
+        if (pr && pr.items) {
+            try {
+                const items = typeof pr.items === 'string' ? JSON.parse(pr.items) : pr.items;
+                initialItems = items.map(it => ({
+                    itemId: it.itemId,
+                    quantity: it.quantity || 1,
+                    itemName: it.displayName || getItemName(it.itemId),
+                    itemCode: getItemCode(it.itemId),
+                    unit: getItemUnit(it.itemId)
+                }));
+            } catch (e) {}
+        }
+        _poSelectedItems = initialItems;
+        _poMode = 'create';
+        _poEditId = null;
+
+        showModal('Tạo Purchase Order (PO)', `
+            <div class="form-group"><label>Dự án</label>
+                <select id="f-po-project">${projectOpts}</select>
+            </div>
+            <div class="form-group"><label>Nhà cung cấp</label>
+                <select id="f-po-vendor">${vendorOpts}</select>
+            </div>
+            <div class="form-group">
+                <label>Danh sách vật tư</label>
+                <button type="button" class="btn btn-sm btn-info" onclick="openItemSelectorForPO()">
+                    <i class="fas fa-plus"></i> Chọn vật tư
+                </button>
+                <div id="po-selected-items-container" style="margin-top:8px; max-height:200px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:6px; padding:8px;">
+                    ${_renderPOSelectedItemsHTML()}
+                </div>
+            </div>
+            <div class="form-group"><label>Ghi chú</label><textarea id="f-po-note" rows="2">${pr ? pr.note || '' : ''}</textarea></div>
+            <div class="modal-actions">
+                <button class="btn" onclick="savePOManual()">Lưu</button>
+                <button class="btn btn-danger" onclick="closeModal()">Hủy</button>
+            </div>
+        `);
+
+        setTimeout(() => {
+            _attachPOQuantityEvents();
+        }, 100);
+    } catch (error) {
+        showError('Lỗi tải dữ liệu: ' + error.message);
+    }
+}
+
 // ====== LƯU PO ======
 async function savePOManual() {
     if (!hasPermission('po.create')) {
@@ -291,7 +472,12 @@ async function savePOManual() {
     const projectCode = document.getElementById('f-po-project').value;
     const vendorCode = document.getElementById('f-po-vendor').value;
     const note = document.getElementById('f-po-note').value.trim();
-    const items = _poSelectedItems || [];
+
+    const items = _poSelectedItems.map(item => ({
+        itemId: item.itemId,
+        quantity: item.quantity,
+        displayName: item.itemName
+    }));
 
     if (!projectCode || !vendorCode || items.length === 0) {
         showError('Vui lòng chọn dự án, nhà cung cấp và ít nhất một vật tư');
@@ -309,7 +495,7 @@ async function savePOManual() {
             projectName: proj ? proj.name : '',
             vendorCode,
             vendorName: vendor ? vendor.name : '',
-            items: JSON.stringify(items.map(it => ({ itemId: it.itemId, quantity: it.quantity }))),
+            items: JSON.stringify(items),
             note
         };
 
@@ -341,9 +527,15 @@ async function viewPO(id) {
             }
         } catch (e) { items = []; }
 
-        const itemsHtml = buildItemsTable(items);
-        
-        // Lấy workflow steps từ workflowId của PO
+        const itemsHtml = items.map(it => `
+            <tr>
+                <td>${getItemCode(it.itemId)}</td>
+                <td>${it.displayName || getItemName(it.itemId)}</td>
+                <td>${getItemUnit(it.itemId)}</td>
+                <td>${it.quantity}</td>
+            </tr>
+        `).join('');
+
         let stepsConfig = [
             { id: 1, label: 'Phòng Kế hoạch' },
             { id: 2, label: 'Phòng Dự án' },
@@ -361,26 +553,7 @@ async function viewPO(id) {
                 }
             } catch (e) {
                 console.warn('Không lấy được workflow steps:', e);
-                try {
-                    const workflowSteps = await api.getStepsWithStatus('po');
-                    if (workflowSteps && workflowSteps.length > 0) {
-                        stepsConfig = workflowSteps.map(s => ({
-                            id: s.step,
-                            label: s.label || `Bước ${s.step}`
-                        }));
-                    }
-                } catch (e2) {}
             }
-        } else {
-            try {
-                const workflowSteps = await api.getStepsWithStatus('po');
-                if (workflowSteps && workflowSteps.length > 0) {
-                    stepsConfig = workflowSteps.map(s => ({
-                        id: s.step,
-                        label: s.label || `Bước ${s.step}`
-                    }));
-                }
-            } catch (e) {}
         }
 
         const approvalHtml = renderApprovalProgress(po.status, po.approvalStep || 1, stepsConfig);
@@ -389,6 +562,15 @@ async function viewPO(id) {
             `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="closeModal(); viewProject(${projectId});">${po.projectName || po.projectCode || '--'}</span>` :
             (po.projectName || po.projectCode || '--');
         const totalAmount = items.reduce((sum, it) => sum + ((it.price || 0) * (it.quantity || 0)), 0);
+
+        const itemsTable = `
+            <div class="table-responsive">
+                <table>
+                    <thead><tr><th>Mã</th><th>Tên</th><th>ĐVT</th><th>Số lượng</th></tr></thead>
+                    <tbody>${itemsHtml}</tbody>
+                </table>
+            </div>
+        `;
 
         showModal('Chi tiết PO', `
             <div class="detail-grid">
@@ -400,7 +582,7 @@ async function viewPO(id) {
                 <div><span class="label">Trạng thái:</span> <span class="value">${getStatusBadge(po.status)}</span></div>
                 ${totalAmount > 0 ? `<div><span class="label">Tổng tiền:</span> <span class="value">${totalAmount.toLocaleString()} VND</span></div>` : ''}
                 <div style="grid-column:1/-1;"><span class="label">Tiến độ duyệt:</span><br>${approvalHtml}</div>
-                <div style="grid-column:1/-1;"><span class="label">Danh sách vật tư:</span><br>${itemsHtml}</div>
+                <div style="grid-column:1/-1;"><span class="label">Danh sách vật tư:</span><br>${itemsTable}</div>
                 <div style="grid-column:1/-1;"><span class="label">Ghi chú:</span> <span class="value">${po.note || ''}</span></div>
             </div>
             <div class="modal-actions">
@@ -432,23 +614,6 @@ async function editPO(id) {
             return;
         }
 
-        let initialItems = [];
-        try {
-            if (po.items) {
-                const items = typeof po.items === 'string' ? JSON.parse(po.items) : po.items;
-                initialItems = items.map(it => ({
-                    itemId: it.itemId,
-                    quantity: it.quantity || 1,
-                    itemName: getItemName(it.itemId),
-                    itemCode: getItemCode(it.itemId),
-                    unit: getItemUnit(it.itemId)
-                }));
-            }
-        } catch (e) {}
-        _poSelectedItems = initialItems;
-        _poMode = 'edit';
-        _poEditId = id;
-
         const projects = await api.getProjects();
         const projectOpts = projects.map(p =>
             `<option value="${p.code}" ${p.code === po.projectCode ? 'selected' : ''}>${p.code} - ${p.name}</option>`
@@ -457,6 +622,23 @@ async function editPO(id) {
         const vendorOpts = vendors.map(v =>
             `<option value="${v.code}" ${v.code === po.vendorCode ? 'selected' : ''}>${v.code} - ${v.name}</option>`
         ).join('');
+
+        let itemsData = [];
+        try {
+            if (po.items) {
+                const items = typeof po.items === 'string' ? JSON.parse(po.items) : po.items;
+                itemsData = items.map(it => ({
+                    itemId: it.itemId,
+                    quantity: it.quantity || 1,
+                    itemName: it.displayName || getItemName(it.itemId),
+                    itemCode: getItemCode(it.itemId),
+                    unit: getItemUnit(it.itemId)
+                }));
+            }
+        } catch (e) {}
+        _poSelectedItems = itemsData;
+        _poMode = 'edit';
+        _poEditId = id;
 
         showModal('Sửa Purchase Order', `
             <div class="form-group"><label>Dự án</label>
@@ -494,7 +676,12 @@ async function updatePO(id) {
     const projectCode = document.getElementById('f-po-project').value;
     const vendorCode = document.getElementById('f-po-vendor').value;
     const note = document.getElementById('f-po-note').value.trim();
-    const items = _poSelectedItems || [];
+
+    const items = _poSelectedItems.map(item => ({
+        itemId: item.itemId,
+        quantity: item.quantity,
+        displayName: item.itemName
+    }));
 
     if (!projectCode || !vendorCode || items.length === 0) {
         showError('Vui lòng chọn dự án, NCC và ít nhất một vật tư');
@@ -512,7 +699,7 @@ async function updatePO(id) {
             projectName: proj ? proj.name : '',
             vendorCode,
             vendorName: vendor ? vendor.name : '',
-            items: JSON.stringify(items.map(it => ({ itemId: it.itemId, quantity: it.quantity }))),
+            items: JSON.stringify(items),
             note
         };
 
@@ -622,9 +809,12 @@ window.getPOActions = getPOActions;
 window.savePOManual = savePOManual;
 window.showCreatePOFromPRModal = showCreatePOFromPRModal;
 window.showCreatePOModal = showCreatePOModal;
+window.resetPOFilters = resetPOFilters;
+
+// Item selector functions
 window.poItemSelectorCallback = poItemSelectorCallback;
 window.renderPOSelectedItems = renderPOSelectedItems;
 window.removePOItem = removePOItem;
 window.openItemSelectorForPO = openItemSelectorForPO;
 
-console.log('✅ PO module updated with permission checks (header removed).');
+console.log('✅ PO module updated with multi-field search, sort, and advanced filters.');

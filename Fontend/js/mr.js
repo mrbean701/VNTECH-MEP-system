@@ -1,8 +1,23 @@
 // ================================================================
 // MR (Material Request) - SỬ DỤNG API - HỖ TRỢ WORKFLOW ĐỘNG
 // ================================================================
-let mrPageState = { page: 1, perPage: 10 };
 
+// ====== STATE ======
+const mrState = {
+    page: 1,
+    perPage: 10,
+    filterText: '',
+    statusFilter: '',
+    projectFilter: '',
+    sortBy: 'createdAt',
+    sortOrder: 'desc'
+};
+
+// ====== DEBOUNCE FILTER ======
+const debouncedMRFilter = debounce(() => {
+    mrState.page = 1;
+    renderMR();
+}, 300);
 
 // ====== HÀM LẤY ACTION ======
 function getMRActions(mr) {
@@ -11,21 +26,20 @@ function getMRActions(mr) {
 
     actions += `<button class="btn btn-info btn-sm" onclick="viewMR(${mr.id})"><i class="fas fa-eye"></i></button>`;
 
-    const canEdit = hasPermission('mr.edit') && 
-                   (mr.status === 'DRAFT' || mr.status === 'PENDING') && 
+    const canEdit = hasPermission('mr.edit') &&
+                   (mr.status === 'DRAFT' || mr.status === 'PENDING') &&
                    (user?.role === 'ADMIN' || user?.id === mr.createdBy);
     if (canEdit) {
         actions += ` <button class="btn btn-warning btn-sm" onclick="editMR(${mr.id})"><i class="fas fa-edit"></i></button>`;
     }
 
-    const canDelete = hasPermission('mr.delete') && 
-                     (user?.role === 'ADMIN' || user?.id === mr.createdBy) && 
+    const canDelete = hasPermission('mr.delete') &&
+                     (user?.role === 'ADMIN' || user?.id === mr.createdBy) &&
                      mr.status === 'DRAFT';
     if (canDelete) {
         actions += ` <button class="btn btn-danger btn-sm" onclick="deleteMR(${mr.id})"><i class="fas fa-trash"></i></button>`;
     }
 
-    // ✅ SỬA: Gửi duyệt → Xác nhận
     const canSubmit = hasPermission('mr.submit') && mr.status === 'DRAFT';
     if (canSubmit) {
         actions += ` <button class="btn btn-success btn-sm" onclick="submitMR(${mr.id})">Xác nhận</button>`;
@@ -44,24 +58,103 @@ function getMRActions(mr) {
     return actions || '-';
 }
 
+// ====== HÀM FILTER DỮ LIỆU (NHẬN DANH SÁCH DỰ ÁN) ======
+function filterMRData(mrs, projects) {
+    const { filterText, statusFilter, projectFilter } = mrState;
+    const keyword = filterText.toLowerCase().trim();
+
+    return mrs.filter(mr => {
+        // Lọc theo từ khóa (multi-field)
+        let matchKeyword = true;
+        if (keyword) {
+            const codeMatch = (mr.code || '').toLowerCase().includes(keyword);
+            const projectNameMatch = (mr.projectName || '').toLowerCase().includes(keyword);
+            const projectCodeMatch = (mr.projectCode || '').toLowerCase().includes(keyword);
+
+            let itemsMatch = false;
+            try {
+                if (mr.items) {
+                    const items = typeof mr.items === 'string' ? JSON.parse(mr.items) : mr.items;
+                    itemsMatch = items.some(item => {
+                        const itemName = item.displayName || getItemName(item.itemId) || '';
+                        const itemCode = getItemCode(item.itemId) || '';
+                        return itemName.toLowerCase().includes(keyword) ||
+                               itemCode.toLowerCase().includes(keyword);
+                    });
+                }
+            } catch (e) {}
+
+            matchKeyword = codeMatch || projectNameMatch || projectCodeMatch || itemsMatch;
+        }
+
+        // Lọc theo status
+        const matchStatus = statusFilter ? mr.status === statusFilter : true;
+
+        // Lọc theo dự án (dùng projects truyền vào)
+        let matchProject = true;
+        if (projectFilter) {
+            const selectedProject = projects.find(p => p.code === projectFilter || p.id === parseInt(projectFilter));
+            if (selectedProject) {
+                matchProject = mr.projectCode === selectedProject.code;
+            } else {
+                matchProject = false;
+            }
+        }
+
+        return matchKeyword && matchStatus && matchProject;
+    });
+}
+
+// ====== HÀM SORT DỮ LIỆU ======
+function sortMRData(data) {
+    const { sortBy, sortOrder } = mrState;
+    const order = sortOrder === 'asc' ? 1 : -1;
+
+    return [...data].sort((a, b) => {
+        let valA = a[sortBy] || '';
+        let valB = b[sortBy] || '';
+
+        if (sortBy === 'projectName') {
+            valA = a.projectName || a.projectCode || '';
+            valB = b.projectName || b.projectCode || '';
+        } else if (sortBy === 'createdAt') {
+            valA = new Date(a.createdAt || 0);
+            valB = new Date(b.createdAt || 0);
+        } else if (sortBy === 'status') {
+            const statusOrder = { 'DRAFT': 0, 'PENDING': 1, 'APPROVED': 2, 'REJECTED': 3 };
+            valA = statusOrder[a.status] || 0;
+            valB = statusOrder[b.status] || 0;
+        }
+
+        if (typeof valA === 'string') valA = valA.toLowerCase();
+        if (typeof valB === 'string') valB = valB.toLowerCase();
+
+        if (valA < valB) return -1 * order;
+        if (valA > valB) return 1 * order;
+        return 0;
+    });
+}
+
 // ====== RENDER DANH SÁCH MR ======
 async function renderMR(page = null) {
     try {
-        const mrs = await api.getMRs();
-        const filter = document.getElementById('mr-filter')?.value?.toLowerCase() || '';
-        const statusFilter = document.getElementById('mr-status-filter')?.value || '';
+        // Lấy cả MR và danh sách dự án cùng lúc
+        const [mrs, projects] = await Promise.all([
+            api.getMRs(),
+            api.getProjects()
+        ]);
+        // Lưu projects vào cache để dùng cho getProjectIdByCode
+        window._projectsCache = projects;
+        saveData('projects', projects);
 
-        const filtered = mrs.filter(m => {
-            const matchCode = (m.code || '').toLowerCase().includes(filter);
-            const matchProject = (m.projectName || m.projectCode || '').toLowerCase().includes(filter);
-            const matchStatus = statusFilter ? m.status === statusFilter : true;
-            return (matchCode || matchProject) && matchStatus;
-        });
+        if (page) mrState.page = page;
 
-        if (page) mrPageState.page = page;
+        let filtered = filterMRData(mrs, projects);
+        filtered = sortMRData(filtered);
+
         const perPage = getPageSize('mr');
-        mrPageState.perPage = perPage;
-        const paging = paginate(filtered, mrPageState.page, perPage);
+        mrState.perPage = perPage;
+        const paging = paginate(filtered, mrState.page, perPage);
 
         const canCreate = hasPermission('mr.create');
         const btnCreate = document.getElementById('btn-create-mr');
@@ -69,17 +162,31 @@ async function renderMR(page = null) {
             btnCreate.style.display = canCreate ? 'inline-block' : 'none';
         }
 
+        // HTML filter bar
         let html = `
             <div class="filter-bar">
-                <input type="text" id="mr-filter" placeholder="Tìm theo mã hoặc dự án..." style="flex:1;" />
-                <select id="mr-status-filter">
-                    <option value="">Tất cả</option>
-                    <option value="DRAFT">DRAFT</option>
-                    <option value="PENDING">PENDING</option>
-                    <option value="APPROVED">APPROVED</option>
-                    <option value="REJECTED">REJECTED</option>
+                <input type="text" id="mr-filter" placeholder="Tìm theo mã, dự án, vật tư..." style="flex:2;" value="${mrState.filterText}">
+                <select id="mr-status-filter" style="flex:1;">
+                    <option value="">Tất cả trạng thái</option>
+                    <option value="DRAFT" ${mrState.statusFilter === 'DRAFT' ? 'selected' : ''}>DRAFT</option>
+                    <option value="PENDING" ${mrState.statusFilter === 'PENDING' ? 'selected' : ''}>PENDING</option>
+                    <option value="APPROVED" ${mrState.statusFilter === 'APPROVED' ? 'selected' : ''}>APPROVED</option>
+                    <option value="REJECTED" ${mrState.statusFilter === 'REJECTED' ? 'selected' : ''}>REJECTED</option>
                 </select>
-                <button class="btn btn-sm" onclick="renderMR()"><i class="fas fa-search"></i></button>
+                <select id="mr-project-filter" style="flex:1;">
+                    <option value="">Tất cả dự án</option>
+                    ${projects.map(p => `<option value="${p.code}" ${mrState.projectFilter === p.code ? 'selected' : ''}>${p.code} - ${p.name}</option>`).join('')}
+                </select>
+                <select id="mr-sort" style="flex:1;">
+                    <option value="createdAt_desc" ${mrState.sortBy === 'createdAt' && mrState.sortOrder === 'desc' ? 'selected' : ''}>Ngày tạo (mới nhất)</option>
+                    <option value="createdAt_asc" ${mrState.sortBy === 'createdAt' && mrState.sortOrder === 'asc' ? 'selected' : ''}>Ngày tạo (cũ nhất)</option>
+                    <option value="code_asc" ${mrState.sortBy === 'code' && mrState.sortOrder === 'asc' ? 'selected' : ''}>Mã (A→Z)</option>
+                    <option value="code_desc" ${mrState.sortBy === 'code' && mrState.sortOrder === 'desc' ? 'selected' : ''}>Mã (Z→A)</option>
+                    <option value="projectName_asc" ${mrState.sortBy === 'projectName' && mrState.sortOrder === 'asc' ? 'selected' : ''}>Dự án (A→Z)</option>
+                    <option value="projectName_desc" ${mrState.sortBy === 'projectName' && mrState.sortOrder === 'desc' ? 'selected' : ''}>Dự án (Z→A)</option>
+                    <option value="status" ${mrState.sortBy === 'status' ? 'selected' : ''}>Trạng thái</option>
+                </select>
+                <button class="btn btn-sm" onclick="resetMRFilters()"><i class="fas fa-undo"></i> Reset</button>
             </div>
             <div class="table-responsive">
                 <table>
@@ -105,7 +212,10 @@ async function renderMR(page = null) {
             try {
                 if (m.items) {
                     const items = typeof m.items === 'string' ? JSON.parse(m.items) : m.items;
-                    itemsStr = items.map(it => `${getItemCode(it.itemId)} (${it.quantity})`).join(', ');
+                    itemsStr = items.map(it => {
+                        const name = it.displayName || getItemName(it.itemId) || 'N/A';
+                        return `${name} (${it.quantity})`;
+                    }).join(', ');
                 }
             } catch (e) { itemsStr = 'Lỗi parse'; }
 
@@ -130,20 +240,44 @@ async function renderMR(page = null) {
         html += buildPaginationHTML(paging, 'renderMR', 'mr');
         document.getElementById('mr-container').innerHTML = html;
 
+        // Gắn sự kiện
         const filterInput = document.getElementById('mr-filter');
         const statusSelect = document.getElementById('mr-status-filter');
-        if (filterInput) {
-            filterInput.removeEventListener('input', renderMR);
-            const debouncedMRFilter = debounce(() => {
-                    mrPageState.page = 1;
-                    renderMR();
-                }, 300);
+        const projectSelect = document.getElementById('mr-project-filter');
+        const sortSelect = document.getElementById('mr-sort');
 
-        filterInput?.addEventListener('input', debouncedMRFilter);        
+        if (filterInput) {
+            filterInput.removeEventListener('input', debouncedMRFilter);
+            filterInput.addEventListener('input', function(e) {
+                mrState.filterText = this.value;
+                debouncedMRFilter();
+            });
         }
+
         if (statusSelect) {
-            statusSelect.removeEventListener('change', renderMR);
-            statusSelect.addEventListener('change', () => { mrPageState.page = 1; renderMR(); });
+            statusSelect.removeEventListener('change', debouncedMRFilter);
+            statusSelect.addEventListener('change', function(e) {
+                mrState.statusFilter = this.value;
+                debouncedMRFilter();
+            });
+        }
+
+        if (projectSelect) {
+            projectSelect.removeEventListener('change', debouncedMRFilter);
+            projectSelect.addEventListener('change', function(e) {
+                mrState.projectFilter = this.value;
+                debouncedMRFilter();
+            });
+        }
+
+        if (sortSelect) {
+            sortSelect.removeEventListener('change', debouncedMRFilter);
+            sortSelect.addEventListener('change', function(e) {
+                const [sortBy, sortOrder] = this.value.split('_');
+                mrState.sortBy = sortBy;
+                mrState.sortOrder = sortOrder || 'desc';
+                debouncedMRFilter();
+            });
         }
 
     } catch (error) {
@@ -152,15 +286,96 @@ async function renderMR(page = null) {
     }
 }
 
-// ====== TẠO MR MỚI (MODAL) ======
-// Thay vì buildItemRowsForForm, chúng ta sẽ có nút "Chọn vật tư"
-// và container để hiển thị danh sách đã chọn.
+// ====== RESET FILTER ======
+function resetMRFilters() {
+    mrState.filterText = '';
+    mrState.statusFilter = '';
+    mrState.projectFilter = '';
+    mrState.sortBy = 'createdAt';
+    mrState.sortOrder = 'desc';
+    mrState.page = 1;
+    renderMR();
+}
 
+// ====== BIẾN TOÀN CỤC CHO ITEM SELECTOR ======
+let _mrSelectedItems = [];
+let _mrMode = 'create';
+let _mrEditId = null;
+
+// ====== CALLBACK TỪ MODAL CHỌN VẬT TƯ ======
+function mrItemSelectorCallback(selectedItems) {
+    _mrSelectedItems = selectedItems.map(item => ({
+        itemId: item.itemId,
+        quantity: item.quantity || 1,
+        itemName: item.itemName || getItemName(item.itemId),
+        itemCode: item.itemCode || getItemCode(item.itemId),
+        unit: item.unit || getItemUnit(item.itemId)
+    }));
+    renderMRSelectedItems();
+}
+
+function renderMRSelectedItems() {
+    const container = document.getElementById('mr-selected-items-container');
+    if (!container) return;
+    container.innerHTML = _renderMRSelectedItemsHTML();
+    _attachMRQuantityEvents();
+}
+
+function _renderMRSelectedItemsHTML() {
+    const items = _mrSelectedItems || [];
+    if (items.length === 0) {
+        return '<div style="color:#999; text-align:center; padding:8px;">Chưa chọn vật tư nào</div>';
+    }
+    let html = '';
+    items.forEach((item, index) => {
+        html += `
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:4px 8px; margin-bottom:4px; background:#f0f4f8; border-radius:4px;">
+                <span><strong>${item.itemCode}</strong> - ${item.itemName} (${item.unit})</span>
+                <span>Số lượng: <input type="number" class="mr-item-qty" data-index="${index}" value="${item.quantity}" style="width:70px; padding:4px; border:1px solid #ccc; border-radius:4px;" min="0.01" step="0.01"></span>
+                <button type="button" class="btn btn-sm btn-danger" onclick="removeMRItem(${index})"><i class="fas fa-times"></i></button>
+            </div>
+        `;
+    });
+    return html;
+}
+
+function _attachMRQuantityEvents() {
+    document.querySelectorAll('.mr-item-qty').forEach(input => {
+        input.removeEventListener('change', _onMRQtyChange);
+        input.addEventListener('change', _onMRQtyChange);
+    });
+}
+
+function _onMRQtyChange(e) {
+    const idx = parseInt(this.dataset.index);
+    const val = parseFloat(this.value) || 1;
+    if (val > 0 && _mrSelectedItems[idx]) {
+        _mrSelectedItems[idx].quantity = val;
+    } else {
+        this.value = _mrSelectedItems[idx]?.quantity || 1;
+    }
+}
+
+function removeMRItem(index) {
+    if (_mrSelectedItems && _mrSelectedItems.length > index) {
+        _mrSelectedItems.splice(index, 1);
+        renderMRSelectedItems();
+    }
+}
+
+function openItemSelectorForMR() {
+    const selected = _mrSelectedItems || [];
+    openItemSelectorHelper(selected, mrItemSelectorCallback, 'mr');
+}
+
+// ====== TẠO MR MỚI ======
 function showCreateMRModal() {
     api.getProjects().then(projects => {
         const projectOpts = projects.map(p => `<option value="${p.code}">${p.code} - ${p.name}</option>`).join('');
-        
-        // Tạo form với container cho selected items
+        _mrSelectedItems = [];
+        _mrMode = 'create';
+        _mrEditId = null;
+
         showModal('Tạo Material Request', `
             <div class="form-group"><label>Dự án</label>
                 <select id="f-mr-project"><option value="">-- Chọn --</option>${projectOpts}</select>
@@ -170,11 +385,11 @@ function showCreateMRModal() {
             <div class="form-group"><label>Người yêu cầu</label><input id="f-mr-requester" placeholder="Tên người yêu cầu"></div>
             <div class="form-group">
                 <label>Danh sách vật tư</label>
-                <button type="button" class="btn btn-sm btn-info" onclick="openItemSelectorForMR('create')">
+                <button type="button" class="btn btn-sm btn-info" onclick="openItemSelectorForMR()">
                     <i class="fas fa-plus"></i> Chọn vật tư
                 </button>
                 <div id="mr-selected-items-container" style="margin-top:8px; max-height:200px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:6px; padding:8px;">
-                    <div style="color:#999; text-align:center; padding:8px;">Chưa chọn vật tư nào</div>
+                    ${_renderMRSelectedItemsHTML()}
                 </div>
             </div>
             <div class="form-group"><label>Ghi chú</label><textarea id="f-mr-note" rows="2"></textarea></div>
@@ -184,70 +399,10 @@ function showCreateMRModal() {
             </div>
         `);
 
-        // Lưu trạng thái items tạm
-        window._mrSelectedItems = [];
-        window._mrMode = 'create';
-        window._mrEditId = null;
+        setTimeout(() => {
+            _attachMRQuantityEvents();
+        }, 100);
     }).catch(err => showError('Không thể tải dự án: ' + err.message));
-}
-
-// Hàm này được gọi từ modal chọn vật tư
-function mrItemSelectorCallback(selectedItems) {
-    window._mrSelectedItems = selectedItems.map(item => ({
-        itemId: item.itemId,
-        quantity: item.quantity,
-        itemName: item.itemName || getItemName(item.itemId),
-        itemCode: item.itemCode || getItemCode(item.itemId),
-        unit: item.unit || getItemUnit(item.itemId)
-    }));
-    renderMRSelectedItems();
-}
-
-// Render danh sách đã chọn
-function renderMRSelectedItems() {
-    const container = document.getElementById('mr-selected-items-container');
-    if (!container) return;
-    const items = window._mrSelectedItems || [];
-    if (items.length === 0) {
-        container.innerHTML = '<div style="color:#999; text-align:center; padding:8px;">Chưa chọn vật tư nào</div>';
-        return;
-    }
-    let html = '';
-    items.forEach((item, index) => {
-        html += `
-            <div style="display:flex; justify-content:space-between; align-items:center; padding:4px 8px; margin-bottom:4px; background:#f0f4f8; border-radius:4px;">
-                <span><strong>${item.itemCode}</strong> - ${item.itemName} (${item.unit})</span>
-                <span>Số lượng: <input type="number" class="mr-item-qty" data-index="${index}" value="${item.quantity}" style="width:70px; padding:4px; border:1px solid #ccc; border-radius:4px;"></span>
-                <button type="button" class="btn btn-sm btn-danger" onclick="removeMRItem(${index})"><i class="fas fa-times"></i></button>
-            </div>
-        `;
-    });
-    container.innerHTML = html;
-
-    // Gắn sự kiện thay đổi số lượng
-    container.querySelectorAll('.mr-item-qty').forEach(input => {
-        input.addEventListener('change', function() {
-            const idx = parseInt(this.dataset.index);
-            const val = parseFloat(this.value) || 1;
-            if (val > 0 && window._mrSelectedItems[idx]) {
-                window._mrSelectedItems[idx].quantity = val;
-            }
-        });
-    });
-}
-
-// Xóa một item
-function removeMRItem(index) {
-    if (window._mrSelectedItems && window._mrSelectedItems.length > index) {
-        window._mrSelectedItems.splice(index, 1);
-        renderMRSelectedItems();
-    }
-}
-
-// Hàm mở modal chọn vật tư cho MR
-function openItemSelectorForMR(mode) {
-    const selected = window._mrSelectedItems || [];
-    openItemSelectorHelper(selected, mrItemSelectorCallback, 'mr');
 }
 
 // ====== LƯU MR ======
@@ -261,8 +416,13 @@ async function saveMR() {
     const needDate = document.getElementById('f-mr-needdate').value;
     const purpose = document.getElementById('f-mr-purpose').value.trim();
     const requester = document.getElementById('f-mr-requester').value.trim();
-    const items = window._mrSelectedItems || [];
     const note = document.getElementById('f-mr-note').value.trim();
+
+    const items = _mrSelectedItems.map(item => ({
+        itemId: item.itemId,
+        quantity: item.quantity,
+        displayName: item.itemName
+    }));
 
     if (!projectCode || items.length === 0) {
         showError('Vui lòng chọn dự án và ít nhất một vật tư');
@@ -277,7 +437,7 @@ async function saveMR() {
         const newMR = {
             projectCode,
             projectName: proj ? proj.name : '',
-            items: JSON.stringify(items.map(it => ({ itemId: it.itemId, quantity: it.quantity }))),
+            items: JSON.stringify(items),
             needDate,
             purpose,
             requester: requester || user.name,
@@ -286,6 +446,7 @@ async function saveMR() {
 
         await api.createMR(newMR);
         closeModal();
+        _mrSelectedItems = [];
         await renderMR();
         showSuccess('Tạo MR thành công! (Trạng thái DRAFT)');
     } catch (error) {
@@ -311,9 +472,15 @@ async function viewMR(id) {
             }
         } catch (e) { items = []; }
 
-        const itemsHtml = buildItemsTable(items);
-        
-        // Lấy workflow steps từ workflowId của MR
+        const itemsHtml = items.map(it => `
+            <tr>
+                <td>${getItemCode(it.itemId)}</td>
+                <td>${it.displayName || getItemName(it.itemId)}</td>
+                <td>${getItemUnit(it.itemId)}</td>
+                <td>${it.quantity}</td>
+            </tr>
+        `).join('');
+
         let stepsConfig = [{ id: 1, label: 'Chỉ huy trưởng' }];
         if (mr.workflowId) {
             try {
@@ -327,36 +494,23 @@ async function viewMR(id) {
                 }
             } catch (e) {
                 console.warn('Không lấy được workflow steps:', e);
-                // Fallback: lấy steps từ module
-                try {
-                    const workflowSteps = await api.getStepsWithStatus('mr');
-                    if (workflowSteps && workflowSteps.length > 0) {
-                        stepsConfig = workflowSteps.map(s => ({
-                            id: s.step,
-                            label: s.label || `Bước ${s.step}`
-                        }));
-                    }
-                } catch (e2) {}
             }
-        } else {
-            // Fallback: lấy steps từ module
-            try {
-                const workflowSteps = await api.getStepsWithStatus('mr');
-                if (workflowSteps && workflowSteps.length > 0) {
-                    stepsConfig = workflowSteps.map(s => ({
-                        id: s.step,
-                        label: s.label || `Bước ${s.step}`
-                    }));
-                }
-            } catch (e) {}
         }
 
         const approvalHtml = renderApprovalProgress(mr.status, mr.approvalStep || 1, stepsConfig);
-
         const projectId = getProjectIdByCode(mr.projectCode);
         const projectLink = projectId ?
             `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="closeModal(); viewProject(${projectId});">${mr.projectName || mr.projectCode || '--'}</span>` :
             (mr.projectName || mr.projectCode || '--');
+
+        const itemsTable = `
+            <div class="table-responsive">
+                <table>
+                    <thead><tr><th>Mã</th><th>Tên</th><th>ĐVT</th><th>Số lượng</th></tr></thead>
+                    <tbody>${itemsHtml}</tbody>
+                </table>
+            </div>
+        `;
 
         showModal('Chi tiết MR', `
             <div class="detail-grid">
@@ -368,7 +522,7 @@ async function viewMR(id) {
                 <div><span class="label">Mục đích/Khu vực:</span> <span class="value">${mr.purpose || ''}</span></div>
                 <div><span class="label">Trạng thái:</span> <span class="value">${getStatusBadge(mr.status)}</span></div>
                 <div style="grid-column:1/-1;"><span class="label">Tiến độ duyệt:</span><br>${approvalHtml}</div>
-                <div style="grid-column:1/-1;"><span class="label">Danh sách vật tư:</span><br>${itemsHtml}</div>
+                <div style="grid-column:1/-1;"><span class="label">Danh sách vật tư:</span><br>${itemsTable}</div>
                 <div style="grid-column:1/-1;"><span class="label">Ghi chú:</span> <span class="value">${mr.note || ''}</span></div>
             </div>
             <div class="modal-actions">
@@ -405,13 +559,22 @@ async function editMR(id) {
         const projectOpts = projects.map(p =>
             `<option value="${p.code}" ${p.code === mr.projectCode ? 'selected' : ''}>${p.code} - ${p.name}</option>`).join('');
 
-        let itemsData = [{ itemId: '', quantity: '' }];
+        let itemsData = [];
         try {
             if (mr.items) {
-                itemsData = typeof mr.items === 'string' ? JSON.parse(mr.items) : mr.items;
-                if (!itemsData.length) itemsData = [{ itemId: '', quantity: '' }];
+                const items = typeof mr.items === 'string' ? JSON.parse(mr.items) : mr.items;
+                itemsData = items.map(it => ({
+                    itemId: it.itemId,
+                    quantity: it.quantity || 1,
+                    itemName: it.displayName || getItemName(it.itemId),
+                    itemCode: getItemCode(it.itemId),
+                    unit: getItemUnit(it.itemId)
+                }));
             }
-        } catch (e) { itemsData = [{ itemId: '', quantity: '' }]; }
+        } catch (e) {}
+        _mrSelectedItems = itemsData;
+        _mrMode = 'edit';
+        _mrEditId = id;
 
         showModal('Sửa Material Request', `
             <div class="form-group"><label>Dự án</label>
@@ -420,8 +583,14 @@ async function editMR(id) {
             <div class="form-group"><label>Ngày cần</label><input id="f-mr-needdate" type="date" value="${mr.needDate || ''}"></div>
             <div class="form-group"><label>Mục đích</label><input id="f-mr-purpose" value="${mr.purpose || ''}"></div>
             <div class="form-group"><label>Người yêu cầu</label><input id="f-mr-requester" value="${mr.requester || ''}"></div>
-            <div class="form-group"><label>Vật tư</label>
-                <div id="mr-items-container">${buildItemRowsForForm(itemsData, 'mr')}</div>
+            <div class="form-group">
+                <label>Vật tư</label>
+                <button type="button" class="btn btn-sm btn-info" onclick="openItemSelectorForMR()">
+                    <i class="fas fa-plus"></i> Chọn vật tư
+                </button>
+                <div id="mr-selected-items-container" style="margin-top:8px; max-height:200px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:6px; padding:8px;">
+                    ${_renderMRSelectedItemsHTML()}
+                </div>
             </div>
             <div class="form-group"><label>Ghi chú</label><textarea id="f-mr-note" rows="2">${mr.note || ''}</textarea></div>
             <div class="modal-actions">
@@ -429,6 +598,10 @@ async function editMR(id) {
                 <button class="btn btn-danger" onclick="closeModal()">Hủy</button>
             </div>
         `);
+
+        setTimeout(() => {
+            _attachMRQuantityEvents();
+        }, 100);
     } catch (error) {
         showError('Lỗi khi tải thông tin MR: ' + error.message);
     }
@@ -440,8 +613,13 @@ async function updateMR(id) {
     const needDate = document.getElementById('f-mr-needdate').value;
     const purpose = document.getElementById('f-mr-purpose').value.trim();
     const requester = document.getElementById('f-mr-requester').value.trim();
-    const container = document.getElementById('mr-items-container');
-    const items = collectItemsFromForm(container);
+    const note = document.getElementById('f-mr-note').value.trim();
+
+    const items = _mrSelectedItems.map(item => ({
+        itemId: item.itemId,
+        quantity: item.quantity,
+        displayName: item.itemName
+    }));
 
     if (!projectCode || items.length === 0) {
         showError('Vui lòng chọn dự án và ít nhất một vật tư');
@@ -459,11 +637,12 @@ async function updateMR(id) {
             needDate,
             purpose,
             requester: requester,
-            note: document.getElementById('f-mr-note').value.trim(),
+            note
         };
 
         await api.updateMR(id, updatedMR);
         closeModal();
+        _mrSelectedItems = [];
         await renderMR();
         showSuccess('Cập nhật MR thành công!');
     } catch (error) {
@@ -567,5 +746,12 @@ window.createPRFromMR = createPRFromMR;
 window.printMR = printMR;
 window.getMRActions = getMRActions;
 window.showCreateMRModal = showCreateMRModal;
+window.resetMRFilters = resetMRFilters;
 
-console.log('✅ MR module updated with dynamic workflow support.');
+// Item selector functions
+window.mrItemSelectorCallback = mrItemSelectorCallback;
+window.renderMRSelectedItems = renderMRSelectedItems;
+window.removeMRItem = removeMRItem;
+window.openItemSelectorForMR = openItemSelectorForMR;
+
+console.log('✅ MR module updated with multi-field search, sort, and advanced filters.');

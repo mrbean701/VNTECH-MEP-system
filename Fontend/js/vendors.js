@@ -4,23 +4,76 @@
 
 let vendorsPageState = { page: 1, perPage: 10 };
 
+// ====== STATE ======
+const vendorsState = {
+    page: 1,
+    perPage: 10,
+    filterText: '',
+    statusFilter: '',
+    groupFilter: '',
+    sortBy: 'code',
+    sortOrder: 'asc'
+};
+
+const debouncedVendorsFilter = debounce(() => {
+    vendorsState.page = 1;
+    renderVendors();
+}, 300);
+
 // ====== RENDER DANH SÁCH NHÀ CUNG CẤP ======
 async function renderVendors(page = null) {
     try {
         const vendors = await api.getVendors();
-        const filter = document.getElementById('vendor-filter')?.value?.toLowerCase() || '';
-        const filtered = vendors.filter(v =>
-            (v.code || '').toLowerCase().includes(filter) ||
-            (v.name || '').toLowerCase().includes(filter)
-        );
+        window._vendorsCache = vendors;
+        saveData('vendors', vendors);
 
-        if (page) vendorsPageState.page = page;
+        if (page) vendorsState.page = page;
+
+        // Filter
+        const keyword = vendorsState.filterText.toLowerCase().trim();
+        let filtered = vendors.filter(v => {
+            let matchKeyword = true;
+            if (keyword) {
+                const codeMatch = (v.code || '').toLowerCase().includes(keyword);
+                const nameMatch = (v.name || '').toLowerCase().includes(keyword);
+                const contactMatch = (v.contact || '').toLowerCase().includes(keyword);
+                const phoneMatch = (v.phone || '').toLowerCase().includes(keyword);
+                const emailMatch = (v.email || '').toLowerCase().includes(keyword);
+                const groups = v.vendorGroups || (v.vendorGroup ? [v.vendorGroup] : []);
+                const groupMatch = groups.some(g => g.toLowerCase().includes(keyword));
+                matchKeyword = codeMatch || nameMatch || contactMatch || phoneMatch || emailMatch || groupMatch;
+            }
+            const matchStatus = vendorsState.statusFilter ? v.status === vendorsState.statusFilter : true;
+            let matchGroup = true;
+            if (vendorsState.groupFilter) {
+                const groups = v.vendorGroups || (v.vendorGroup ? [v.vendorGroup] : []);
+                matchGroup = groups.includes(vendorsState.groupFilter);
+            }
+            return matchKeyword && matchStatus && matchGroup;
+        });
+
+        // Sort
+        const order = vendorsState.sortOrder === 'asc' ? 1 : -1;
+        filtered.sort((a, b) => {
+            let valA = a[vendorsState.sortBy] || '';
+            let valB = b[vendorsState.sortBy] || '';
+            if (vendorsState.sortBy === 'createdAt') {
+                valA = new Date(valA || 0);
+                valB = new Date(valB || 0);
+            } else if (typeof valA === 'string') {
+                valA = valA.toLowerCase();
+                valB = valB.toLowerCase();
+            }
+            if (valA < valB) return -1 * order;
+            if (valA > valB) return 1 * order;
+            return 0;
+        });
+
         const perPage = getPageSize('vendors');
-        vendorsPageState.perPage = perPage;
-        const paging = paginate(filtered, vendorsPageState.page, perPage);
+        vendorsState.perPage = perPage;
+        const paging = paginate(filtered, vendorsState.page, perPage);
 
         const user = getUser();
-
         const canCreate = hasPermission('vendors.create');
         const canEdit = hasPermission('vendors.edit');
         const canDelete = hasPermission('vendors.delete');
@@ -30,10 +83,37 @@ async function renderVendors(page = null) {
             btnCreate.style.display = canCreate ? 'inline-block' : 'none';
         }
 
+        const allGroups = new Set();
+        vendors.forEach(v => {
+            const groups = v.vendorGroups || (v.vendorGroup ? [v.vendorGroup] : []);
+            groups.forEach(g => allGroups.add(g));
+        });
+        const groupList = Array.from(allGroups).sort();
+
         let html = `
             <div class="filter-bar">
-                <input type="text" id="vendor-filter" placeholder="Tìm theo mã hoặc tên..." style="flex:1;" />
-                <button class="btn btn-sm" onclick="renderVendors()"><i class="fas fa-search"></i></button>
+                <input type="text" id="vendor-filter" placeholder="Tìm theo mã, tên, liên hệ, email, nhóm..." style="flex:2;" value="${vendorsState.filterText}">
+                <select id="vendor-status-filter" style="flex:1;">
+                    <option value="">Tất cả trạng thái</option>
+                    <option value="ACTIVE" ${vendorsState.statusFilter === 'ACTIVE' ? 'selected' : ''}>Đang hợp tác</option>
+                    <option value="INACTIVE" ${vendorsState.statusFilter === 'INACTIVE' ? 'selected' : ''}>Ngừng hợp tác</option>
+                </select>
+                <select id="vendor-group-filter" style="flex:1;">
+                    <option value="">Tất cả nhóm</option>
+                    ${groupList.map(g => `<option value="${g}" ${vendorsState.groupFilter === g ? 'selected' : ''}>${g}</option>`).join('')}
+                </select>
+                <select id="vendor-sort" style="flex:1;">
+                    <option value="code_asc" ${vendorsState.sortBy === 'code' && vendorsState.sortOrder === 'asc' ? 'selected' : ''}>Mã (A→Z)</option>
+                    <option value="code_desc" ${vendorsState.sortBy === 'code' && vendorsState.sortOrder === 'desc' ? 'selected' : ''}>Mã (Z→A)</option>
+                    <option value="name_asc" ${vendorsState.sortBy === 'name' && vendorsState.sortOrder === 'asc' ? 'selected' : ''}>Tên (A→Z)</option>
+                    <option value="name_desc" ${vendorsState.sortBy === 'name' && vendorsState.sortOrder === 'desc' ? 'selected' : ''}>Tên (Z→A)</option>
+                    <option value="contact_asc" ${vendorsState.sortBy === 'contact' && vendorsState.sortOrder === 'asc' ? 'selected' : ''}>Liên hệ (A→Z)</option>
+                    <option value="contact_desc" ${vendorsState.sortBy === 'contact' && vendorsState.sortOrder === 'desc' ? 'selected' : ''}>Liên hệ (Z→A)</option>
+                    <option value="createdAt_desc" ${vendorsState.sortBy === 'createdAt' && vendorsState.sortOrder === 'desc' ? 'selected' : ''}>Ngày tạo (mới nhất)</option>
+                    <option value="createdAt_asc" ${vendorsState.sortBy === 'createdAt' && vendorsState.sortOrder === 'asc' ? 'selected' : ''}>Ngày tạo (cũ nhất)</option>
+                    <option value="status" ${vendorsState.sortBy === 'status' ? 'selected' : ''}>Trạng thái</option>
+                </select>
+                <button class="btn btn-sm" onclick="resetVendorsFilters()"><i class="fas fa-undo"></i> Reset</button>
             </div>
             <div class="table-responsive">
                 <table>
@@ -69,14 +149,13 @@ async function renderVendors(page = null) {
                 actions += ` <button class="btn btn-danger btn-sm" onclick="deleteVendor(${v.id})"><i class="fas fa-trash"></i></button>`;
             }
 
-            const groups = v.vendorGroups && v.vendorGroups.length > 0
-                ? v.vendorGroups.join(', ')
-                : '--';
+            const groups = v.vendorGroups || (v.vendorGroup ? [v.vendorGroup] : []);
+            const groupsDisplay = groups.length > 0 ? groups.join(', ') : '--';
 
             html += `<tr>
                 <td><strong>${v.code || '--'}</strong></td>
                 <td>${v.name || '--'}</td>
-                <td>${groups}</td>
+                <td>${groupsDisplay}</td>
                 <td>${v.contact || '--'}</td>
                 <td>${v.phone || '--'}</td>
                 <td>${v.email || '--'}</td>
@@ -89,12 +168,92 @@ async function renderVendors(page = null) {
         html += buildPaginationHTML(paging, 'renderVendors', 'vendors');
         document.getElementById('vendors-container').innerHTML = html;
 
-        document.getElementById('vendor-filter')?.addEventListener('input', () => { vendorsPageState.page = 1; renderVendors(); });
+        const filterInput = document.getElementById('vendor-filter');
+        const statusSelect = document.getElementById('vendor-status-filter');
+        const groupSelect = document.getElementById('vendor-group-filter');
+        const sortSelect = document.getElementById('vendor-sort');
+
+        if (filterInput) {
+            filterInput.removeEventListener('input', debouncedVendorsFilter);
+            filterInput.addEventListener('input', function(e) {
+                vendorsState.filterText = this.value;
+                debouncedVendorsFilter();
+            });
+        }
+        if (statusSelect) {
+            statusSelect.removeEventListener('change', debouncedVendorsFilter);
+            statusSelect.addEventListener('change', function(e) {
+                vendorsState.statusFilter = this.value;
+                debouncedVendorsFilter();
+            });
+        }
+        if (groupSelect) {
+            groupSelect.removeEventListener('change', debouncedVendorsFilter);
+            groupSelect.addEventListener('change', function(e) {
+                vendorsState.groupFilter = this.value;
+                debouncedVendorsFilter();
+            });
+        }
+        if (sortSelect) {
+            sortSelect.removeEventListener('change', debouncedVendorsFilter);
+            sortSelect.addEventListener('change', function(e) {
+                const [sortBy, sortOrder] = this.value.split('_');
+                vendorsState.sortBy = sortBy;
+                vendorsState.sortOrder = sortOrder || 'asc';
+                debouncedVendorsFilter();
+            });
+        }
 
     } catch (error) {
         showError('Không thể tải danh sách nhà cung cấp: ' + error.message);
         console.error('renderVendors error:', error);
     }
+}
+
+// ====== RESET FILTER ======
+function resetVendorsFilters() {
+    vendorsState.filterText = '';
+    vendorsState.statusFilter = '';
+    vendorsState.groupFilter = '';
+    vendorsState.sortBy = 'code';
+    vendorsState.sortOrder = 'asc';
+    vendorsState.page = 1;
+    renderVendors();
+}
+
+// ====== THÊM DÒNG NHÓM HÀNG ======
+function addVendorGroupInput(value = '') {
+    const container = document.getElementById('vendor-group-container');
+    if (!container) return;
+    const row = document.createElement('div');
+    row.className = 'item-row';
+    row.style.marginTop = '4px';
+    row.innerHTML = `
+        <input type="text" class="vendor-group-input" placeholder="Nhập nhóm hàng" value="${value}" style="flex:1;">
+        <button type="button" class="btn btn-sm btn-danger" onclick="removeVendorGroupInput(this)"><i class="fas fa-times"></i></button>
+    `;
+    container.appendChild(row);
+}
+
+function removeVendorGroupInput(btn) {
+    const row = btn.parentElement;
+    const container = row.parentElement;
+    if (container.querySelectorAll('.item-row').length <= 1) {
+        const input = row.querySelector('.vendor-group-input');
+        if (input) input.value = '';
+        return;
+    }
+    row.remove();
+}
+
+function collectVendorGroups() {
+    const inputs = document.querySelectorAll('.vendor-group-input');
+    const groups = [];
+    inputs.forEach(input => {
+        const val = input.value.trim();
+        if (val) groups.push(val);
+    });
+    return groups;
 }
 
 // ====== HIỂN THỊ MODAL THÊM NCC ======
@@ -123,41 +282,6 @@ function showAddVendorModal() {
     `);
 }
 
-// ====== THÊM NHÓM HÀNG (DYNAMIC) ======
-function addVendorGroupInput(value = '') {
-    const container = document.getElementById('vendor-group-container');
-    const row = document.createElement('div');
-    row.className = 'item-row';
-    row.style.marginTop = '4px';
-    row.innerHTML = `
-        <input type="text" class="vendor-group-input" placeholder="Nhập nhóm hàng" value="${value}" style="flex:1;">
-        <button type="button" class="btn btn-sm btn-danger" onclick="removeVendorGroupInput(this)"><i class="fas fa-times"></i></button>
-    `;
-    container.appendChild(row);
-}
-
-function removeVendorGroupInput(btn) {
-    const row = btn.parentElement;
-    const container = row.parentElement;
-    if (container.querySelectorAll('.item-row').length <= 1) {
-        // Nếu chỉ còn 1 dòng, clear value thay vì xóa
-        const input = row.querySelector('.vendor-group-input');
-        if (input) input.value = '';
-        return;
-    }
-    row.remove();
-}
-
-function collectVendorGroups() {
-    const inputs = document.querySelectorAll('.vendor-group-input');
-    const groups = [];
-    inputs.forEach(input => {
-        const val = input.value.trim();
-        if (val) groups.push(val);
-    });
-    return groups;
-}
-
 // ====== LƯU NCC MỚI ======
 async function saveVendor() {
     const code = document.getElementById('f-vendor-code').value.trim().toUpperCase();
@@ -183,10 +307,16 @@ async function saveVendor() {
         };
 
         const vendor = await api.createVendor(newVendor);
-        // ✅ Thêm groups sau khi tạo
+
         if (groups.length > 0 && typeof api.updateVendorGroups === 'function') {
             await api.updateVendorGroups(vendor.id, groups);
         }
+
+        if (typeof invalidateCache === 'function') invalidateCache('vendors');
+        const freshVendors = await api.getVendors();
+        window._vendorsCache = freshVendors;
+        saveData('vendors', freshVendors);
+
         closeModal();
         await renderVendors();
         showSuccess(`Thêm nhà cung cấp ${code} - ${name} thành công!`);
@@ -251,7 +381,6 @@ async function editVendor(id) {
             return;
         }
 
-        // Lấy danh sách group
         let groups = v.vendorGroups || [];
 
         let groupsHtml = '';
@@ -269,7 +398,6 @@ async function editVendor(id) {
                     <button type="button" class="btn btn-sm btn-danger" onclick="removeVendorGroupInput(this)"><i class="fas fa-times"></i></button>
                 </div>
             `).join('');
-            // Thêm dòng trống
             groupsHtml += `
                 <div class="item-row">
                     <input type="text" class="vendor-group-input" placeholder="Nhập nhóm hàng" style="flex:1;">
@@ -308,7 +436,6 @@ async function editVendor(id) {
             </div>
         `);
 
-        // Sự kiện thay đổi status
         document.getElementById('f-vendor-status')?.addEventListener('change', function() {
             const dateInput = document.getElementById('f-vendor-inactive-date');
             if (this.value === 'INACTIVE') {
@@ -354,13 +481,16 @@ async function updateVendor(id) {
             inactiveDate: status === 'INACTIVE' ? (inactiveDate || new Date().toISOString().slice(0, 10)) : null
         };
 
-        // ✅ Cập nhật vendor trước
         await api.updateVendor(id, updatedVendor);
 
-        // ✅ Cập nhật groups (nếu có)
         if (typeof api.updateVendorGroups === 'function') {
             await api.updateVendorGroups(id, groups);
         }
+
+        if (typeof invalidateCache === 'function') invalidateCache('vendors');
+        const freshVendors = await api.getVendors();
+        window._vendorsCache = freshVendors;
+        saveData('vendors', freshVendors);
 
         closeModal();
         await renderVendors();
@@ -388,6 +518,12 @@ async function deleteVendor(id) {
         if (!confirm(`Xóa nhà cung cấp "${v.name}"?`)) return;
 
         await api.deleteVendor(id);
+
+        if (typeof invalidateCache === 'function') invalidateCache('vendors');
+        const freshVendors = await api.getVendors();
+        window._vendorsCache = freshVendors;
+        saveData('vendors', freshVendors);
+
         await renderVendors();
         showSuccess('Xóa nhà cung cấp thành công!');
     } catch (error) {
@@ -407,5 +543,6 @@ window.updateVendor = updateVendor;
 window.deleteVendor = deleteVendor;
 window.saveVendor = saveVendor;
 window.showAddVendorModal = showAddVendorModal;
+window.resetVendorsFilters = resetVendorsFilters;
 
-console.log('✅ Vendors module updated with status and vendor groups.');
+console.log('✅ Vendors module updated with group display fix and cache refresh.');

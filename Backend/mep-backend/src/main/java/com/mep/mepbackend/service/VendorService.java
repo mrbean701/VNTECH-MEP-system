@@ -7,12 +7,14 @@ import com.mep.mepbackend.exception.ResourceNotFoundException;
 import com.mep.mepbackend.repository.VendorGroupRepository;
 import com.mep.mepbackend.repository.VendorRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
@@ -44,7 +46,24 @@ public class VendorService {
      */
     public List<VendorDTO> getAllDTO() {
         List<Vendor> vendors = vendorRepository.findAll();
-        return convertToDTOList(vendors);
+        if (vendors.isEmpty()) return new ArrayList<>();
+
+        // Lấy tất cả group cho các vendor
+        List<Long> vendorIds = vendors.stream().map(Vendor::getId).collect(Collectors.toList());
+        List<VendorGroup> allGroups = vendorGroupRepository.findByVendorIdIn(vendorIds);
+        Map<Long, List<String>> groupMap = allGroups.stream()
+                .collect(Collectors.groupingBy(
+                        VendorGroup::getVendorId,
+                        Collectors.mapping(VendorGroup::getName, Collectors.toList())
+                ));
+
+        // Tạo DTO và set vendorGroups
+        return vendors.stream().map(v -> {
+            VendorDTO dto = new VendorDTO();
+            BeanUtils.copyProperties(v, dto);
+            dto.setVendorGroups(groupMap.getOrDefault(v.getId(), new ArrayList<>()));
+            return dto;
+        }).collect(Collectors.toList());
     }
 
     /**
@@ -209,4 +228,19 @@ public class VendorService {
             return dto;
         }).collect(Collectors.toList());
     }
+
+    public VendorDTO getDTOById(Long id) {
+        Vendor vendor = getById(id);
+        VendorDTO dto = new VendorDTO();
+        BeanUtils.copyProperties(vendor, dto);
+
+        // Lấy danh sách nhóm hàng
+        List<VendorGroup> groups = vendorGroupRepository.findByVendorId(id);
+        dto.setVendorGroups(groups.stream()
+                .map(VendorGroup::getName)
+                .collect(Collectors.toList()));
+
+        return dto;
+    }
+    
 }
