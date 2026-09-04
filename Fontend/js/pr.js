@@ -20,6 +20,11 @@ const debouncedPRFilter = debounce(() => {
     renderPR();
 }, 300);
 
+// ====== BIẾN TOÀN CỤC CHO ITEM SELECTOR ======
+let _prSelectedItems = [];
+let _prMode = 'create';
+let _prEditId = null;
+
 // ====== HÀM LẤY ACTION ======
 function getPRActions(pr) {
     const user = getUser();
@@ -159,13 +164,18 @@ function sortPRData(data) {
 // ====== RENDER DANH SÁCH PR ======
 async function renderPR(page = null) {
     try {
-        const [prs, projects, vendors] = await Promise.all([
+        const [prs, projects, vendors, statuses] = await Promise.all([
             api.getPRs(),
             api.getProjects(),
-            api.getVendors()
+            api.getVendors(),
+            api.getStatuses('pr')
         ]);
+        
         window._projectsCache = projects;
         window._vendorsCache = vendors;
+        if (!window._statusesCache) window._statusesCache = {};
+        window._statusesCache['pr'] = statuses;
+        
         saveData('projects', projects);
         saveData('vendors', vendors);
 
@@ -189,15 +199,7 @@ async function renderPR(page = null) {
                 <input type="text" id="pr-filter" placeholder="Tìm theo mã, dự án, NCC, vật tư..." style="flex:2;" value="${prState.filterText}">
                 <select id="pr-status-filter" style="flex:1;">
                     <option value="">Tất cả trạng thái</option>
-                    <option value="DRAFT" ${prState.statusFilter === 'DRAFT' ? 'selected' : ''}>DRAFT</option>
-                    <option value="PENDING" ${prState.statusFilter === 'PENDING' ? 'selected' : ''}>PENDING</option>
-                    <option value="PENDING_PLANNING" ${prState.statusFilter === 'PENDING_PLANNING' ? 'selected' : ''}>PENDING_PLANNING</option>
-                    <option value="PLANNING_APPROVED" ${prState.statusFilter === 'PLANNING_APPROVED' ? 'selected' : ''}>PLANNING_APPROVED</option>
-                    <option value="PENDING_PROJECT" ${prState.statusFilter === 'PENDING_PROJECT' ? 'selected' : ''}>PENDING_PROJECT</option>
-                    <option value="PROJECT_APPROVED" ${prState.statusFilter === 'PROJECT_APPROVED' ? 'selected' : ''}>PROJECT_APPROVED</option>
-                    <option value="PENDING_CEO" ${prState.statusFilter === 'PENDING_CEO' ? 'selected' : ''}>PENDING_CEO</option>
-                    <option value="APPROVED" ${prState.statusFilter === 'APPROVED' ? 'selected' : ''}>APPROVED</option>
-                    <option value="REJECTED" ${prState.statusFilter === 'REJECTED' ? 'selected' : ''}>REJECTED</option>
+                    ${statuses.map(s => `<option value="${s.code}" ${prState.statusFilter === s.code ? 'selected' : ''}>${s.name}</option>`).join('')}
                 </select>
                 <select id="pr-project-filter" style="flex:1;">
                     <option value="">Tất cả dự án</option>
@@ -251,7 +253,7 @@ async function renderPR(page = null) {
                 }
             } catch (e) { itemsStr = 'Lỗi parse'; }
 
-            const statusBadge = getStatusBadge(p.status);
+            const statusBadge = getStatusBadgeWithInfo(p.status, statuses);
             const actions = getPRActions(p);
             const projectId = getProjectIdByCode(p.projectCode);
             const projectLink = projectId ?
@@ -328,6 +330,127 @@ async function renderPR(page = null) {
     }
 }
 
+// ====== VIEW PR (CHI TIẾT) ======
+async function viewPR(id) {
+    try {
+        const [pr, allPRs, items, mrs, statuses] = await Promise.all([
+            api.getPRById ? api.getPRById(id) : null,
+            api.getPRs(),
+            api.getItems(),
+            api.getMRs(),
+            api.getStatuses('pr')
+        ]);
+
+        let prData = pr;
+        if (!prData) {
+            prData = allPRs.find(p => p.id === id);
+        }
+        if (!prData) {
+            showError('Không tìm thấy PR!');
+            return;
+        }
+
+        window._itemsCache = items;
+        window._mrsCache = mrs;
+        if (!window._statusesCache) window._statusesCache = {};
+        window._statusesCache['pr'] = statuses;
+
+        let mrCode = '';
+        if (prData.mrId) {
+            const mr = mrs.find(m => m.id === prData.mrId);
+            if (mr) mrCode = mr.code;
+        }
+
+        let itemsList = [];
+        try {
+            if (prData.items) {
+                itemsList = typeof prData.items === 'string' ? JSON.parse(prData.items) : prData.items;
+            }
+        } catch (e) { itemsList = []; }
+
+        const itemsHtml = itemsList.map(it => {
+            const item = items.find(i => i.id === it.itemId);
+            const code = item ? item.code : 'N/A';
+            const name = item ? (it.displayName || item.name) : (it.displayName || 'N/A');
+            const unit = item ? item.unit : '';
+            const model = item ? (item.model ? ` (${item.model})` : '') : '';
+            return `
+                <tr>
+                    <td><strong>${code}</strong></td>
+                    <td>${name}${model}</td>
+                    <td>${unit || '--'}</td>
+                    <td>${it.quantity}</td>
+                </tr>
+            `;
+        }).join('');
+
+        let stepsConfig = [
+            { id: 1, label: 'Phòng Kế hoạch' },
+            { id: 2, label: 'Phòng Dự án' },
+            { id: 3, label: 'Tổng Giám đốc' }
+        ];
+        if (prData.workflowId) {
+            try {
+                const wf = await api.getWorkflowById ? await api.getWorkflowById(prData.workflowId) : null;
+                if (wf && wf.steps) {
+                    const steps = JSON.parse(wf.steps);
+                    stepsConfig = steps.map(s => ({
+                        id: s.step || s.id,
+                        label: s.label || `Bước ${s.step || s.id}`
+                    }));
+                }
+            } catch (e) {
+                console.warn('Không lấy được workflow steps:', e);
+            }
+        }
+
+        const currentStep = prData.approvalStep || 1;
+        const approvalHtml = renderApprovalProgress(prData.status, currentStep, stepsConfig, statuses);
+
+        const projectId = getProjectIdByCode(prData.projectCode);
+        const projectLink = projectId ?
+            `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="closeModal(); viewProject(${projectId});">${prData.projectName || prData.projectCode || '--'}</span>` :
+            (prData.projectName || prData.projectCode || '--');
+
+        const mrLink = mrCode ?
+            `<a href="#" onclick="event.preventDefault(); closeModal(); viewMRByCode('${mrCode}');" style="color:#1a3c6e; text-decoration:underline;">${mrCode}</a>` :
+            '--';
+
+        const itemsTable = `
+            <div class="table-responsive">
+                <table>
+                    <thead><tr><th>Mã</th><th>Tên</th><th>ĐVT</th><th>Số lượng</th></tr></thead>
+                    <tbody>${itemsHtml}</tbody>
+                </table>
+            </div>
+        `;
+
+        const totalAmount = itemsList.reduce((sum, it) => sum + ((it.price || 0) * (it.quantity || 0)), 0);
+        const statusBadge = getStatusBadgeWithInfo(prData.status, statuses);
+
+        showModal('Chi tiết PR', `
+            <div class="detail-grid">
+                <div><span class="label">Mã PR:</span> <span class="value">${prData.code || '--'}</span></div>
+                <div><span class="label">Ngày tạo:</span> <span class="value">${prData.createdAt || ''}</span></div>
+                <div><span class="label">MR liên quan:</span> <span class="value">${mrLink}</span></div>
+                <div><span class="label">Dự án:</span> <span class="value">${projectLink}</span></div>
+                <div><span class="label">Nhà cung cấp:</span> <span class="value">${prData.vendorName || prData.vendorCode || '--'}</span></div>
+                <div><span class="label">Trạng thái:</span> <span class="value">${statusBadge}</span></div>
+                ${totalAmount > 0 ? `<div><span class="label">Tổng tiền:</span> <span class="value">${totalAmount.toLocaleString()} VND</span></div>` : ''}
+                <div style="grid-column:1/-1;"><span class="label">Tiến độ duyệt:</span><br>${approvalHtml}</div>
+                <div style="grid-column:1/-1;"><span class="label">Danh sách vật tư:</span><br>${itemsTable}</div>
+                <div style="grid-column:1/-1;"><span class="label">Ghi chú:</span> <span class="value">${prData.note || ''}</span></div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-info" onclick="printPR(${prData.id}); closeModal();"><i class="fas fa-print"></i> In phiếu</button>
+                <button class="btn btn-danger" onclick="closeModal()">Đóng</button>
+            </div>
+        `);
+    } catch (error) {
+        showError('Lỗi khi tải chi tiết PR: ' + error.message);
+    }
+}
+
 // ====== RESET FILTER ======
 function resetPRFilters() {
     prState.filterText = '';
@@ -340,11 +463,6 @@ function resetPRFilters() {
     renderPR();
 }
 
-// ====== BIẾN TOÀN CỤC CHO ITEM SELECTOR ======
-let _prSelectedItems = [];
-let _prMode = 'create';
-let _prEditId = null;
-
 // ====== CALLBACK TỪ MODAL CHỌN VẬT TƯ ======
 function prItemSelectorCallback(selectedItems) {
     _prSelectedItems = selectedItems.map(item => ({
@@ -352,7 +470,8 @@ function prItemSelectorCallback(selectedItems) {
         quantity: item.quantity || 1,
         itemName: item.displayName || item.itemName || getItemName(item.itemId),
         itemCode: item.itemCode || getItemCode(item.itemId),
-        unit: item.unit || getItemUnit(item.itemId)
+        unit: item.unit || getItemUnit(item.itemId),
+        model: item.model || getItemModel(item.itemId)
     }));
     renderPRSelectedItems();
 }
@@ -371,11 +490,18 @@ function _renderPRSelectedItemsHTML() {
     }
     let html = '';
     items.forEach((item, index) => {
+        const modelDisplay = item.model ? ` (${item.model})` : '';
+        const unitDisplay = item.unit ? ` [${item.unit}]` : '';
         html += `
-            <div style="display:flex; justify-content:space-between; align-items:center; padding:4px 8px; margin-bottom:4px; background:#f0f4f8; border-radius:4px;">
-                <span><strong>${item.itemCode}</strong> - ${item.itemName} (${item.unit})</span>
-                <span>Số lượng: <input type="number" class="pr-item-qty" data-index="${index}" value="${item.quantity}" style="width:70px; padding:4px; border:1px solid #ccc; border-radius:4px;" min="0.01" step="0.01"></span>
-                <button type="button" class="btn btn-sm btn-danger" onclick="removePRItem(${index})"><i class="fas fa-times"></i></button>
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 8px; margin-bottom:4px; background:#f8fafc; border-radius:4px; border:1px solid #e2e8f0;">
+                <span style="flex:1; font-size:14px;">
+                    <strong>${item.itemCode}</strong> - ${item.itemName}${modelDisplay}${unitDisplay}
+                </span>
+                <span style="display:flex; align-items:center; gap:6px;">
+                    <span style="font-size:13px; color:#555;">SL:</span>
+                    <input type="number" class="pr-item-qty" data-index="${index}" value="${item.quantity}" style="width:70px; padding:4px; border:1px solid #ccc; border-radius:4px;" min="0.01" step="0.01">
+                </span>
+                <button type="button" class="btn btn-sm btn-danger" onclick="removePRItem(${index})" style="margin-left:8px;"><i class="fas fa-times"></i></button>
             </div>
         `;
     });
@@ -414,11 +540,15 @@ function openItemSelectorForPR() {
 // ====== TẠO PR MỚI ======
 async function showCreatePRModal(mr = null) {
     try {
-        const projects = await api.getProjects();
+        const [projects, vendors, items] = await Promise.all([
+            api.getProjects(),
+            api.getVendors(),
+            api.getItems()
+        ]);
+
         const projectOpts = projects.map(p => 
             `<option value="${p.code}" ${mr && p.code === mr.projectCode ? 'selected' : ''}>${p.code} - ${p.name}</option>`
         ).join('');
-        const vendors = await api.getVendors();
         const vendorOpts = vendors.map(v => 
             `<option value="${v.code}" ${mr && v.code === mr.vendorCode ? 'selected' : ''}>${v.code} - ${v.name}</option>`
         ).join('');
@@ -426,21 +556,37 @@ async function showCreatePRModal(mr = null) {
         let initialItems = [];
         if (mr && mr.items) {
             try {
-                const items = typeof mr.items === 'string' ? JSON.parse(mr.items) : mr.items;
-                initialItems = items.map(it => ({
-                    itemId: it.itemId,
-                    quantity: it.quantity || 1,
-                    itemName: it.displayName || getItemName(it.itemId),
-                    itemCode: getItemCode(it.itemId),
-                    unit: getItemUnit(it.itemId)
-                }));
+                const mrItems = typeof mr.items === 'string' ? JSON.parse(mr.items) : mr.items;
+                initialItems = mrItems.map(it => {
+                    const item = items.find(i => i.id === it.itemId);
+                    return {
+                        itemId: it.itemId,
+                        quantity: it.quantity || 1,
+                        itemName: it.displayName || (item ? item.name : getItemName(it.itemId)),
+                        itemCode: item ? item.code : getItemCode(it.itemId),
+                        unit: item ? item.unit : getItemUnit(it.itemId),
+                        model: item ? item.model : ''
+                    };
+                });
             } catch (e) {}
         }
         _prSelectedItems = initialItems;
         _prMode = 'create';
         _prEditId = null;
 
+        let mrInfoHtml = '';
+        if (mr) {
+            mrInfoHtml = `
+                <div style="background:#f0fdf4; padding:12px; border-radius:6px; border:1px solid #bbf7d0; margin-bottom:12px;">
+                    <strong><i class="fas fa-clipboard-list"></i> MR nguồn:</strong> ${mr.code}
+                    <span style="margin-left:16px;"><strong>Dự án:</strong> ${mr.projectName || mr.projectCode}</span>
+                    ${mr.purpose ? `<span style="margin-left:16px;"><strong>Mục đích:</strong> ${mr.purpose}</span>` : ''}
+                </div>
+            `;
+        }
+
         showModal('Tạo Purchase Request (PR)', `
+            ${mrInfoHtml}
             <div class="form-group"><label>Dự án</label>
                 <select id="f-pr-project">${projectOpts}</select>
             </div>
@@ -455,10 +601,11 @@ async function showCreatePRModal(mr = null) {
                 <div id="pr-selected-items-container" style="margin-top:8px; max-height:200px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:6px; padding:8px;">
                     ${_renderPRSelectedItemsHTML()}
                 </div>
+                ${mr ? '<div style="font-size:13px; color:#888; margin-top:4px;"><i class="fas fa-info-circle"></i> Vật tư được lấy từ MR. Bạn có thể điều chỉnh số lượng.</div>' : ''}
             </div>
             <div class="form-group"><label>Ghi chú</label><textarea id="f-pr-note" rows="2">${mr ? mr.note || '' : ''}</textarea></div>
             <div class="modal-actions">
-                <button class="btn" onclick="savePRManual()">Lưu</button>
+                <button class="btn" onclick="savePRManual()"><i class="fas fa-save"></i> Lưu</button>
                 <button class="btn btn-danger" onclick="closeModal()">Hủy</button>
             </div>
         `);
@@ -466,6 +613,26 @@ async function showCreatePRModal(mr = null) {
         setTimeout(() => {
             _attachPRQuantityEvents();
         }, 100);
+    } catch (error) {
+        showError('Lỗi tải dữ liệu: ' + error.message);
+    }
+}
+
+// ====== TẠO PR TỪ MR ======
+async function showCreatePRFromMRModal(mrId) {
+    if (!hasPermission('pr.create')) {
+        showWarning('Bạn không có quyền tạo PR!');
+        return;
+    }
+
+    try {
+        const mrs = await api.getMRs();
+        const mr = mrs.find(m => m.id === mrId);
+        if (!mr) {
+            showError('Không tìm thấy MR!');
+            return;
+        }
+        await showCreatePRModal(mr);
     } catch (error) {
         showError('Lỗi tải dữ liệu: ' + error.message);
     }
@@ -518,92 +685,6 @@ async function savePRManual() {
     }
 }
 
-// ====== XEM CHI TIẾT PR ======
-async function viewPR(id) {
-    try {
-        let pr = null;
-        const allPRs = await api.getPRs();
-        pr = allPRs.find(p => p.id === id);
-        if (!pr) {
-            showError('Không tìm thấy PR!');
-            return;
-        }
-
-        let items = [];
-        try {
-            if (pr.items) {
-                items = typeof pr.items === 'string' ? JSON.parse(pr.items) : pr.items;
-            }
-        } catch (e) { items = []; }
-
-        const itemsHtml = items.map(it => `
-            <tr>
-                <td>${getItemCode(it.itemId)}</td>
-                <td>${it.displayName || getItemName(it.itemId)}</td>
-                <td>${getItemUnit(it.itemId)}</td>
-                <td>${it.quantity}</td>
-            </tr>
-        `).join('');
-
-        let stepsConfig = [
-            { id: 1, label: 'Phòng Kế hoạch' },
-            { id: 2, label: 'Phòng Dự án' },
-            { id: 3, label: 'Tổng Giám đốc' }
-        ];
-        if (pr.workflowId) {
-            try {
-                const wf = await api.getWorkflowById ? await api.getWorkflowById(pr.workflowId) : null;
-                if (wf && wf.steps) {
-                    const steps = JSON.parse(wf.steps);
-                    stepsConfig = steps.map(s => ({
-                        id: s.step || s.id,
-                        label: s.label || `Bước ${s.step || s.id}`
-                    }));
-                }
-            } catch (e) {
-                console.warn('Không lấy được workflow steps:', e);
-            }
-        }
-
-        const approvalHtml = renderApprovalProgress(pr.status, pr.approvalStep || 1, stepsConfig);
-        const projectId = getProjectIdByCode(pr.projectCode);
-        const projectLink = projectId ?
-            `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="closeModal(); viewProject(${projectId});">${pr.projectName || pr.projectCode || '--'}</span>` :
-            (pr.projectName || pr.projectCode || '--');
-        const totalAmount = items.reduce((sum, it) => sum + ((it.price || 0) * (it.quantity || 0)), 0);
-
-        const itemsTable = `
-            <div class="table-responsive">
-                <table>
-                    <thead><tr><th>Mã</th><th>Tên</th><th>ĐVT</th><th>Số lượng</th></tr></thead>
-                    <tbody>${itemsHtml}</tbody>
-                </table>
-            </div>
-        `;
-
-        showModal('Chi tiết PR', `
-            <div class="detail-grid">
-                <div><span class="label">Mã PR:</span> <span class="value">${pr.code || '--'}</span></div>
-                <div><span class="label">Ngày tạo:</span> <span class="value">${pr.createdAt || ''}</span></div>
-                <div><span class="label">MR liên quan:</span> <span class="value">${pr.mrId ? 'MR-'+String(pr.mrId).padStart(3,'0') : ''}</span></div>
-                <div><span class="label">Dự án:</span> <span class="value">${projectLink}</span></div>
-                <div><span class="label">Nhà cung cấp:</span> <span class="value">${pr.vendorName || pr.vendorCode || '--'}</span></div>
-                <div><span class="label">Trạng thái:</span> <span class="value">${getStatusBadge(pr.status)}</span></div>
-                ${totalAmount > 0 ? `<div><span class="label">Tổng tiền:</span> <span class="value">${totalAmount.toLocaleString()} VND</span></div>` : ''}
-                <div style="grid-column:1/-1;"><span class="label">Tiến độ duyệt:</span><br>${approvalHtml}</div>
-                <div style="grid-column:1/-1;"><span class="label">Danh sách vật tư:</span><br>${itemsTable}</div>
-                <div style="grid-column:1/-1;"><span class="label">Ghi chú:</span> <span class="value">${pr.note || ''}</span></div>
-            </div>
-            <div class="modal-actions">
-                <button class="btn btn-info" onclick="printPR(${pr.id}); closeModal();"><i class="fas fa-print"></i> In phiếu</button>
-                <button class="btn btn-danger" onclick="closeModal()">Đóng</button>
-            </div>
-        `);
-    } catch (error) {
-        showError('Lỗi khi tải chi tiết PR: ' + error.message);
-    }
-}
-
 // ====== SỬA PR ======
 async function editPR(id) {
     if (!hasPermission('pr.edit')) {
@@ -641,7 +722,8 @@ async function editPR(id) {
                     quantity: it.quantity || 1,
                     itemName: it.displayName || getItemName(it.itemId),
                     itemCode: getItemCode(it.itemId),
-                    unit: getItemUnit(it.itemId)
+                    unit: getItemUnit(it.itemId),
+                    model: getItemModel(it.itemId)
                 }));
             }
         } catch (e) {}
@@ -680,7 +762,6 @@ async function editPR(id) {
     }
 }
 
-// ====== CẬP NHẬT PR ======
 async function updatePR(id) {
     const projectCode = document.getElementById('f-pr-project').value;
     const vendorCode = document.getElementById('f-pr-vendor').value;
@@ -799,22 +880,6 @@ function createPOFromPR(prId) {
     }, 300);
 }
 
-// ====== TẠO PR TỪ MR ======
-function showCreatePRFromMRModal(mrId) {
-    if (!hasPermission('pr.create')) {
-        showWarning('Bạn không có quyền tạo PR!');
-        return;
-    }
-    api.getMRs().then(mrs => {
-        const mr = mrs.find(m => m.id === mrId);
-        if (mr) {
-            showCreatePRModal(mr);
-        } else {
-            showError('Không tìm thấy MR');
-        }
-    }).catch(err => showError('Lỗi tải MR: ' + err.message));
-}
-
 // ====== IN PHIẾU PR ======
 function printPR(id) {
     showInfo('Chức năng in đang được phát triển.');
@@ -843,4 +908,4 @@ window.renderPRSelectedItems = renderPRSelectedItems;
 window.removePRItem = removePRItem;
 window.openItemSelectorForPR = openItemSelectorForPR;
 
-console.log('✅ PR module updated with multi-field search, sort, and advanced filters.');
+console.log('✅ PR module updated with status synchronization.');

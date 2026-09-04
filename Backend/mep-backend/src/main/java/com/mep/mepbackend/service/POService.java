@@ -3,6 +3,7 @@ package com.mep.mepbackend.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mep.mepbackend.entity.ApprovalHistory;
 import com.mep.mepbackend.entity.PO;
+import com.mep.mepbackend.entity.Status;
 import com.mep.mepbackend.entity.User;
 import com.mep.mepbackend.entity.Workflow;
 import com.mep.mepbackend.exception.ResourceNotFoundException;
@@ -15,7 +16,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -29,7 +29,7 @@ public class POService {
     private final ApprovalHistoryRepository approvalHistoryRepository;
     private final ObjectMapper objectMapper;
     private final WorkflowService workflowService;
-    private final StatusService statusService;
+    private final StatusService statusService; // ✅ Đã thêm
     private final CurrentUserUtil currentUserUtil;
 
     private static final List<String> PENDING_STATUSES = Arrays.asList(
@@ -60,6 +60,19 @@ public class POService {
     public PO getById(Long id) {
         return poRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("PO not found with id: " + id));
+    }
+
+    public PO getByCode(String code) {
+        return poRepository.findByCode(code)
+                .orElseThrow(() -> new ResourceNotFoundException("PO not found with code: " + code));
+    }
+
+    public List<PO> getByProjectCode(String projectCode) {
+        return poRepository.findByProjectCode(projectCode);
+    }
+
+    public List<PO> getByStatus(String status) {
+        return poRepository.findByStatus(status);
     }
 
     // ===== CREATE =====
@@ -155,7 +168,6 @@ public class POService {
                 throw new RuntimeException("Bạn không có quyền duyệt PO");
             }
 
-            // ✅ Quan trọng: Set status thành PENDING trước khi gọi approve()
             Map<String, Object> firstStep = steps.get(0);
             String statusCode = (String) firstStep.get("statusCode");
             po.setStatus(statusCode != null && !statusCode.isEmpty() ? statusCode : "PENDING");
@@ -214,12 +226,26 @@ public class POService {
         history.setStatusBefore(po.getStatus());
 
         if (currentStep == steps.size()) {
+            // Bước cuối → APPROVED
             po.setStatus("APPROVED");
+            po.setApprovalStep(currentStep);
         } else {
+            // Chuyển sang bước tiếp theo
             po.setApprovalStep(currentStep + 1);
             String nextStatusCode = workflowService.getStatusForStep(wf.getId(), currentStep + 1);
-            po.setStatus(nextStatusCode != null && !nextStatusCode.isEmpty() ? nextStatusCode : "PENDING");
+
+            // ✅ Fallback an toàn: nếu không có mapping, lấy status mặc định của PO
+            if (nextStatusCode == null || nextStatusCode.isEmpty()) {
+                try {
+                    Status defaultStatus = statusService.getDefaultStatus("po");
+                    nextStatusCode = defaultStatus != null ? defaultStatus.getCode() : "PENDING";
+                } catch (Exception e) {
+                    nextStatusCode = "PENDING";
+                }
+            }
+            po.setStatus(nextStatusCode);
         }
+
         history.setStatusAfter(po.getStatus());
 
         approvalHistoryRepository.save(history);
@@ -253,19 +279,5 @@ public class POService {
             throw new RuntimeException("Bạn không có quyền xóa PO");
         }
         poRepository.delete(po);
-    }
-    // ===== GETTERS BỔ SUNG =====
-    public PO getByCode(String code) {
-        return poRepository.findByCode(code)
-                .orElseThrow(() -> new ResourceNotFoundException("PO not found with code: " + code));
-    }
-
-    public List<PO> getByProjectCode(String projectCode) {
-        return poRepository.findByProjectCode(projectCode);
-    }
-
-
-    public List<PO> getByStatus(String status) {
-        return List.of();
     }
 }

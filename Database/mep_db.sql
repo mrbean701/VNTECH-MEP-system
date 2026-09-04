@@ -718,7 +718,7 @@ INSERT INTO auto_reorder_config (enabled, multiplier, default_vendor_code, updat
 (FALSE, 2.0, NULL, CURDATE());
 
 -- 7. PROJECTS MẪU
-INSERT INTO projects (code, name, client, commander, status, created_at, updated_at) VALUESapproval_history
+INSERT INTO projects (code, name, client, commander, status, created_at, updated_at) VALUES
 ('DA001', 'Dự án mẫu', 'Khách hàng A', 'Nguyễn Văn A', 'ACTIVE', CURDATE(), CURDATE()),
 ('DA002', 'Dự án thử nghiệm', 'Khách hàng B', 'Trần Văn B', 'ACTIVE', CURDATE(), CURDATE());
 

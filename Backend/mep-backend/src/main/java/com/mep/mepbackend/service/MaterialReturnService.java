@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.mep.mepbackend.entity.ApprovalHistory;
 import com.mep.mepbackend.entity.Inventory;
 import com.mep.mepbackend.entity.MaterialReturn;
+import com.mep.mepbackend.entity.Status;
 import com.mep.mepbackend.entity.User;
 import com.mep.mepbackend.entity.Workflow;
 import com.mep.mepbackend.exception.ResourceNotFoundException;
@@ -18,7 +19,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -32,7 +32,7 @@ public class MaterialReturnService {
     private final ApprovalHistoryRepository approvalHistoryRepository;
     private final ObjectMapper objectMapper;
     private final WorkflowService workflowService;
-    private final StatusService statusService;
+    private final StatusService statusService; // ✅ Đã thêm
     private final CurrentUserUtil currentUserUtil;
 
     private static final List<String> PENDING_STATUSES = Arrays.asList("PENDING");
@@ -132,13 +132,11 @@ public class MaterialReturnService {
             throw new RuntimeException("Workflow không có bước duyệt nào");
         }
 
-        // Nếu workflow có 1 bước → tự động duyệt luôn
         if (steps.size() == 1) {
             if (!currentUserUtil.hasPermission("materialreturn.approve")) {
                 throw new RuntimeException("Bạn không có quyền duyệt phiếu hoàn trả");
             }
 
-            // ✅ Quan trọng: Set status thành PENDING trước khi gọi approve()
             Map<String, Object> firstStep = steps.get(0);
             String statusCode = (String) firstStep.get("statusCode");
             mr.setStatus(statusCode != null && !statusCode.isEmpty() ? statusCode : "PENDING");
@@ -150,7 +148,6 @@ public class MaterialReturnService {
             return;
         }
 
-        // Nhiều bước → chuyển sang PENDING bước 1
         Map<String, Object> firstStep = steps.get(0);
         String statusCode = (String) firstStep.get("statusCode");
         mr.setStatus(statusCode != null && !statusCode.isEmpty() ? statusCode : "PENDING");
@@ -230,7 +227,16 @@ public class MaterialReturnService {
         } else {
             mr.setApprovalStep(currentStep + 1);
             String nextStatusCode = workflowService.getStatusForStep(wf.getId(), currentStep + 1);
-            mr.setStatus(nextStatusCode != null && !nextStatusCode.isEmpty() ? nextStatusCode : "APPROVED");
+
+            if (nextStatusCode == null || nextStatusCode.isEmpty()) {
+                try {
+                    Status defaultStatus = statusService.getDefaultStatus("materialreturn");
+                    nextStatusCode = defaultStatus != null ? defaultStatus.getCode() : "APPROVED";
+                } catch (Exception e) {
+                    nextStatusCode = "APPROVED";
+                }
+            }
+            mr.setStatus(nextStatusCode);
         }
         history.setStatusAfter(mr.getStatus());
 
@@ -281,7 +287,15 @@ public class MaterialReturnService {
         history.setApproverName(currentUser.getName());
         history.setStatusBefore(mr.getStatus());
 
-        mr.setStatus(statusCode != null ? statusCode : "CONFIRMED");
+        if (statusCode == null || statusCode.isEmpty()) {
+            try {
+                Status nextStatus = statusService.getByEntityTypeAndCode("materialreturn", "CONFIRMED");
+                statusCode = nextStatus != null ? nextStatus.getCode() : "CONFIRMED";
+            } catch (Exception e) {
+                statusCode = "CONFIRMED";
+            }
+        }
+        mr.setStatus(statusCode);
         mr.setApprovalStep(currentStep);
         mr.setConfirmedBy(currentUser.getName());
         mr.setCompletionDate(LocalDate.now());

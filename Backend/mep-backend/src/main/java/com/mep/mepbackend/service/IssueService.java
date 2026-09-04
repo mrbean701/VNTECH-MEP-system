@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.mep.mepbackend.entity.ApprovalHistory;
 import com.mep.mepbackend.entity.Issue;
+import com.mep.mepbackend.entity.Status;
 import com.mep.mepbackend.entity.User;
 import com.mep.mepbackend.entity.Workflow;
 import com.mep.mepbackend.exception.ResourceNotFoundException;
@@ -18,7 +19,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -33,7 +33,7 @@ public class IssueService {
     private final ApprovalHistoryRepository approvalHistoryRepository;
     private final ObjectMapper objectMapper;
     private final WorkflowService workflowService;
-    private final StatusService statusService;
+    private final StatusService statusService; // ✅ Đã thêm
     private final CurrentUserUtil currentUserUtil;
 
     private static final List<String> PENDING_STATUSES = Arrays.asList("PENDING");
@@ -133,13 +133,11 @@ public class IssueService {
             throw new RuntimeException("Workflow không có bước duyệt nào");
         }
 
-        // Nếu workflow có 1 bước → tự động duyệt luôn
         if (steps.size() == 1) {
             if (!currentUserUtil.hasPermission("issue.approve")) {
                 throw new RuntimeException("Bạn không có quyền duyệt phiếu cấp phát");
             }
 
-            // ✅ Quan trọng: Set status thành PENDING trước khi gọi approve()
             Map<String, Object> firstStep = steps.get(0);
             String statusCode = (String) firstStep.get("statusCode");
             issue.setStatus(statusCode != null && !statusCode.isEmpty() ? statusCode : "PENDING");
@@ -151,7 +149,6 @@ public class IssueService {
             return;
         }
 
-        // Nhiều bước → chuyển sang PENDING bước 1
         Map<String, Object> firstStep = steps.get(0);
         String statusCode = (String) firstStep.get("statusCode");
         issue.setStatus(statusCode != null && !statusCode.isEmpty() ? statusCode : "PENDING");
@@ -203,7 +200,16 @@ public class IssueService {
         } else {
             issue.setApprovalStep(currentStep + 1);
             String nextStatusCode = workflowService.getStatusForStep(wf.getId(), currentStep + 1);
-            issue.setStatus(nextStatusCode != null && !nextStatusCode.isEmpty() ? nextStatusCode : "PENDING");
+
+            if (nextStatusCode == null || nextStatusCode.isEmpty()) {
+                try {
+                    Status defaultStatus = statusService.getDefaultStatus("issue");
+                    nextStatusCode = defaultStatus != null ? defaultStatus.getCode() : "PENDING";
+                } catch (Exception e) {
+                    nextStatusCode = "PENDING";
+                }
+            }
+            issue.setStatus(nextStatusCode);
         }
         history.setStatusAfter(issue.getStatus());
 
@@ -290,7 +296,15 @@ public class IssueService {
             history.setApproverName(currentUser.getName());
             history.setStatusBefore(issue.getStatus());
 
-            issue.setStatus(statusCode != null ? statusCode : "COMPLETED");
+            if (statusCode == null || statusCode.isEmpty()) {
+                try {
+                    Status nextStatus = statusService.getByEntityTypeAndCode("issue", "COMPLETED");
+                    statusCode = nextStatus != null ? nextStatus.getCode() : "COMPLETED";
+                } catch (Exception e) {
+                    statusCode = "COMPLETED";
+                }
+            }
+            issue.setStatus(statusCode);
             issue.setApprovalStep(currentStep);
             issue.setCompletedBy(currentUser.getName());
             history.setStatusAfter(issue.getStatus());
@@ -344,7 +358,15 @@ public class IssueService {
         history.setApproverName(currentUser.getName());
         history.setStatusBefore(issue.getStatus());
 
-        issue.setStatus(statusCode != null ? statusCode : "CONFIRMED");
+        if (statusCode == null || statusCode.isEmpty()) {
+            try {
+                Status nextStatus = statusService.getByEntityTypeAndCode("issue", "CONFIRMED");
+                statusCode = nextStatus != null ? nextStatus.getCode() : "CONFIRMED";
+            } catch (Exception e) {
+                statusCode = "CONFIRMED";
+            }
+        }
+        issue.setStatus(statusCode);
         issue.setApprovalStep(currentStep);
         issue.setConfirmedBy(currentUser.getName());
         issue.setCompletionDate(LocalDate.now());

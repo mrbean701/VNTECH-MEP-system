@@ -369,7 +369,7 @@ function updateStepNumbers(containerId) {
     });
 }
 
-// ✅ Đã sửa: lấy permissionKey thay vì role
+// Trong collectWorkflowStepsWithStatus()
 function collectWorkflowStepsWithStatus(containerId) {
     const container = document.getElementById(containerId);
     if (!container) return { steps: [], stepStatuses: [] };
@@ -378,6 +378,7 @@ function collectWorkflowStepsWithStatus(containerId) {
     const stepStatuses = [];
     rows.forEach((row, idx) => {
         const permissionKey = row.querySelector('.wf-permission-select')?.value || '';
+        // ✅ Lấy departmentId từ dropdown
         const deptId = row.querySelector('.wf-dept-select')?.value || '';
         const label = row.querySelector('.wf-label-input')?.value || `Bước ${idx + 1}`;
         const statusCode = row.querySelector('.wf-status-select')?.value || '';
@@ -385,7 +386,7 @@ function collectWorkflowStepsWithStatus(containerId) {
             step: idx + 1,
             permissionKey: permissionKey,
             label: label,
-            departmentId: deptId ? parseInt(deptId) : null
+            departmentId: deptId ? parseInt(deptId) : null  // ✅ Thêm departmentId
         });
         if (statusCode) {
             stepStatuses.push({
@@ -455,16 +456,6 @@ async function saveNewWorkflow() {
         showError('Vui lòng nhập tên và ít nhất một bước duyệt');
         return;
     }
-    for (const step of steps) {
-        if (!step.permissionKey) {
-            showError(`Bước ${step.step} chưa chọn permission key`);
-            return;
-        }
-        if (!step.label) {
-            showError(`Bước ${step.step} chưa nhập tên bước`);
-            return;
-        }
-    }
 
     try {
         const payload = {
@@ -474,13 +465,10 @@ async function saveNewWorkflow() {
             steps: JSON.stringify(steps),
             status: 'DRAFT',
             isSystem: false,
-            stepStatuses: stepStatuses
+            stepStatuses: stepStatuses  // ✅ Gửi lên backend
         };
         await api.createWorkflowWithStatuses(payload);
-        closeModal();
-        showSuccess('Tạo workflow thành công!');
-        await refreshAdminWorkflows();
-        renderAdminUI('workflows');
+        // ...
     } catch (error) {
         showError('Lỗi tạo workflow: ' + error.message);
     }

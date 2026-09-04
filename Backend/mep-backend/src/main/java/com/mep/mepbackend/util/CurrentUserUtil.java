@@ -54,11 +54,15 @@ public class CurrentUserUtil {
     }
 
     /**
-     * Kiểm tra xem user có quyền override phòng ban không.
-     * Chỉ sử dụng permission workflow.override, KHÔNG hardcode role CEO hay ADMIN.
+     * Kiểm tra override permission - chỉ ADMIN mới có thể override
      */
     private boolean hasOverridePermission() {
         try {
+            User user = getCurrentUser();
+            // ADMIN luôn có override
+            if ("ADMIN".equals(user.getRole())) {
+                return true;
+            }
             return hasPermission("workflow.override");
         } catch (Exception e) {
             return false;
@@ -67,7 +71,7 @@ public class CurrentUserUtil {
 
     /**
      * Kiểm tra quyền dựa trên:
-     * 1. Nếu user có permission workflow.override -> true (chỉ dùng cho override department, không phải toàn quyền)
+     * 1. ADMIN -> true
      * 2. UserPermission (nếu có) -> theo enabled
      * 3. DepartmentPermission (nếu user có departmentId) -> theo enabled
      * 4. Mặc định -> false
@@ -75,6 +79,11 @@ public class CurrentUserUtil {
     public boolean hasPermission(String permissionKey) {
         try {
             User user = getCurrentUser();
+
+            // ADMIN luôn có toàn quyền
+            if ("ADMIN".equals(user.getRole())) {
+                return true;
+            }
 
             // Bước 1: User permission (ghi đè)
             Optional<UserPermission> userPermOpt =
@@ -102,17 +111,25 @@ public class CurrentUserUtil {
 
     /**
      * Kiểm tra quyền và phòng ban (nếu có yêu cầu)
-     * Nếu user có permission workflow.override, bỏ qua kiểm tra phòng ban.
+     * - Nếu user là ADMIN: luôn true
+     * - Nếu departmentId != null: user phải thuộc phòng ban đó
+     * - Nếu departmentId == null: chỉ cần có permission
      */
     public boolean hasPermissionAndDepartment(String permissionKey, Long departmentId) {
         if (permissionKey == null || permissionKey.isEmpty()) return true;
         if (!hasPermission(permissionKey)) return false;
 
-        // Nếu user có permission workflow.override, bỏ qua kiểm tra department
-        if (hasOverridePermission()) {
-            return true;
+        // Nếu user là ADMIN, bỏ qua kiểm tra phòng ban
+        try {
+            User user = getCurrentUser();
+            if ("ADMIN".equals(user.getRole())) {
+                return true;
+            }
+        } catch (Exception e) {
+            return false;
         }
 
+        // Nếu có yêu cầu phòng ban, kiểm tra
         if (departmentId != null) {
             return isInDepartment(departmentId);
         }

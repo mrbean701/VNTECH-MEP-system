@@ -52,8 +52,10 @@ public class StatusService {
 
     @Transactional
     public Status create(Status status) {
-        if (statusRepository.existsByCode(status.getCode())) {
-            throw new DuplicateResourceException("Status code '" + status.getCode() + "' already exists");
+        // Kiểm tra trùng theo cặp (entity_type, code)
+        if (statusRepository.existsByEntityTypeAndCode(status.getEntityType(), status.getCode())) {
+            throw new DuplicateResourceException(
+                    "Status code '" + status.getCode() + "' already exists for entity type '" + status.getEntityType() + "'");
         }
 
         if (Boolean.TRUE.equals(status.getIsDefault())) {
@@ -71,9 +73,13 @@ public class StatusService {
     public Status update(Long id, Status details) {
         Status status = getById(id);
 
-        if (!status.getCode().equals(details.getCode()) &&
-                statusRepository.existsByCode(details.getCode())) {
-            throw new DuplicateResourceException("Status code '" + details.getCode() + "' already exists");
+        // Kiểm tra trùng khi đổi code hoặc entity_type
+        if (!status.getCode().equals(details.getCode()) ||
+                !status.getEntityType().equals(details.getEntityType())) {
+            if (statusRepository.existsByEntityTypeAndCode(details.getEntityType(), details.getCode())) {
+                throw new DuplicateResourceException(
+                        "Status code '" + details.getCode() + "' already exists for entity type '" + details.getEntityType() + "'");
+            }
         }
 
         status.setEntityType(details.getEntityType());
@@ -83,7 +89,7 @@ public class StatusService {
         status.setIsFinal(details.getIsFinal());
         status.setSortOrder(details.getSortOrder());
         status.setColor(details.getColor());
-        status.setStatusGroup(details.getStatusGroup()); // ✅ Đổi tên
+        status.setStatusGroup(details.getStatusGroup());
         status.setUpdatedAt(LocalDate.now());
 
         if (Boolean.TRUE.equals(details.getIsDefault()) && !Boolean.TRUE.equals(status.getIsDefault())) {

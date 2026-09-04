@@ -2,6 +2,10 @@
 // UTILITY FUNCTIONS - DÙNG CACHE TỪ API
 // ================================================================
 
+// ====== KHAI BÁO CACHE ======
+let _statusesCache = {};
+window._statusesCache = _statusesCache;
+
 // ====== LẤY THÔNG TIN VẬT TƯ (TỪ CACHE) ======
 function getItemName(id) {
     const cache = window._itemsCache || [];
@@ -19,6 +23,12 @@ function getItemUnit(id) {
     const cache = window._itemsCache || [];
     const found = cache.find(i => i.id === id);
     return found ? found.unit : '';
+}
+
+function getItemModel(id) {
+    const cache = window._itemsCache || [];
+    const found = cache.find(i => i.id === id);
+    return found ? found.model : '';
 }
 
 function getProjectNameByProjectId(id) {
@@ -57,8 +67,60 @@ function getWarehouseCode(id) {
     return wh ? wh.code : 'N/A';
 }
 
-// ====== BADGE TRẠNG THÁI ======
-function getStatusBadge(status) {
+// ====== QUẢN LÝ CACHE STATUS ======
+async function getStatusesForModule(moduleType) {
+    if (!_statusesCache[moduleType]) {
+        try {
+            const data = await api.getStatuses(moduleType);
+            _statusesCache[moduleType] = data || [];
+        } catch (e) {
+            console.warn('Không thể lấy statuses cho module:', moduleType, e);
+            _statusesCache[moduleType] = [];
+        }
+    }
+    return _statusesCache[moduleType];
+}
+
+function getStatusInfo(statusCode, statuses) {
+    if (!statuses || !Array.isArray(statuses) || statuses.length === 0) {
+        return {
+            name: statusCode || '--',
+            color: '#6b7280',
+            isDefault: false,
+            isFinal: false,
+            sortOrder: 999
+        };
+    }
+    const found = statuses.find(s => s.code === statusCode);
+    if (found) {
+        return {
+            name: found.name || statusCode,
+            color: found.color || '#6b7280',
+            isDefault: found.isDefault || false,
+            isFinal: found.isFinal || false,
+            sortOrder: found.sortOrder || 0
+        };
+    }
+    return {
+        name: statusCode || '--',
+        color: '#6b7280',
+        isDefault: false,
+        isFinal: false,
+        sortOrder: 999
+    };
+}
+
+function getStatusBadgeWithInfo(statusCode, statuses) {
+    const info = getStatusInfo(statusCode, statuses);
+    // ✅ Hiển thị mã code thay vì tên
+    return `<span class="badge" style="background-color:${info.color}; color:white; border-radius:12px; padding:4px 12px; font-weight:600; font-size:12px; display:inline-block;">${statusCode}</span>`;
+}
+
+// ====== BADGE TRẠNG THÁI (FALLBACK) ======
+function getStatusBadge(status, color = null) {
+    if (color) {
+        return `<span class="badge" style="background-color:${color}; color:white; border-radius:12px; padding:4px 12px; font-weight:600; font-size:12px; display:inline-block;">${status}</span>`;
+    }
     const map = {
         'DRAFT': 'badge-draft',
         'PENDING': 'badge-pending',
@@ -74,9 +136,116 @@ function getStatusBadge(status) {
         'CANCEL': 'badge-cancelled',
         'CONFIRMED': 'badge-completed',
         'RECEIVED': 'badge-info',
-        'QC_CHECKED': 'badge-info'
+        'QC_CHECKED': 'badge-info',
+        'CEO_APPROVED': 'badge-approved',
+        'CEO_PENDING': 'badge-pending',
+        'PARTIALLY_FULFILLED': 'badge-pending'
     };
     return `<span class="badge ${map[status] || 'badge-draft'}">${status}</span>`;
+}
+
+// ====== RENDER APPROVAL PROGRESS ======
+function renderApprovalProgress(status, step, stepsConfig, statuses) {
+    const defaultSteps = [
+        { id: 1, label: 'Phòng Kế hoạch' },
+        { id: 2, label: 'Phòng Dự án' },
+        { id: 3, label: 'Tổng Giám đốc' }
+    ];
+    const steps = stepsConfig && stepsConfig.length > 0 ? stepsConfig : defaultSteps;
+
+    let currentStep = step || 1;
+    currentStep = Math.min(currentStep, steps.length);
+
+    // Lấy tên trạng thái từ statuses (cho phần hiển thị tên ở header)
+    const statusInfo = getStatusInfo(status, statuses || []);
+    const statusName = statusInfo.name || status;
+
+    // Hoàn thành
+    const finalStatuses = ['APPROVED', 'COMPLETED', 'CONFIRMED'];
+    if (finalStatuses.includes(status)) {
+        let progressHtml = `<div style="display:flex; align-items:center; justify-content:space-between; width:100%; margin:8px 0;">`;
+        steps.forEach((s, idx) => {
+            progressHtml += `
+                <div style="display:flex; flex-direction:column; align-items:center; flex:1; position:relative;">
+                    <div style="width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; background:#22c55e; color:white; z-index:2;">✓</div>
+                    ${idx < steps.length - 1 ? `<div style="flex:1; height:3px; background:#22c55e; position:absolute; left:calc(50% + 14px); right:calc(-50% + 14px); top:14px; z-index:1;"></div>` : ''}
+                </div>
+            `;
+        });
+        progressHtml += `</div>`;
+        let labelsHtml = `<div style="display:flex; justify-content:space-between; width:100%; margin-top:4px;">`;
+        steps.forEach(s => labelsHtml += `<span style="text-align:center; flex:1; font-size:12px; color:#15803d; font-weight:500;">${s.label}</span>`);
+        labelsHtml += `</div>`;
+        return `
+            <div style="background:#f0fdf4; border:1px solid #bbf7d0; padding:12px 16px; border-radius:8px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                    <span style="font-size:14px; font-weight:500; color:#15803d;">✅ Đã hoàn thành</span>
+                    <span style="font-size:13px; background:#dcfce7; padding:2px 12px; border-radius:12px; color:#15803d;">${statusName}</span>
+                </div>
+                ${progressHtml}
+                ${labelsHtml}
+            </div>
+        `;
+    }
+
+    // Từ chối
+    if (status === 'REJECTED' || status === 'CANCELLED') {
+        return `
+            <div style="background:#fef2f2; border:1px solid #fecaca; padding:10px 14px; border-radius:8px; display:flex; align-items:center; gap:8px; color:#b91c1c;">
+                <span style="font-weight:600;">❌ Đã bị từ chối</span>
+                <span style="flex:1;"></span>
+                <span style="font-size:13px; background:#fee2e2; padding:2px 12px; border-radius:12px; color:#b91c1c;">${statusName}</span>
+            </div>
+        `;
+    }
+
+    // Đang xử lý
+    let progressHtml = `<div style="display:flex; align-items:center; justify-content:space-between; width:100%; margin:8px 0;">`;
+    steps.forEach((s, idx) => {
+        let circleBg = '';
+        let lineColor = '';
+        const stepNum = s.id || (idx + 1);
+        if (stepNum < currentStep) {
+            circleBg = 'background:#22c55e; color:white;';
+            lineColor = '#22c55e';
+        } else if (stepNum === currentStep) {
+            circleBg = 'background:#f59e0b; color:white; box-shadow:0 0 0 4px #fef3c7;';
+            lineColor = '#e5e7eb';
+        } else {
+            circleBg = 'background:#e5e7eb; color:#9ca3af;';
+            lineColor = '#e5e7eb';
+        }
+        progressHtml += `
+            <div style="display:flex; flex-direction:column; align-items:center; flex:1; position:relative;">
+                <div style="width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; ${circleBg} z-index:2;">
+                    ${stepNum < currentStep ? '✓' : stepNum}
+                </div>
+                ${idx < steps.length - 1 ? `<div style="flex:1; height:3px; background:${lineColor}; position:absolute; left:calc(50% + 14px); right:calc(-50% + 14px); top:14px; z-index:1;"></div>` : ''}
+            </div>
+        `;
+    });
+    progressHtml += `</div>`;
+
+    let labelsHtml = `<div style="display:flex; justify-content:space-between; width:100%; margin-top:4px;">`;
+    steps.forEach((s, idx) => {
+        const stepNum = s.id || (idx + 1);
+        let color = stepNum < currentStep ? '#15803d' : (stepNum === currentStep ? '#d97706' : '#9ca3af');
+        let weight = stepNum === currentStep ? '600' : '400';
+        labelsHtml += `<span style="text-align:center; flex:1; font-size:12px; color:${color}; font-weight:${weight};">${s.label}</span>`;
+    });
+    labelsHtml += `</div>`;
+
+    const stepName = steps.find(s => (s.id || s.step) === currentStep)?.label || `Bước ${currentStep}`;
+    return `
+        <div style="background:#f8fafc; border:1px solid #e2e8f0; padding:12px 16px; border-radius:8px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                <span style="font-size:14px; font-weight:500; color:#334155;">⏳ Đang thực hiện</span>
+                <span style="font-size:13px; background:#fef3c7; padding:2px 12px; border-radius:12px; color:#b45309;">${stepName}</span>
+            </div>
+            ${progressHtml}
+            ${labelsHtml}
+        </div>
+    `;
 }
 
 // ====== TÊN BƯỚC DUYỆT ======
@@ -172,139 +341,7 @@ document.getElementById('modal')?.addEventListener('click', function(e) {
 });
 
 // ================================================================
-// RENDER PROGRESS (HỖ TRỢ WORKFLOW ĐỘNG)
-// ================================================================
-function renderApprovalProgress(status, step, stepsConfig) {
-    // Nếu không có stepsConfig, fallback về 3 bước mặc định
-    const defaultSteps = [
-        { id: 1, label: 'Phòng Kế hoạch' },
-        { id: 2, label: 'Phòng Dự án' },
-        { id: 3, label: 'Tổng Giám đốc' }
-    ];
-    const steps = stepsConfig && stepsConfig.length > 0 ? stepsConfig : defaultSteps;
-
-    // Xác định bước hiện tại
-    let currentStep = step || 1;
-    
-    // Map trạng thái sang bước (cho các workflow mặc định)
-    const statusMap = {
-        'PENDING': 1,
-        'PENDING_PLANNING': 1,
-        'PLANNING_APPROVED': 1,
-        'PENDING_PROJECT': 2,
-        'PROJECT_APPROVED': 2,
-        'PENDING_CEO': 3,
-        // GRN
-        'RECEIVED': 2,
-        'QC_CHECKED': 3,
-        // Issue
-        'COMPLETED': 3,
-        'CONFIRMED': 4,
-        // Material Return
-        'APPROVED': 2,
-        'CONFIRMED': 3,
-        // STO
-        'APPROVED': 2,
-        'COMPLETED': 3
-    };
-    if (statusMap[status] !== undefined) {
-        currentStep = statusMap[status];
-    }
-
-    // Đảm bảo currentStep không vượt quá số bước
-    currentStep = Math.min(currentStep, steps.length);
-
-    // Hoàn thành
-    const finalStatuses = ['APPROVED', 'COMPLETED', 'CONFIRMED'];
-    if (finalStatuses.includes(status)) {
-        let progressHtml = `<div style="display:flex; align-items:center; justify-content:space-between; width:100%; margin:8px 0;">`;
-        steps.forEach((s, idx) => {
-            progressHtml += `
-                <div style="display:flex; flex-direction:column; align-items:center; flex:1; position:relative;">
-                    <div style="width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; background:#22c55e; color:white; z-index:2;">✓</div>
-                    ${idx < steps.length - 1 ? `<div style="flex:1; height:3px; background:#22c55e; position:absolute; left:calc(50% + 14px); right:calc(-50% + 14px); top:14px; z-index:1;"></div>` : ''}
-                </div>
-            `;
-        });
-        progressHtml += `</div>`;
-        let labelsHtml = `<div style="display:flex; justify-content:space-between; width:100%; margin-top:4px;">`;
-        steps.forEach(s => labelsHtml += `<span style="text-align:center; flex:1; font-size:12px; color:#15803d; font-weight:500;">${s.label}</span>`);
-        labelsHtml += `</div>`;
-        return `
-            <div style="background:#f0fdf4; border:1px solid #bbf7d0; padding:12px 16px; border-radius:8px;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                    <span style="font-size:14px; font-weight:500; color:#15803d;">✅ Đã hoàn thành</span>
-                    <span style="font-size:13px; background:#dcfce7; padding:2px 12px; border-radius:12px; color:#15803d;">Hoàn thành</span>
-                </div>
-                ${progressHtml}
-                ${labelsHtml}
-            </div>
-        `;
-    }
-
-    // Từ chối
-    if (status === 'REJECTED' || status === 'CANCELLED') {
-        return `
-            <div style="background:#fef2f2; border:1px solid #fecaca; padding:10px 14px; border-radius:8px; display:flex; align-items:center; gap:8px; color:#b91c1c;">
-                <span style="font-weight:600;">❌ Đã bị từ chối</span>
-                <span style="flex:1;"></span>
-                <span style="font-size:13px; background:#fee2e2; padding:2px 12px; border-radius:12px;">Không duyệt</span>
-            </div>
-        `;
-    }
-
-    // Đang xử lý
-    let progressHtml = `<div style="display:flex; align-items:center; justify-content:space-between; width:100%; margin:8px 0;">`;
-    steps.forEach((s, idx) => {
-        let circleBg = '';
-        let lineColor = '';
-        const stepNum = s.id || (idx + 1);
-        if (stepNum < currentStep) {
-            circleBg = 'background:#22c55e; color:white;';
-            lineColor = '#22c55e';
-        } else if (stepNum === currentStep) {
-            circleBg = 'background:#f59e0b; color:white; box-shadow:0 0 0 4px #fef3c7;';
-            lineColor = '#e5e7eb';
-        } else {
-            circleBg = 'background:#e5e7eb; color:#9ca3af;';
-            lineColor = '#e5e7eb';
-        }
-        progressHtml += `
-            <div style="display:flex; flex-direction:column; align-items:center; flex:1; position:relative;">
-                <div style="width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; ${circleBg} z-index:2;">
-                    ${stepNum < currentStep ? '✓' : stepNum}
-                </div>
-                ${idx < steps.length - 1 ? `<div style="flex:1; height:3px; background:${lineColor}; position:absolute; left:calc(50% + 14px); right:calc(-50% + 14px); top:14px; z-index:1;"></div>` : ''}
-            </div>
-        `;
-    });
-    progressHtml += `</div>`;
-
-    let labelsHtml = `<div style="display:flex; justify-content:space-between; width:100%; margin-top:4px;">`;
-    steps.forEach((s, idx) => {
-        const stepNum = s.id || (idx + 1);
-        let color = stepNum < currentStep ? '#15803d' : (stepNum === currentStep ? '#d97706' : '#9ca3af');
-        let weight = stepNum === currentStep ? '600' : '400';
-        labelsHtml += `<span style="text-align:center; flex:1; font-size:12px; color:${color}; font-weight:${weight};">${s.label}</span>`;
-    });
-    labelsHtml += `</div>`;
-
-    const stepName = steps.find(s => (s.id || s.step) === currentStep)?.label || `Bước ${currentStep}`;
-    return `
-        <div style="background:#f8fafc; border:1px solid #e2e8f0; padding:12px 16px; border-radius:8px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                <span style="font-size:14px; font-weight:500; color:#334155;">⏳ Đang thực hiện</span>
-                <span style="font-size:13px; background:#fef3c7; padding:2px 12px; border-radius:12px; color:#b45309;">${stepName}</span>
-            </div>
-            ${progressHtml}
-            ${labelsHtml}
-        </div>
-    `;
-}
-
-
-// ================================================================
-// PHÂN TRANG (CLIENT-SIDE) - DÙNG CHUNG CHO MỌI MENU
+// PHÂN TRANG (CLIENT-SIDE)
 // ================================================================
 const DEFAULT_PAGE_SIZE = 10;
 const PAGE_SIZE_OPTIONS = [10, 20, 30, 50];
@@ -370,17 +407,14 @@ window._changePageSize = function(storageKey, size, targetFn) {
 // ================================================================
 // SHOW WAREHOUSE INFO MODAL
 // ================================================================
-// ====== SHOW WAREHOUSE INFO MODAL ======
 async function showWarehouseInfoModal(whId) {
     if (!whId) {
         showError('ID kho không hợp lệ!');
         return;
     }
 
-    // 1. Thử tìm trong cache trước
     let wh = (window._warehousesCache || []).find(w => w.id === whId);
     
-    // 2. Nếu không có trong cache, gọi API lấy mới
     if (!wh) {
         try {
             const warehouses = await api.getWarehouses();
@@ -426,22 +460,12 @@ async function showWarehouseInfoModal(whId) {
 // ================================================================
 // UTILITY FUNCTIONS - Caching & Debounce
 // ================================================================
-
-// ====== CACHE MANAGER ======
 const _cache = {
     data: {},
     lastFetch: {},
     ttl: {}
 };
 
-/**
- * Lấy dữ liệu từ cache hoặc gọi API
- * @param {string} key - Cache key (vd: 'items', 'projects')
- * @param {Function} fetchFn - Hàm trả về Promise
- * @param {number} ttl - Thời gian sống (ms), mặc định 60 giây
- * @param {boolean} forceRefresh - Bỏ qua cache, gọi API luôn
- * @returns {Promise<any>}
- */
 function getCachedData(key, fetchFn, ttl = 60000, forceRefresh = false) {
     const now = Date.now();
     if (!forceRefresh && _cache.data[key] && _cache.lastFetch[key] && (now - _cache.lastFetch[key] < ttl)) {
@@ -455,9 +479,6 @@ function getCachedData(key, fetchFn, ttl = 60000, forceRefresh = false) {
     });
 }
 
-/**
- * Xóa cache của một key
- */
 function clearCache(key) {
     if (key) {
         delete _cache.data[key];
@@ -470,9 +491,6 @@ function clearCache(key) {
     }
 }
 
-/**
- * Lấy cache hiện tại (dùng cho debug)
- */
 function getCacheStatus() {
     return {
         keys: Object.keys(_cache.data),
@@ -481,14 +499,6 @@ function getCacheStatus() {
     };
 }
 
-// ====== DEBOUNCE ======
-/**
- * Debounce function – trì hoãn gọi hàm cho đến khi ngừng gõ
- * @param {Function} func - Hàm cần debounce
- * @param {number} wait - Thời gian chờ (ms)
- * @param {boolean} immediate - Gọi ngay lần đầu tiên
- * @returns {Function}
- */
 function debounce(func, wait = 300, immediate = false) {
     let timeout;
     return function executedFunction(...args) {
@@ -504,10 +514,13 @@ function debounce(func, wait = 300, immediate = false) {
     };
 }
 
-// ====== EXPORT RA WINDOW ======
+// ================================================================
+// EXPORT
+// ================================================================
 window.getItemName = getItemName;
 window.getItemCode = getItemCode;
 window.getItemUnit = getItemUnit;
+window.getItemModel = getItemModel;
 window.getProjectNameByProjectId = getProjectNameByProjectId;
 window.getProjectNameByCode = getProjectNameByCode;
 window.getProjectIdByCode = getProjectIdByCode;
@@ -528,11 +541,12 @@ window.getPageSize = getPageSize;
 window.setPageSize = setPageSize;
 window.DEFAULT_PAGE_SIZE = DEFAULT_PAGE_SIZE;
 window.PAGE_SIZE_OPTIONS = PAGE_SIZE_OPTIONS;
-
-// Export ra window
 window.getCachedData = getCachedData;
 window.clearCache = clearCache;
 window.getCacheStatus = getCacheStatus;
 window.debounce = debounce;
+window.getStatusesForModule = getStatusesForModule;
+window.getStatusInfo = getStatusInfo;
+window.getStatusBadgeWithInfo = getStatusBadgeWithInfo;
 
-console.log('✅ Utils updated with caching & debounce.');
+console.log('✅ Utils updated with status code display.');

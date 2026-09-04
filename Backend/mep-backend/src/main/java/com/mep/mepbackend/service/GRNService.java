@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.mep.mepbackend.entity.ApprovalHistory;
 import com.mep.mepbackend.entity.GRN;
 import com.mep.mepbackend.entity.Inventory;
+import com.mep.mepbackend.entity.Status;
 import com.mep.mepbackend.entity.User;
 import com.mep.mepbackend.entity.Workflow;
 import com.mep.mepbackend.exception.ResourceNotFoundException;
@@ -19,7 +20,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -34,7 +34,7 @@ public class GRNService {
     private final ApprovalHistoryRepository approvalHistoryRepository;
     private final ObjectMapper objectMapper;
     private final WorkflowService workflowService;
-    private final StatusService statusService;
+    private final StatusService statusService; // ✅ Đã thêm
     private final CurrentUserUtil currentUserUtil;
 
     private static final List<String> PENDING_STATUSES = Arrays.asList("DRAFT", "RECEIVED", "QC_CHECKED");
@@ -51,7 +51,6 @@ public class GRNService {
     }
 
     private boolean isPendingStatus(String status) {
-
         return PENDING_STATUSES.contains(status);
     }
 
@@ -63,6 +62,19 @@ public class GRNService {
     public GRN getById(Long id) {
         return grnRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("GRN not found with id: " + id));
+    }
+
+    public GRN getByCode(String code) {
+        return grnRepository.findByCode(code)
+                .orElseThrow(() -> new ResourceNotFoundException("GRN not found with code: " + code));
+    }
+
+    public List<GRN> getByStatus(String status) {
+        return grnRepository.findByStatus(status);
+    }
+
+    public List<GRN> getByProjectCode(String projectCode) {
+        return grnRepository.findByProjectCode(projectCode);
     }
 
     // ===== CREATE =====
@@ -167,9 +179,20 @@ public class GRNService {
 
         grn.setWarehouseStaff(warehouseStaff);
         grn.setReceiptDate(receiptDate);
-        grn.setStatus(statusCode != null ? statusCode : "RECEIVED");
+
+        // ✅ Fallback nếu không có statusCode trong mapping
+        if (statusCode == null || statusCode.isEmpty()) {
+            try {
+                Status nextStatus = statusService.getByEntityTypeAndCode("grn", "RECEIVED");
+                statusCode = nextStatus != null ? nextStatus.getCode() : "RECEIVED";
+            } catch (Exception e) {
+                statusCode = "RECEIVED";
+            }
+        }
+        grn.setStatus(statusCode);
         grn.setApprovalStep(currentStep);
         history.setStatusAfter(grn.getStatus());
+
         approvalHistoryRepository.save(history);
         grn.setUpdatedAt(LocalDate.now());
         grnRepository.save(grn);
@@ -222,7 +245,17 @@ public class GRNService {
                     "QC: " + qcName + " - KHÔNG ĐẠT - " + note);
         } else {
             grn.setQcConfirm(qcName);
-            grn.setStatus(statusCode != null ? statusCode : "QC_CHECKED");
+
+            // ✅ Fallback nếu không có statusCode trong mapping
+            if (statusCode == null || statusCode.isEmpty()) {
+                try {
+                    Status nextStatus = statusService.getByEntityTypeAndCode("grn", "QC_CHECKED");
+                    statusCode = nextStatus != null ? nextStatus.getCode() : "QC_CHECKED";
+                } catch (Exception e) {
+                    statusCode = "QC_CHECKED";
+                }
+            }
+            grn.setStatus(statusCode);
             grn.setApprovalStep(currentStep);
             grn.setNote((grn.getNote() != null ? grn.getNote() + " | " : "") +
                     "QC: " + qcName + " - " + result + " - " + note);
@@ -305,7 +338,16 @@ public class GRNService {
         history.setApproverName(currentUser.getName());
         history.setStatusBefore(grn.getStatus());
 
-        grn.setStatus(statusCode != null ? statusCode : "COMPLETED");
+        // ✅ Fallback nếu không có statusCode trong mapping
+        if (statusCode == null || statusCode.isEmpty()) {
+            try {
+                Status nextStatus = statusService.getByEntityTypeAndCode("grn", "COMPLETED");
+                statusCode = nextStatus != null ? nextStatus.getCode() : "COMPLETED";
+            } catch (Exception e) {
+                statusCode = "COMPLETED";
+            }
+        }
+        grn.setStatus(statusCode);
         grn.setApprovalStep(currentStep);
         history.setStatusAfter(grn.getStatus());
 
@@ -325,19 +367,5 @@ public class GRNService {
             throw new RuntimeException("Chỉ có thể xóa GRN ở trạng thái DRAFT hoặc RECEIVED");
         }
         grnRepository.delete(grn);
-    }
-
-    // ===== GETTERS BỔ SUNG =====
-    public GRN getByCode(String code) {
-        return grnRepository.findByCode(code)
-                .orElseThrow(() -> new ResourceNotFoundException("GRN not found with code: " + code));
-    }
-
-    public List<GRN> getByStatus(String status) {
-        return grnRepository.findByStatus(status);
-    }
-
-    public List<GRN> getByProjectCode(String projectCode) {
-        return grnRepository.findByProjectCode(projectCode);
     }
 }

@@ -3,6 +3,7 @@ package com.mep.mepbackend.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mep.mepbackend.entity.ApprovalHistory;
 import com.mep.mepbackend.entity.MR;
+import com.mep.mepbackend.entity.Status;
 import com.mep.mepbackend.entity.User;
 import com.mep.mepbackend.entity.Workflow;
 import com.mep.mepbackend.exception.ResourceNotFoundException;
@@ -14,7 +15,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -27,7 +27,7 @@ public class MRService {
     private final ApprovalHistoryRepository approvalHistoryRepository;
     private final ObjectMapper objectMapper;
     private final WorkflowService workflowService;
-    private final StatusService statusService;
+    private final StatusService statusService; // ✅ Đã thêm
     private final CurrentUserUtil currentUserUtil;
 
     private static final List<String> PENDING_STATUSES = Arrays.asList("PENDING", "PENDING_PLANNING", "PENDING_PROJECT", "PENDING_CEO");
@@ -57,7 +57,6 @@ public class MRService {
                 .orElseThrow(() -> new ResourceNotFoundException("MR not found with id: " + id));
     }
 
-    // ===== GETTERS BỔ SUNG =====
     public MR getByCode(String code) {
         return mrRepository.findByCode(code)
                 .orElseThrow(() -> new ResourceNotFoundException("MR not found with code: " + code));
@@ -65,6 +64,10 @@ public class MRService {
 
     public List<MR> getByProjectCode(String projectCode) {
         return mrRepository.findByProjectCode(projectCode);
+    }
+
+    public List<MR> getByStatus(String status) {
+        return mrRepository.findByStatus(status);
     }
 
     // ===== CREATE =====
@@ -119,7 +122,7 @@ public class MRService {
         return mrRepository.save(mr);
     }
 
-    // ===== MRService.submit() =====
+    // ===== SUBMIT =====
     @Transactional
     public void submit(Long id) {
         MR mr = getById(id);
@@ -142,7 +145,6 @@ public class MRService {
                 throw new RuntimeException("Bạn không có quyền duyệt MR");
             }
 
-            // ✅ QUAN TRỌNG: Set status thành PENDING trước khi gọi approve()
             Map<String, Object> firstStep = steps.get(0);
             String statusCode = (String) firstStep.get("statusCode");
             mr.setStatus(statusCode != null && !statusCode.isEmpty() ? statusCode : "PENDING");
@@ -186,13 +188,11 @@ public class MRService {
             throw new RuntimeException("Bạn không có quyền duyệt bước này");
         }
 
-        // Cấm người tạo tự duyệt khi workflow > 1 bước
         User currentUser = currentUserUtil.getCurrentUser();
         if (steps.size() > 1 && currentUser.getId().equals(mr.getCreatedBy())) {
             throw new RuntimeException("Bạn không thể tự duyệt MR do chính mình tạo");
         }
 
-        // Ghi lịch sử duyệt
         ApprovalHistory history = new ApprovalHistory();
         history.setEntityType("MR");
         history.setEntityId(mr.getId());
@@ -203,12 +203,26 @@ public class MRService {
         history.setStatusBefore(mr.getStatus());
 
         if (currentStep == steps.size()) {
+            // Bước cuối → APPROVED
             mr.setStatus("APPROVED");
+            mr.setApprovalStep(currentStep);
         } else {
+            // Chuyển sang bước tiếp theo
             mr.setApprovalStep(currentStep + 1);
             String nextStatusCode = workflowService.getStatusForStep(wf.getId(), currentStep + 1);
-            mr.setStatus(nextStatusCode != null && !nextStatusCode.isEmpty() ? nextStatusCode : "PENDING");
+
+            // ✅ Fallback an toàn: nếu không có mapping, lấy status mặc định của MR
+            if (nextStatusCode == null || nextStatusCode.isEmpty()) {
+                try {
+                    Status defaultStatus = statusService.getDefaultStatus("mr");
+                    nextStatusCode = defaultStatus != null ? defaultStatus.getCode() : "PENDING";
+                } catch (Exception e) {
+                    nextStatusCode = "PENDING";
+                }
+            }
+            mr.setStatus(nextStatusCode);
         }
+
         history.setStatusAfter(mr.getStatus());
 
         approvalHistoryRepository.save(history);
@@ -242,9 +256,5 @@ public class MRService {
             throw new RuntimeException("Bạn không có quyền xóa MR");
         }
         mrRepository.delete(mr);
-    }
-
-    public List<MR> getByStatus(String status) {
-        return List.of();
     }
 }

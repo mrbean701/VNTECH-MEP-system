@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.mep.mepbackend.entity.ApprovalHistory;
 import com.mep.mepbackend.entity.Inventory;
 import com.mep.mepbackend.entity.STO;
+import com.mep.mepbackend.entity.Status;
 import com.mep.mepbackend.entity.User;
 import com.mep.mepbackend.entity.Workflow;
 import com.mep.mepbackend.exception.ResourceNotFoundException;
@@ -18,7 +19,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -32,7 +32,7 @@ public class STOService {
     private final ApprovalHistoryRepository approvalHistoryRepository;
     private final ObjectMapper objectMapper;
     private final WorkflowService workflowService;
-    private final StatusService statusService;
+    private final StatusService statusService; // ✅ Đã thêm
     private final CurrentUserUtil currentUserUtil;
 
     private static final List<String> PENDING_STATUSES = Arrays.asList("PENDING");
@@ -60,6 +60,19 @@ public class STOService {
     public STO getById(Long id) {
         return stoRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("STO not found with id: " + id));
+    }
+
+    public STO getByCode(String code) {
+        return stoRepository.findByCode(code)
+                .orElseThrow(() -> new ResourceNotFoundException("STO not found with code: " + code));
+    }
+
+    public List<STO> getByStatus(String status) {
+        return stoRepository.findByStatus(status);
+    }
+
+    public List<STO> getByProjectCode(String projectCode) {
+        return stoRepository.findByProjectCode(projectCode);
     }
 
     // ===== CREATE =====
@@ -131,13 +144,11 @@ public class STOService {
             throw new RuntimeException("Workflow không có bước duyệt nào");
         }
 
-        // Nếu workflow có 1 bước → tự động duyệt luôn
         if (steps.size() == 1) {
             if (!currentUserUtil.hasPermission("sto.approve")) {
                 throw new RuntimeException("Bạn không có quyền duyệt STO");
             }
 
-            // ✅ Quan trọng: Set status thành PENDING trước khi gọi approve()
             Map<String, Object> firstStep = steps.get(0);
             String statusCode = (String) firstStep.get("statusCode");
             sto.setStatus(statusCode != null && !statusCode.isEmpty() ? statusCode : "PENDING");
@@ -149,7 +160,6 @@ public class STOService {
             return;
         }
 
-        // Nhiều bước → chuyển sang PENDING bước 1
         Map<String, Object> firstStep = steps.get(0);
         String statusCode = (String) firstStep.get("statusCode");
         sto.setStatus(statusCode != null && !statusCode.isEmpty() ? statusCode : "PENDING");
@@ -201,7 +211,16 @@ public class STOService {
         } else {
             sto.setApprovalStep(currentStep + 1);
             String nextStatusCode = workflowService.getStatusForStep(wf.getId(), currentStep + 1);
-            sto.setStatus(nextStatusCode != null && !nextStatusCode.isEmpty() ? nextStatusCode : "PENDING");
+
+            if (nextStatusCode == null || nextStatusCode.isEmpty()) {
+                try {
+                    Status defaultStatus = statusService.getDefaultStatus("sto");
+                    nextStatusCode = defaultStatus != null ? defaultStatus.getCode() : "PENDING";
+                } catch (Exception e) {
+                    nextStatusCode = "PENDING";
+                }
+            }
+            sto.setStatus(nextStatusCode);
         }
         history.setStatusAfter(sto.getStatus());
 
@@ -295,7 +314,15 @@ public class STOService {
         history.setApproverName(currentUser.getName());
         history.setStatusBefore(sto.getStatus());
 
-        sto.setStatus(statusCode != null ? statusCode : "COMPLETED");
+        if (statusCode == null || statusCode.isEmpty()) {
+            try {
+                Status nextStatus = statusService.getByEntityTypeAndCode("sto", "COMPLETED");
+                statusCode = nextStatus != null ? nextStatus.getCode() : "COMPLETED";
+            } catch (Exception e) {
+                statusCode = "COMPLETED";
+            }
+        }
+        sto.setStatus(statusCode);
         sto.setApprovalStep(currentStep);
         history.setStatusAfter(sto.getStatus());
 
@@ -315,19 +342,5 @@ public class STOService {
             throw new RuntimeException("Chỉ có thể xóa STO ở trạng thái DRAFT hoặc PENDING");
         }
         stoRepository.delete(sto);
-    }
-
-    // ===== GETTERS BỔ SUNG =====
-    public STO getByCode(String code) {
-        return stoRepository.findByCode(code)
-                .orElseThrow(() -> new ResourceNotFoundException("STO not found with code: " + code));
-    }
-
-    public List<STO> getByStatus(String status) {
-        return stoRepository.findByStatus(status);
-    }
-
-    public List<STO> getByProjectCode(String projectCode) {
-        return stoRepository.findByProjectCode(projectCode);
     }
 }

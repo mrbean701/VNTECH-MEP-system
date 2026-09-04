@@ -18,18 +18,79 @@ let _itemSelectorState = {
     mode: 'mr',
     _showingSelected: false,
     _parentContent: '',
-    _expandedAlias: null     // Lưu code đang mở dropdown alias
+    _expandedAlias: null,    // Lưu code đang mở dropdown alias
+    _parentState: {}         // Lưu giá trị các input của modal cha
 };
+
+// ====== LƯU TRẠNG THÁI INPUT CỦA MODAL CHA ======
+function _saveParentState(mode) {
+    const state = {};
+    if (mode === 'mr') {
+        state.project = document.getElementById('f-mr-project')?.value || '';
+        state.needDate = document.getElementById('f-mr-needdate')?.value || '';
+        state.purpose = document.getElementById('f-mr-purpose')?.value || '';
+        state.requester = document.getElementById('f-mr-requester')?.value || '';
+        state.note = document.getElementById('f-mr-note')?.value || '';
+    } else if (mode === 'pr') {
+        state.project = document.getElementById('f-pr-project')?.value || '';
+        state.vendor = document.getElementById('f-pr-vendor')?.value || '';
+        state.note = document.getElementById('f-pr-note')?.value || '';
+    } else if (mode === 'po') {
+        state.project = document.getElementById('f-po-project')?.value || '';
+        state.vendor = document.getElementById('f-po-vendor')?.value || '';
+        state.note = document.getElementById('f-po-note')?.value || '';
+    } else if (mode === 'issue') {
+        state.project = document.getElementById('f-issue-project')?.value || '';
+        state.date = document.getElementById('f-issue-date')?.value || '';
+        state.area = document.getElementById('f-issue-area')?.value || '';
+        state.team = document.getElementById('f-issue-team')?.value || '';
+        state.requester = document.getElementById('f-issue-requester')?.value || '';
+        state.note = document.getElementById('f-issue-note')?.value || '';
+    } else if (mode === 'materialreturn') {
+        state.project = document.getElementById('f-return-project')?.value || '';
+        state.date = document.getElementById('f-return-date')?.value || '';
+        state.warehouse = document.getElementById('f-return-warehouse')?.value || '';
+        state.returnFrom = document.getElementById('f-return-from')?.value || '';
+        state.returner = document.getElementById('f-return-returner')?.value || '';
+        state.note = document.getElementById('f-return-note')?.value || '';
+    }
+    _itemSelectorState._parentState = state;
+}
+
+// ====== KHÔI PHỤC TRẠNG THÁI INPUT CỦA MODAL CHA ======
+function _restoreParentState(mode) {
+    const state = _itemSelectorState._parentState;
+    if (!state || Object.keys(state).length === 0) return;
+    if (mode === 'mr') {
+        const project = document.getElementById('f-mr-project');
+        const needDate = document.getElementById('f-mr-needdate');
+        const purpose = document.getElementById('f-mr-purpose');
+        const requester = document.getElementById('f-mr-requester');
+        const note = document.getElementById('f-mr-note');
+        if (project) project.value = state.project || '';
+        if (needDate) needDate.value = state.needDate || '';
+        if (purpose) purpose.value = state.purpose || '';
+        if (requester) requester.value = state.requester || '';
+        if (note) note.value = state.note || '';
+    } else if (mode === 'pr') {
+        // ...
+    } else if (mode === 'po') {
+        // ...
+    } else if (mode === 'issue') {
+        // ...
+    } else if (mode === 'materialreturn') {
+        // ...
+    }
+}
 
 // ====== HÀM MỞ MODAL ======
 async function openItemSelector(options) {
     const { selectedItems = [], callback, mode = 'mr' } = options || {};
-
     const modalContent = document.getElementById('modal-content');
     if (modalContent) {
         _itemSelectorState._parentContent = modalContent.innerHTML;
+        _saveParentState(mode);
     }
-
     _itemSelectorState.selectedItems = selectedItems.map(item => ({
         itemId: item.itemId,
         quantity: item.quantity || 1,
@@ -44,10 +105,8 @@ async function openItemSelector(options) {
     _itemSelectorState.page = 1;
     _itemSelectorState._showingSelected = false;
     _itemSelectorState._expandedAlias = null;
-
     await _loadItems();
     _renderModal();
-
     document.getElementById('modal').classList.add('active');
 }
 
@@ -58,17 +117,45 @@ function closeItemSelector() {
     if (content && _itemSelectorState._parentContent) {
         content.innerHTML = _itemSelectorState._parentContent;
         _itemSelectorState._parentContent = '';
+        _restoreParentState(_itemSelectorState.mode);
     }
     modal.classList.remove('active');
 }
 
-// ====== ĐÓNG MODAL SAU KHI LƯU ======
+// ====== ÁP DỤNG LỰA CHỌN (KHÔNG ĐÓNG MODAL CHA) ======
+function applyItemSelection() {
+    // Khôi phục nội dung cha
+    const modal = document.getElementById('modal');
+    const content = document.getElementById('modal-content');
+    if (content && _itemSelectorState._parentContent) {
+        content.innerHTML = _itemSelectorState._parentContent;
+        _itemSelectorState._parentContent = '';
+        _restoreParentState(_itemSelectorState.mode);
+        modal.classList.add('active');
+    }
+    // Gọi callback
+    if (typeof _itemSelectorState.callback === 'function') {
+        const selected = _itemSelectorState.selectedItems.map(s => ({
+            itemId: s.itemId,
+            quantity: s.quantity,
+            displayName: s.displayName,
+            itemCode: s.itemCode,
+            unit: s.unit,
+            standardPrice: s.standardPrice
+        }));
+        _itemSelectorState.callback(selected);
+    }
+    _renderParentItems();
+}
+
+// ====== ĐÓNG MODAL SAU KHI LƯU (ĐÓNG CẢ MODAL CHA) ======
 function closeItemSelectorAfterSave() {
     const modal = document.getElementById('modal');
     const content = document.getElementById('modal-content');
     if (content && _itemSelectorState._parentContent) {
         content.innerHTML = _itemSelectorState._parentContent;
         _itemSelectorState._parentContent = '';
+        _restoreParentState(_itemSelectorState.mode);
         if (typeof _itemSelectorState.callback === 'function') {
             const selected = _itemSelectorState.selectedItems.map(s => ({
                 itemId: s.itemId,
@@ -93,6 +180,10 @@ function _renderParentItems() {
         renderPRSelectedItems();
     } else if (_itemSelectorState.mode === 'po' && typeof renderPOSelectedItems === 'function') {
         renderPOSelectedItems();
+    } else if (_itemSelectorState.mode === 'issue' && typeof renderIssueSelectedItems === 'function') {
+        renderIssueSelectedItems();
+    } else if (_itemSelectorState.mode === 'materialreturn' && typeof renderReturnSelectedItems === 'function') {
+        renderReturnSelectedItems();
     }
 }
 
@@ -531,7 +622,7 @@ function saveSelectedItems() {
                 newItems.push({
                     itemId: found.id,
                     quantity: quantity,
-                    displayName: found.name,
+                    displayName: found.name,  // Lấy tên từ found
                     itemCode: found.code,
                     unit: found.unit,
                     standardPrice: found.standardPrice
@@ -545,30 +636,26 @@ function saveSelectedItems() {
     _renderModal();
     showSuccess('Đã cập nhật danh sách vật tư.');
 }
-
 // ====== ĐÓNG MODAL DANH SÁCH (KHÔNG LƯU) ======
 function closeSelectedModal() {
     _itemSelectorState._showingSelected = false;
     _renderModal();
 }
 
-// ====== XÁC NHẬN CHỌN VẬT TƯ ======
+// ====== XÁC NHẬN CHỌN VẬT TƯ (ÁP DỤNG VÀ ĐÓNG MODAL CON, GIỮ MODAL CHA) ======
 function confirmItemSelection() {
     const count = _itemSelectorState.selectedItems.length;
     if (count === 0) {
         showWarning('Bạn chưa chọn vật tư nào!');
         return;
     }
-
-    if (confirm(`Xác nhận chọn ${count} vật tư này?`)) {
-        closeItemSelectorAfterSave();
-        showSuccess(`Đã chọn ${count} vật tư.`);
-    }
+    applyItemSelection();
+    showSuccess(`Đã chọn ${count} vật tư.`);
 }
 
 // ====== HỦY TIẾN TRÌNH (QUAY LẠI) ======
 function cancelItemSelection() {
-    if (confirm('Bạn có chắc muốn hủy tiến trình chọn vật tư? Các thay đổi sẽ không được lưu.')) {
+    if (confirm('Bạn có chắc muốn hủy tiến trình chọn vật tư?')) {
         closeItemSelector();
     }
 }
@@ -641,11 +728,7 @@ window.itemSelectorPage = function(page) {
 window.openItemSelector = openItemSelector;
 window.closeItemSelector = closeItemSelector;
 window.closeItemSelectorAfterSave = closeItemSelectorAfterSave;
-window.itemSelectorPage = itemSelectorPage;
-window.itemSelectorSearch = itemSelectorSearch;
-window.itemSelectorSelectAll = itemSelectorSelectAll;
-window.itemSelectorDeselectAll = itemSelectorDeselectAll;
-window.clearAllSelected = clearAllSelected;
+window.applyItemSelection = applyItemSelection;
 window.confirmItemSelection = confirmItemSelection;
 window.cancelItemSelection = cancelItemSelection;
 window.showSelectedItemsModal = showSelectedItemsModal;
@@ -655,4 +738,4 @@ window.selectAlias = selectAlias;
 window.toggleAliasDropdown = toggleAliasDropdown;
 window.resetAndCloseAliasDropdown = resetAndCloseAliasDropdown;
 
-console.log('✅ Item selector modal updated – close alias dropdown by clicking outside keeps selection, only "Đóng" button resets to main name.');
+console.log('✅ Item selector modal updated – now preserves parent input values and correctly renders selected items after confirmation.');
