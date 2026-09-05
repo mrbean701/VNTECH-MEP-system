@@ -25,7 +25,7 @@ let _prSelectedItems = [];
 let _prMode = 'create';
 let _prEditId = null;
 
-// ====== HÀM LẤY ACTION (CÓ KIỂM TRA canApprove) ======
+// ====== HÀM LẤY ACTION (CÓ KIỂM TRA canApprove + currentStep) ======
 function getPRActions(pr, statuses) {
     const user = getUser();
     let actions = '';
@@ -48,6 +48,7 @@ function getPRActions(pr, statuses) {
         actions += ` <button class="btn btn-danger btn-sm" onclick="deletePR(${pr.id})"><i class="fas fa-trash"></i></button>`;
     }
 
+    // ✅ Nút Submit (chỉ khi DRAFT)
     const canSubmit = hasPermission('pr.submit') && 
                      pr.status === 'DRAFT' && 
                      (user?.role === 'ADMIN' || user?.id === pr.createdBy);
@@ -55,23 +56,27 @@ function getPRActions(pr, statuses) {
         actions += ` <button class="btn btn-success btn-sm" onclick="submitPR(${pr.id})">Xác nhận</button>`;
     }
 
-    // ✅ Kiểm tra điều kiện duyệt
+    // ✅ Nút Approve/Reject: kiểm tra currentStep (lấy từ workflow_progress)
     const pendingStatuses = ['PENDING', 'PENDING_PLANNING', 'PENDING_PROJECT', 'PENDING_CEO', 
                              'PLANNING_APPROVED', 'PROJECT_APPROVED'];
-    if (pendingStatuses.includes(pr.status)) {
-        // Lấy thông tin step hiện tại từ workflow
-        const currentStep = pr.approvalStep || 1;
-        // Lấy permissionKey và departmentId từ workflow (cần parse từ steps)
-        // Ở đây tôi giả định lấy từ pr.workflowId và gọi API
-        // Thực tế nên cache workflow steps để tránh gọi API nhiều
-        const canApprovePR = canApprove(currentStep, 'pr.approve', null);
-        if (canApprovePR) {
+    if (pendingStatuses.includes(pr.status) && !pr.isCompleted) {
+        // Lấy currentStep từ progress nếu có, fallback approvalStep
+        let currentStep = pr.approvalStep || 1;
+        if (pr._progress && pr._progress.currentStep) {
+            currentStep = pr._progress.currentStep;
+        }
+        // Kiểm tra canApprove với currentStep
+        if (canApprove(currentStep, 'pr.approve', null)) {
             actions += ` <button class="btn btn-success btn-sm" onclick="approvePR(${pr.id})">Duyệt</button>`;
             actions += ` <button class="btn btn-danger btn-sm" onclick="rejectPR(${pr.id})">Từ chối</button>`;
         }
     }
 
-            const canCreatePO = hasPermission('po.create') && pr.status === 'APPROVED' && getUserApprovalLevel() === 0;
+    // ✅ Nút tạo PO (khi PR đã APPROVED và user có permission po.create và approvalLevel = 0)
+    const canCreatePO = hasPermission('po.create') && 
+                        (pr.status === 'APPROVED' || pr.isApproved) && 
+                        !pr.isCompleted &&
+                        getUserApprovalLevel() === 0;
     if (canCreatePO) {
         actions += ` <button class="btn btn-warning btn-sm" onclick="createPOFromPR(${pr.id})">Tạo PO</button>`;
     }
@@ -85,13 +90,12 @@ function filterPRData(prs, projects, vendors) {
     const keyword = filterText.toLowerCase().trim();
 
     return prs.filter(pr => {
-        // Lọc theo từ khóa (mã, dự án, NCC, vật tư)
         let matchKeyword = true;
         if (keyword) {
             const codeMatch = (pr.code || '').toLowerCase().includes(keyword);
             const projectNameMatch = (pr.projectName || '').toLowerCase().includes(keyword);
             const projectCodeMatch = (pr.projectCode || '').toLowerCase().includes(keyword);
-                        const vendorNameMatch = (pr.vendorName || '').toLowerCase().includes(keyword);
+            const vendorNameMatch = (pr.vendorName || '').toLowerCase().includes(keyword);
             const vendorCodeMatch = (pr.vendorCode || '').toLowerCase().includes(keyword);
 
             let itemsMatch = false;
@@ -111,17 +115,14 @@ function filterPRData(prs, projects, vendors) {
                            vendorNameMatch || vendorCodeMatch || itemsMatch;
         }
 
-        // Lọc theo status
         const matchStatus = statusFilter ? pr.status === statusFilter : true;
 
-        // Lọc theo dự án
         let matchProject = true;
         if (projectFilter) {
             const selectedProject = projects.find(p => p.code === projectFilter || p.id === parseInt(projectFilter));
             matchProject = selectedProject ? pr.projectCode === selectedProject.code : false;
         }
 
-        // Lọc theo nhà cung cấp
         let matchVendor = true;
         if (vendorFilter) {
             const selectedVendor = vendors.find(v => v.code === vendorFilter || v.name === vendorFilter);
@@ -154,7 +155,7 @@ function sortPRData(data) {
             valA = new Date(a.createdAt || 0);
             valB = new Date(b.createdAt || 0);
         } else if (sortBy === 'status') {
-            const statusOrder = { 'DRAFT': 0, 'PENDING': 1, 'APPROVED': 2, 'REJECTED': 3 };
+            const statusOrder = { 'DRAFT': 0, 'PENDING': 1, 'APPROVED': 2, 'REJECTED': 3, 'COMPLETED': 4 };
             valA = statusOrder[a.status] || 0;
             valB = statusOrder[b.status] || 0;
         }
@@ -175,7 +176,7 @@ async function renderPR(page = null) {
             api.getPRs(),
             api.getProjects(),
             api.getVendors(),
-            api.getStatuses('pr')
+            api.getStatuses('pr').catch(() => [])
         ]);
         
         window._projectsCache = projects;
@@ -195,6 +196,7 @@ async function renderPR(page = null) {
         prState.perPage = perPage;
         const paging = paginate(filtered, prState.page, perPage);
 
+        // ✅ KIỂM TRA QUYỀN TẠO
         const canCreate = hasPermission('pr.create');
         const btnCreate = document.getElementById('btn-create-pr');
         if (btnCreate) {
@@ -340,12 +342,13 @@ async function renderPR(page = null) {
 // ====== VIEW PR (CHI TIẾT) ======
 async function viewPR(id) {
     try {
-        const [pr, allPRs, items, mrs, statuses] = await Promise.all([
-            api.getPRById ? api.getPRById(id) : null,
+        const [pr, allPRs, items, mrs, statuses, progress] = await Promise.all([
+            api.getPRById ? await api.getPRById(id) : null,
             api.getPRs(),
             api.getItems(),
             api.getMRs(),
-            api.getStatuses('pr')
+            api.getStatuses('pr'),
+            api.getWorkflowProgress('pr', id).catch(() => null) // ✅ Lấy tiến trình
         ]);
 
         let prData = pr;
@@ -356,6 +359,9 @@ async function viewPR(id) {
             showError('Không tìm thấy PR!');
             return;
         }
+
+        // Gắn progress vào prData để dùng trong actions
+        prData._progress = progress;
 
         window._itemsCache = items;
         window._mrsCache = mrs;
@@ -391,29 +397,32 @@ async function viewPR(id) {
             `;
         }).join('');
 
-        // Lấy workflow steps
-        let stepsConfig = [
-            { id: 1, label: 'Phòng Kế hoạch' },
-            { id: 2, label: 'Phòng Dự án' },
-            { id: 3, label: 'Tổng Giám đốc' }
-        ];
-        if (prData.workflowId) {
-            try {
-                const wf = await api.getWorkflowById ? await api.getWorkflowById(prData.workflowId) : null;
-                if (wf && wf.steps) {
-                    const steps = JSON.parse(wf.steps);
-                    stepsConfig = steps.map(s => ({
-                        id: s.step || s.id,
-                        label: s.label || `Bước ${s.step || s.id}`
-                    }));
-                }
-            } catch (e) {
-                console.warn('Không lấy được workflow steps:', e);
+        // ✅ Tạo progress bar từ workflow_progress
+        let progressHtml = '';
+        if (progress && progress.totalSteps > 0) {
+            progressHtml = renderWorkflowProgressBar(progress);
+        } else {
+            // Fallback: dùng cách cũ
+            let stepsConfig = [
+                { id: 1, label: 'Phòng Kế hoạch' },
+                { id: 2, label: 'Phòng Dự án' },
+                { id: 3, label: 'Tổng Giám đốc' }
+            ];
+            if (prData.workflowId) {
+                try {
+                    const wf = await api.getWorkflowById ? await api.getWorkflowById(prData.workflowId) : null;
+                    if (wf && wf.steps) {
+                        const steps = JSON.parse(wf.steps);
+                        stepsConfig = steps.map(s => ({
+                            id: s.step || s.id,
+                            label: s.label || `Bước ${s.step || s.id}`
+                        }));
+                    }
+                } catch (e) {}
             }
+            const currentStep = prData.approvalStep !== undefined && prData.approvalStep !== null ? prData.approvalStep : 1;
+            progressHtml = renderApprovalProgress(prData.status, currentStep, stepsConfig, statuses);
         }
-
-        const currentStep = prData.approvalStep !== undefined && prData.approvalStep !== null ? prData.approvalStep : 1;
-        const approvalHtml = renderApprovalProgress(prData.status, currentStep, stepsConfig, statuses);
 
         const projectId = getProjectIdByCode(prData.projectCode);
         const projectLink = projectId ?
@@ -433,13 +442,14 @@ async function viewPR(id) {
             </div>
         `;
 
-                        const totalAmount = itemsList.reduce((sum, it) => sum + ((it.price || 0) * (it.quantity || 0)), 0);
+        const totalAmount = itemsList.reduce((sum, it) => sum + ((it.price || 0) * (it.quantity || 0)), 0);
         const statusBadge = getStatusBadgeWithInfo(prData.status, statuses);
 
-        // Nút tạo PO ở chi tiết PR: chỉ cho bộ phận mua (level 0), khóa khi PR đã duyệt
-        const canMakePO = prData.status === 'APPROVED'
-            && hasPermission('po.create')
-            && getUserApprovalLevel() === 0;
+        // ✅ Kiểm tra nút tạo PO ở chi tiết
+        const canMakePO = (prData.status === 'APPROVED' || prData.isApproved) &&
+            !prData.isCompleted &&
+            hasPermission('po.create') &&
+            getUserApprovalLevel() === 0;
         const poBtnHtml = canMakePO
             ? ` <button class="btn btn-warning btn-sm" onclick="createPOFromPR(${prData.id}); closeModal();">Tạo PO</button>`
             : '';
@@ -453,7 +463,7 @@ async function viewPR(id) {
                 <div><span class="label">Nhà cung cấp:</span> <span class="value">${prData.vendorName || prData.vendorCode || '--'}</span></div>
                 <div><span class="label">Trạng thái:</span> <span class="value">${statusBadge}</span></div>
                 ${totalAmount > 0 ? `<div><span class="label">Tổng tiền:</span> <span class="value">${totalAmount.toLocaleString()} VND</span></div>` : ''}
-                <div style="grid-column:1/-1;"><span class="label">Tiến độ duyệt:</span><br>${approvalHtml}</div>
+                <div style="grid-column:1/-1;"><span class="label">Tiến độ duyệt:</span><br>${progressHtml}</div>
                 <div style="grid-column:1/-1;"><span class="label">Danh sách vật tư:</span><br>${itemsTable}</div>
                 <div style="grid-column:1/-1;"><span class="label">Ghi chú:</span> <span class="value">${prData.note || ''}</span></div>
             </div>
@@ -925,4 +935,4 @@ window.renderPRSelectedItems = renderPRSelectedItems;
 window.removePRItem = removePRItem;
 window.openItemSelectorForPR = openItemSelectorForPR;
 
-console.log('✅ PR module updated with approval level and canApprove.');
+console.log('✅ PR module updated with workflow progress and approval level.');

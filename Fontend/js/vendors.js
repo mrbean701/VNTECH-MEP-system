@@ -78,6 +78,7 @@ async function renderVendors(page = null) {
         const canEdit = hasPermission('vendors.edit');
         const canDelete = hasPermission('vendors.delete');
 
+        // ✅ KIỂM TRA QUYỀN TẠO NHÀ CUNG CẤP
         const btnCreate = document.getElementById('btn-create-vendor');
         if (btnCreate) {
             btnCreate.style.display = canCreate ? 'inline-block' : 'none';
@@ -545,4 +546,4 @@ window.saveVendor = saveVendor;
 window.showAddVendorModal = showAddVendorModal;
 window.resetVendorsFilters = resetVendorsFilters;
 
-console.log('✅ Vendors module updated with group display fix and cache refresh.');
+console.log('✅ Vendors module updated with group display fix and permission check for create button.');

@@ -48,4 +48,10 @@ public class STO {
 
     @Column(name = "created_by_name", length = 100)
     private String createdByName;
+
+    @Column(name = "is_approved", nullable = false)
+    private Boolean isApproved = false;
+
+    @Column(name = "is_completed", nullable = false)
+    private Boolean isCompleted = false;
 }

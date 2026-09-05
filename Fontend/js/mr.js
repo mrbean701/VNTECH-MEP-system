@@ -13,16 +13,25 @@ const mrState = {
     sortOrder: 'desc'
 };
 
+
 // ====== DEBOUNCE FILTER ======
 const debouncedMRFilter = debounce(() => {
     mrState.page = 1;
     renderMR();
 }, 300);
 
+// ====== BIẾN TOÀN CỤC CHO ITEM SELECTOR ======
+let _mrSelectedItems = [];
+let _mrMode = 'create';
+let _mrEditId = null;
+
+
+
 // ====== HÀM LẤY ACTION ======
-function getMRActions(mr, hasPR = false, prCode = null) {
+function getMRActions(mr, statuses) {
     const user = getUser();
     let actions = '';
+
 
     actions += `<button class="btn btn-info btn-sm" onclick="viewMR(${mr.id})"><i class="fas fa-eye"></i></button>`;
 
@@ -45,48 +54,37 @@ function getMRActions(mr, hasPR = false, prCode = null) {
         actions += ` <button class="btn btn-success btn-sm" onclick="submitMR(${mr.id})">Xác nhận</button>`;
     }
 
-    if (hasPermission('mr.approve') && mr.status === 'PENDING') {
-        actions += ` <button class="btn btn-success btn-sm" onclick="approveMR(${mr.id})">Duyệt</button>`;
-        actions += ` <button class="btn btn-danger btn-sm" onclick="rejectMR(${mr.id})">Từ chối</button>`;
+    // ✅ Nút Approve/Reject: kiểm tra currentStep (lấy từ workflow_progress)
+    if (mr.status === 'PENDING' && !mr.isCompleted) {
+        
+        let currentStep = mr.approvalStep || 1;
+        if (mr._progress && mr._progress.currentStep) {
+            currentStep = mr._progress.currentStep;
+        }
+        if (canApprove(currentStep, 'mr.approve', null)) {
+            actions += ` <button class="btn btn-success btn-sm" onclick="approveMR(${mr.id})">Duyệt</button>`;
+            actions += ` <button class="btn btn-danger btn-sm" onclick="rejectMR(${mr.id})">Từ chối</button>`;
+        }
     }
 
-    const canCreatePR = hasPermission('pr.create')
-        && mr.status === 'APPROVED'
-        && !hasPR
-        && getUserApprovalLevel() === 0;
+    // ✅ Nút tạo PR (khi MR đã APPROVED và user có permission pr.create và approvalLevel = 0)
+    const canCreatePR = hasPermission('pr.create') &&
+                        mr.status === 'APPROVED' &&
+                        !mr.isCompleted &&
+                        getUserApprovalLevel() === 0;
     if (canCreatePR) {
         actions += ` <button class="btn btn-warning btn-sm" onclick="createPRFromMR(${mr.id})">Tạo PR</button>`;
-    }
-
-    // Nếu đã có PR, hiển thị link đến PR thay vì nút "Tạo PR"
-    if (hasPR && prCode) {
-        actions += ` <span style="font-size:12px; color:#888;">PR: <a href="#" onclick="event.preventDefault(); viewPRByCode('${prCode}');" style="color:#1a3c6e; text-decoration:underline;">${prCode}</a></span>`;
     }
 
     return actions || '-';
 }
 
-async function viewPRByCode(code) {
-    try {
-        const prs = await api.getPRs();
-        const pr = prs.find(p => p.code === code);
-        if (pr) {
-            viewPR(pr.id);
-        } else {
-            showError('Không tìm thấy PR với mã: ' + code);
-        }
-    } catch (error) {
-        showError('Lỗi tìm PR: ' + error.message);
-    }
-}
-
-// ====== HÀM FILTER DỮ LIỆU (NHẬN DANH SÁCH DỰ ÁN) ======
+// ====== HÀM FILTER DỮ LIỆU ======
 function filterMRData(mrs, projects) {
     const { filterText, statusFilter, projectFilter } = mrState;
     const keyword = filterText.toLowerCase().trim();
 
     return mrs.filter(mr => {
-        // Lọc theo từ khóa (multi-field)
         let matchKeyword = true;
         if (keyword) {
             const codeMatch = (mr.code || '').toLowerCase().includes(keyword);
@@ -109,10 +107,7 @@ function filterMRData(mrs, projects) {
             matchKeyword = codeMatch || projectNameMatch || projectCodeMatch || itemsMatch;
         }
 
-        // Lọc theo status
         const matchStatus = statusFilter ? mr.status === statusFilter : true;
-
-        // Lọc theo dự án (dùng projects truyền vào)
         let matchProject = true;
         if (projectFilter) {
             const selectedProject = projects.find(p => p.code === projectFilter || p.id === parseInt(projectFilter));
@@ -143,7 +138,7 @@ function sortMRData(data) {
             valA = new Date(a.createdAt || 0);
             valB = new Date(b.createdAt || 0);
         } else if (sortBy === 'status') {
-            const statusOrder = { 'DRAFT': 0, 'PENDING': 1, 'APPROVED': 2, 'REJECTED': 3 };
+            const statusOrder = { 'DRAFT': 0, 'PENDING': 1, 'APPROVED': 2, 'REJECTED': 3, 'COMPLETED': 4 };
             valA = statusOrder[a.status] || 0;
             valB = statusOrder[b.status] || 0;
         }
@@ -160,14 +155,14 @@ function sortMRData(data) {
 // ====== RENDER DANH SÁCH MR ======
 async function renderMR(page = null) {
     try {
-        // Lấy statuses cho MR
         const [mrs, projects, statuses] = await Promise.all([
             api.getMRs(),
             api.getProjects(),
-            api.getStatuses('mr')
+            api.getStatuses('mr').catch(() => [])
         ]);
         
         window._projectsCache = projects;
+        if (!window._statusesCache) window._statusesCache = {};
         window._statusesCache['mr'] = statuses;
         saveData('projects', projects);
 
@@ -239,9 +234,8 @@ async function renderMR(page = null) {
                 }
             } catch (e) { itemsStr = 'Lỗi parse'; }
 
-            // Hiển thị trạng thái với màu sắc
             const statusBadge = getStatusBadgeWithInfo(m.status, statuses);
-            const actions = getMRActions(m);
+            const actions = getMRActions(m, statuses);
             const projectId = getProjectIdByCode(m.projectCode);
             const projectLink = projectId ?
                 `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="viewProject(${projectId})">${m.projectName || m.projectCode || '--'}</span>` :
@@ -261,8 +255,46 @@ async function renderMR(page = null) {
         html += buildPaginationHTML(paging, 'renderMR', 'mr');
         document.getElementById('mr-container').innerHTML = html;
 
-        // Gắn sự kiện (giữ nguyên)
-        // ...
+        // Gắn sự kiện
+        const filterInput = document.getElementById('mr-filter');
+        const statusSelect = document.getElementById('mr-status-filter');
+        const projectSelect = document.getElementById('mr-project-filter');
+        const sortSelect = document.getElementById('mr-sort');
+
+        if (filterInput) {
+            filterInput.removeEventListener('input', debouncedMRFilter);
+            filterInput.addEventListener('input', function(e) {
+                mrState.filterText = this.value;
+                debouncedMRFilter();
+            });
+        }
+
+        if (statusSelect) {
+            statusSelect.removeEventListener('change', debouncedMRFilter);
+            statusSelect.addEventListener('change', function(e) {
+                mrState.statusFilter = this.value;
+                debouncedMRFilter();
+            });
+        }
+
+        if (projectSelect) {
+            projectSelect.removeEventListener('change', debouncedMRFilter);
+            projectSelect.addEventListener('change', function(e) {
+                mrState.projectFilter = this.value;
+                debouncedMRFilter();
+            });
+        }
+
+        if (sortSelect) {
+            sortSelect.removeEventListener('change', debouncedMRFilter);
+            sortSelect.addEventListener('change', function(e) {
+                const [sortBy, sortOrder] = this.value.split('_');
+                mrState.sortBy = sortBy;
+                mrState.sortOrder = sortOrder || 'desc';
+                debouncedMRFilter();
+            });
+        }
+
     } catch (error) {
         showError('Không thể tải danh sách MR: ' + error.message);
         console.error('renderMR error:', error);
@@ -280,17 +312,14 @@ function resetMRFilters() {
     renderMR();
 }
 
-// ====== BIẾN TOÀN CỤC CHO ITEM SELECTOR ======
-let _mrSelectedItems = [];
-let _mrMode = 'create';
-let _mrEditId = null;
+
 
 // ====== CALLBACK TỪ MODAL CHỌN VẬT TƯ ======
 function mrItemSelectorCallback(selectedItems) {
     _mrSelectedItems = selectedItems.map(item => ({
         itemId: item.itemId,
         quantity: item.quantity || 1,
-        itemName: item.displayName || getItemName(item.itemId), // Ưu tiên displayName
+        itemName: item.displayName || getItemName(item.itemId),
         itemCode: item.itemCode || getItemCode(item.itemId),
         unit: item.unit || getItemUnit(item.itemId)
     }));
@@ -320,6 +349,13 @@ function _renderMRSelectedItemsHTML() {
         `;
     });
     return html;
+}
+
+function _attachMRQuantityEvents() {
+    document.querySelectorAll('.mr-item-qty').forEach(input => {
+        input.removeEventListener('change', _onMRQtyChange);
+        input.addEventListener('change', _onMRQtyChange);
+    });
 }
 
 function _onMRQtyChange(e) {
@@ -433,17 +469,25 @@ async function saveMR() {
 // ====== XEM CHI TIẾT MR ======
 async function viewMR(id) {
     try {
-        // Lấy danh sách MR từ API
-        const mrs = await api.getMRs();
+        const [mrs, items, statuses, progress] = await Promise.all([
+            api.getMRs(),
+            api.getItems(),
+            api.getStatuses('mr'),
+            api.getWorkflowProgress('mr', id).catch(() => null) // ✅ Lấy tiến trình
+        ]);
+
         const mr = mrs.find(m => m.id === id);
         if (!mr) {
             showError('Không tìm thấy MR!');
             return;
         }
 
-        // Load items để lấy thông tin vật tư
-        const items = await api.getItems();
+        // Gắn progress vào mr để dùng trong actions
+        mr._progress = progress;
+
         window._itemsCache = items;
+        if (!window._statusesCache) window._statusesCache = {};
+        window._statusesCache['mr'] = statuses;
 
         let mrItems = [];
         try {
@@ -455,7 +499,6 @@ async function viewMR(id) {
             mrItems = [];
         }
 
-        // Build bảng vật tư với đầy đủ thông tin
         const itemsHtml = mrItems.map(it => {
             const item = items.find(i => i.id === it.itemId);
             const code = item ? item.code : 'N/A';
@@ -472,28 +515,35 @@ async function viewMR(id) {
             `;
         }).join('');
 
+        // ✅ Tạo progress bar từ workflow_progress
+        let progressHtml = '';
+        if (progress && progress.totalSteps > 0) {
+            progressHtml = renderWorkflowProgressBar(progress);
+        } else {
+            // Fallback: dùng cách cũ
+            let stepsConfig = [{ id: 1, label: 'Chỉ huy trưởng' }];
+            if (mr.workflowId) {
+                try {
+                    const wf = await api.getWorkflowById ? await api.getWorkflowById(mr.workflowId) : null;
+                    if (wf && wf.steps) {
+                        const steps = JSON.parse(wf.steps);
+                        stepsConfig = steps.map(s => ({
+                            id: s.step || s.id,
+                            label: s.label || `Bước ${s.step || s.id}`
+                        }));
+                    }
+                } catch (e) {
+                    console.warn('Không lấy được workflow steps:', e);
+                }
+            }
+            const currentStep = mr.approvalStep !== undefined && mr.approvalStep !== null ? mr.approvalStep : 1;
+            progressHtml = renderApprovalProgress(mr.status, currentStep, stepsConfig, statuses);
+        }
+
         // Lấy PR liên quan (nếu có)
         const prs = await api.getPRs();
         const existingPR = prs.find(pr => pr.mrId === mr.id);
 
-        // Lấy workflow steps
-        let stepsConfig = [{ id: 1, label: 'Chỉ huy trưởng' }];
-        if (mr.workflowId) {
-            try {
-                const wf = await api.getWorkflowById ? await api.getWorkflowById(mr.workflowId) : null;
-                if (wf && wf.steps) {
-                    const steps = JSON.parse(wf.steps);
-                    stepsConfig = steps.map(s => ({
-                        id: s.step || s.id,
-                        label: s.label || `Bước ${s.step || s.id}`
-                    }));
-                }
-            } catch (e) {
-                console.warn('Không lấy được workflow steps:', e);
-            }
-        }
-
-        const approvalHtml = renderApprovalProgress(mr.status, mr.approvalStep || 1, stepsConfig);
         const projectId = getProjectIdByCode(mr.projectCode);
         const projectLink = projectId ?
             `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="closeModal(); viewProject(${projectId});">${mr.projectName || mr.projectCode || '--'}</span>` :
@@ -508,7 +558,6 @@ async function viewMR(id) {
             </div>
         `;
 
-                // Hiển thị thông tin PR đã tạo (nếu có)
         let prInfoHtml = '';
         if (existingPR) {
             prInfoHtml = `
@@ -523,11 +572,11 @@ async function viewMR(id) {
             `;
         }
 
-        // Nút tạo PR ở chi tiết MR: chỉ bộ phận mua (level 0), khi MR đã duyệt & chưa có PR
-        const canMakePR = mr.status === 'APPROVED'
-            && !existingPR
-            && hasPermission('pr.create')
-            && getUserApprovalLevel() === 0;
+        const canMakePR = (mr.status === 'APPROVED' || mr.isApproved) &&
+            !mr.isCompleted &&
+            !existingPR &&
+            hasPermission('pr.create') &&
+            getUserApprovalLevel() === 0;
         const prBtnHtml = canMakePR
             ? ` <button class="btn btn-warning btn-sm" onclick="createPRFromMR(${mr.id}); closeModal();">Tạo PR</button>`
             : '';
@@ -540,17 +589,12 @@ async function viewMR(id) {
                 <div><span class="label">Người yêu cầu:</span> <span class="value">${mr.requester || mr.createdByName || '--'}</span></div>
                 <div><span class="label">Ngày cần:</span> <span class="value">${mr.needDate || ''}</span></div>
                 <div><span class="label">Mục đích/Khu vực:</span> <span class="value">${mr.purpose || ''}</span></div>
-                <div><span class="label">Trạng thái:</span> <span class="value">${getStatusBadge(mr.status)}</span></div>
+                <div><span class="label">Trạng thái:</span> <span class="value">${getStatusBadgeWithInfo(mr.status, statuses)}</span></div>
                 ${prInfoHtml}
-                <div style="grid-column:1/-1;"><span class="label">Tiến độ duyệt:</span><br>${approvalHtml}</div>
+                <div style="grid-column:1/-1;"><span class="label">Tiến độ duyệt:</span><br>${progressHtml}</div>
                 <div style="grid-column:1/-1;"><span class="label">Danh sách vật tư:</span><br>${itemsTable}</div>
                 <div style="grid-column:1/-1;"><span class="label">Ghi chú:</span> <span class="value">${mr.note || ''}</span></div>
             </div>
-
-
-
-
-
             <div class="modal-actions">
                 <button class="btn btn-info" onclick="printMR(${mr.id}); closeModal();"><i class="fas fa-print"></i> In phiếu</button>
                 ${prBtnHtml}
@@ -562,6 +606,7 @@ async function viewMR(id) {
         showError('Lỗi khi tải chi tiết MR: ' + error.message);
     }
 }
+
 // ====== SỬA MR ======
 async function editMR(id) {
     if (!hasPermission('mr.edit')) {
@@ -744,7 +789,6 @@ function createPRFromMR(mrId) {
         showWarning('Bạn không có quyền tạo PR!');
         return;
     }
-    // Kiểm tra và gọi hàm từ window
     if (typeof window.showCreatePRFromMRModal === 'function') {
         window.showCreatePRFromMRModal(mrId);
     } else {
@@ -794,4 +838,4 @@ window.renderMRSelectedItems = renderMRSelectedItems;
 window.removeMRItem = removeMRItem;
 window.openItemSelectorForMR = openItemSelectorForMR;
 
-console.log('✅ MR module updated with multi-field search, sort, and advanced filters.');
+console.log('✅ MR module updated with workflow progress.');

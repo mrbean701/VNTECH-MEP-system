@@ -57,9 +57,22 @@ public class WorkflowService {
     }
 
     public String getStatusForStep(Long workflowId, Integer step) {
-        return stepStatusRepository.findByWorkflowIdAndStep(workflowId, step)
-                .map(WorkflowStepStatus::getStatusCode)
-                .orElse(null);
+        Optional<WorkflowStepStatus> mapping = stepStatusRepository.findByWorkflowIdAndStep(workflowId, step);
+        if (mapping.isPresent()) {
+            return mapping.get().getStatusCode();
+        }
+        try {
+            String module = getModuleByWorkflowId(workflowId);
+            return module.toUpperCase() + "_STEP_" + step;
+        } catch (Exception e) {
+            logger.warn("Không thể tạo fallback status cho workflow {} step {}: {}", workflowId, step, e.getMessage());
+            return "PENDING_STEP_" + step;
+        }
+    }
+
+    public String getModuleByWorkflowId(Long workflowId) {
+        Workflow wf = getById(workflowId);
+        return wf.getModule();
     }
 
     public List<Map<String, Object>> getStepsByModule(String module) {
@@ -78,7 +91,10 @@ public class WorkflowService {
         for (Map<String, Object> step : steps) {
             Integer stepNumber = (Integer) step.get("step");
             String statusCode = statusMap.get(stepNumber);
-            step.put("statusCode", statusCode != null ? statusCode : "");
+            if (statusCode == null || statusCode.isEmpty()) {
+                statusCode = wf.getModule().toUpperCase() + "_STEP_" + stepNumber;
+            }
+            step.put("statusCode", statusCode);
         }
 
         return steps;
@@ -86,9 +102,7 @@ public class WorkflowService {
 
     public String getStatusForStep(String module, Integer step) {
         Workflow wf = getActiveWorkflow(module);
-        return stepStatusRepository.findByWorkflowIdAndStep(wf.getId(), step)
-                .map(WorkflowStepStatus::getStatusCode)
-                .orElse(null);
+        return getStatusForStep(wf.getId(), step);
     }
 
     public List<WorkflowStepStatus> getStepStatuses(Long workflowId) {
@@ -126,7 +140,6 @@ public class WorkflowService {
     public Workflow createWithStatuses(Workflow workflow, List<WorkflowStepStatus> stepStatuses) {
         Workflow saved = create(workflow);
 
-        // Nếu không có stepStatuses truyền vào, tự động tạo từ steps
         if (stepStatuses == null || stepStatuses.isEmpty()) {
             stepStatuses = generateStepStatusesFromSteps(saved.getSteps(), saved.getId());
         }
@@ -147,14 +160,13 @@ public class WorkflowService {
             List<WorkflowStepStatus> result = new ArrayList<>();
             for (Map<String, Object> step : steps) {
                 Integer stepNum = (Integer) step.get("step");
-                // ✅ Lấy statusCode từ steps nếu có
                 String statusCode = (String) step.get("statusCode");
                 if (statusCode != null && !statusCode.isEmpty()) {
                     result.add(new WorkflowStepStatus(workflowId, stepNum, statusCode));
                 } else {
-                    // Nếu không có, fallback: tạo tên từ module + step
-                    String module = step.get("module") != null ? (String) step.get("module") : "UNKNOWN";
-                    result.add(new WorkflowStepStatus(workflowId, stepNum, module + "_STEP_" + stepNum));
+                    String module = (String) step.get("module");
+                    if (module == null) module = "UNKNOWN";
+                    result.add(new WorkflowStepStatus(workflowId, stepNum, module.toUpperCase() + "_STEP_" + stepNum));
                 }
             }
             return result;
@@ -184,7 +196,6 @@ public class WorkflowService {
     public Workflow updateWithStatuses(Long id, Workflow details, List<WorkflowStepStatus> stepStatuses) {
         Workflow saved = update(id, details);
 
-        // Xóa mappings cũ và lưu mới
         stepStatusRepository.deleteByWorkflowId(saved.getId());
 
         if (stepStatuses != null && !stepStatuses.isEmpty()) {

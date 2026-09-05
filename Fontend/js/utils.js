@@ -110,9 +110,18 @@ function getStatusInfo(statusCode, statuses) {
     };
 }
 
+// ====== BADGE TRẠNG THÁI (CẬP NHẬT) ======
 function getStatusBadgeWithInfo(statusCode, statuses) {
+    // Nếu không có statuses hoặc rỗng, trả về badge đơn giản với màu xám
+    if (!statuses || !Array.isArray(statuses) || statuses.length === 0) {
+        return `<span class="badge" style="background-color:#6b7280; color:white; border-radius:12px; padding:4px 12px; font-weight:600; font-size:12px; display:inline-block;">${statusCode || '--'}</span>`;
+    }
+
     const info = getStatusInfo(statusCode, statuses);
-    return `<span class="badge" style="background-color:${info.color}; color:white; border-radius:12px; padding:4px 12px; font-weight:600; font-size:12px; display:inline-block;">${statusCode}</span>`;
+    const displayName = info.name || statusCode || '--';
+    const color = info.color || '#6b7280';
+
+    return `<span class="badge" style="background-color:${color}; color:white; border-radius:12px; padding:4px 12px; font-weight:600; font-size:12px; display:inline-block;">${displayName}</span>`;
 }
 
 // ====== BADGE TRẠNG THÁI CŨ (FALLBACK) ======
@@ -172,10 +181,11 @@ function canApprove(step, permissionKey, departmentId) {
         return false;
     }
     
-        // 3. Kiểm tra approval level: so sánh bước duyệt với cấp duyệt của user
-        // Người dùng chỉ duyệt được bước khi cấp duyệt của họ >= bước hiện tại
-        const level = user.approvalLevel || 0;
-        return level >= step;
+    // 3. Kiểm tra approval level: chỉ duyệt được bước đúng với cấp duyệt của mình
+    // ✅ SỬA LỖI: level === step (thay vì level >= step)
+    const level = user.approvalLevel || 0;
+    if (step === 0) return true; // Bước 0 (không cần duyệt) thì cho phép nếu có quyền
+    return level === step;
 }
 
 // ====== RENDER APPROVAL PROGRESS ======
@@ -190,12 +200,11 @@ function renderApprovalProgress(status, step, stepsConfig, statuses) {
     let currentStep = step || 1;
     currentStep = Math.min(currentStep, steps.length);
 
-    // Lấy tên trạng thái từ statuses
     const statusInfo = getStatusInfo(status, statuses || []);
     const statusName = statusInfo.name || status;
 
     // Hoàn thành (approvalStep = 0)
-    if (step === 0 && (status === 'APPROVED' || status === 'COMPLETE')) {
+    if (step === 0 && (status === 'APPROVED' || status === 'COMPLETE' || status === 'COMPLETED')) {
         let progressHtml = `<div style="display:flex; align-items:center; justify-content:space-between; width:100%; margin:8px 0;">`;
         steps.forEach((s, idx) => {
             progressHtml += `
@@ -547,6 +556,67 @@ function debounce(func, wait = 300, immediate = false) {
     };
 }
 
+// ====== RENDER PROGRESS BAR TỪ WORKFLOW PROGRESS ======
+function renderWorkflowProgressBar(progress) {
+    if (!progress) {
+        return `<div style="color:#999;">Chưa có thông tin tiến độ</div>`;
+    }
+
+    const { currentStep, totalSteps, approvalStep, status, isApproved, isCompleted } = progress;
+    const percent = totalSteps > 0 ? Math.round((approvalStep / totalSteps) * 100) : 0;
+    const isFinished = isCompleted || status === 'COMPLETED' || status === 'COMPLETE';
+
+    let statusText = status;
+    let statusColor = '#6b7280';
+    if (isFinished) {
+        statusText = '✅ Hoàn thành';
+        statusColor = '#22c55e';
+    } else if (isApproved) {
+        statusText = '✅ Đã duyệt';
+        statusColor = '#22c55e';
+    } else if (status === 'PENDING') {
+        statusText = `⏳ Đang chờ duyệt (bước ${currentStep}/${totalSteps})`;
+        statusColor = '#f59e0b';
+    } else if (status === 'DRAFT') {
+        statusText = '📝 Nháp (chưa gửi duyệt)';
+        statusColor = '#6b7280';
+    } else if (status === 'REJECTED') {
+        statusText = '❌ Từ chối';
+        statusColor = '#ef4444';
+    }
+
+    let stepsHtml = '';
+    for (let i = 1; i <= totalSteps; i++) {
+        const isDone = i <= approvalStep;
+        const isCurrent = i === currentStep && !isDone && !isFinished;
+        let circleColor = isDone ? '#22c55e' : (isCurrent ? '#f59e0b' : '#e5e7eb');
+        let labelColor = isDone ? '#15803d' : (isCurrent ? '#d97706' : '#9ca3af');
+        let icon = isDone ? '✓' : i;
+        stepsHtml += `
+            <div style="display:flex; flex-direction:column; align-items:center; flex:1; position:relative;">
+                <div style="width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; background:${circleColor}; color:white; z-index:2;">${icon}</div>
+                ${i < totalSteps ? `<div style="flex:1; height:3px; background:${isDone ? '#22c55e' : '#e5e7eb'}; position:absolute; left:calc(50% + 14px); right:calc(-50% + 14px); top:14px; z-index:1;"></div>` : ''}
+                <div style="font-size:11px; color:${labelColor}; margin-top:4px; text-align:center; max-width:80px;">Bước ${i}</div>
+            </div>
+        `;
+    }
+
+    return `
+        <div style="background:#f8fafc; border:1px solid #e2e8f0; padding:12px 16px; border-radius:8px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:4px;">
+                <span style="font-size:14px; font-weight:500; color:#334155;">${statusText}</span>
+                <span style="font-size:13px; color:#888;">${percent}%</span>
+            </div>
+            <div style="display:flex; align-items:center; justify-content:space-between; width:100%; margin:4px 0;">
+                ${stepsHtml}
+            </div>
+            ${isFinished ? `<div style="margin-top:8px; font-size:13px; color:#15803d; font-weight:500;">✅ Đã hoàn thành toàn bộ quy trình</div>` : ''}
+            ${isApproved && !isFinished ? `<div style="margin-top:8px; font-size:13px; color:#3b82f6; font-weight:500;">📌 Đã duyệt xong, chờ hoàn thành các bước tiếp theo (nhập kho...)</div>` : ''}
+            ${status === 'PENDING' && !isApproved && !isFinished ? `<div style="margin-top:8px; font-size:13px; color:#f59e0b;">⏳ Chờ duyệt bước ${currentStep}/${totalSteps}</div>` : ''}
+        </div>
+    `;
+}
+
 // ================================================================
 // EXPORT
 // ================================================================
@@ -584,5 +654,6 @@ window.getStatusBadgeWithInfo = getStatusBadgeWithInfo;
 window.getUserApprovalLevel = getUserApprovalLevel;
 window.getUserDepartmentId = getUserDepartmentId;
 window.canApprove = canApprove;
+window.renderWorkflowProgressBar = renderWorkflowProgressBar;
 
 console.log('✅ Utils updated with approval level and canApprove function.');

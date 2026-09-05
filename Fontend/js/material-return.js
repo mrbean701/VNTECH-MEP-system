@@ -56,11 +56,10 @@ function getReturnActions(item, statuses) {
         actions += ` <button class="btn btn-success btn-sm" onclick="submitMaterialReturn(${item.id})">Xác nhận</button>`;
     }
 
-    // ✅ Kiểm tra điều kiện duyệt
+    // ✅ SỬ DỤNG canApprove (đã sửa với level === step)
     if (item.status === 'PENDING') {
         const currentStep = item.approvalStep || 1;
-        const canApprove = canApprove(currentStep, 'materialreturn.approve', null);
-        if (canApprove) {
+        if (canApprove(currentStep, 'materialreturn.approve', null)) {
             actions += ` <button class="btn btn-success btn-sm" onclick="approveMaterialReturn(${item.id})">Nhận vật tư</button>`;
             actions += ` <button class="btn btn-danger btn-sm" onclick="rejectMaterialReturn(${item.id})">Từ chối</button>`;
         }
@@ -68,8 +67,7 @@ function getReturnActions(item, statuses) {
 
     if (item.status === 'APPROVED') {
         const currentStep = item.approvalStep || 2;
-        const canConfirm = canApprove(currentStep, 'materialreturn.confirm', null);
-        if (canConfirm) {
+        if (canApprove(currentStep, 'materialreturn.confirm', null)) {
             actions += ` <button class="btn btn-success btn-sm" onclick="confirmMaterialReturn(${item.id})">Xác nhận hoàn tất</button>`;
         }
     }
@@ -243,6 +241,7 @@ async function renderMaterialReturns(page = null) {
         materialReturnState.perPage = perPage;
         const paging = paginate(filtered, materialReturnState.page, perPage);
 
+        // ✅ KIỂM TRA QUYỀN TẠO
         const canCreate = hasPermission('materialreturn.create');
         const btnCreate = document.getElementById('btn-create-return');
         if (btnCreate) {

@@ -79,4 +79,10 @@ public class Issue {
 
     @Column(name = "approval_step")
     private Integer approvalStep; // ✅ Thêm trường này
+
+    @Column(name = "is_approved", nullable = false)
+    private Boolean isApproved = false;
+
+    @Column(name = "is_completed", nullable = false)
+    private Boolean isCompleted = false;
 }

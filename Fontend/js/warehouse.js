@@ -61,15 +61,23 @@ async function renderWarehousePage(tab) {
     const canCreateGRN = hasPermission('grn.create');
     const canCreateSTO = hasPermission('sto.create');
 
-    // Ẩn/hiện nút
+    // ✅ Ẩn/hiện nút "Thêm kho"
     const btnAddWH = document.querySelector('#page-inventory .page-header .btn[onclick*="showAddWarehouse"]');
-    if (btnAddWH) btnAddWH.style.display = (tab === 'wh-list' && canEditInventory) ? 'inline-block' : 'none';
+    if (btnAddWH) {
+        btnAddWH.style.display = (tab === 'wh-list' && canEditInventory) ? 'inline-block' : 'none';
+    }
 
+    // ✅ Ẩn/hiện nút "Tạo GRN"
     const btnAddGRN = document.querySelector('#page-inventory .page-header .btn[onclick*="showAddGRN"]');
-    if (btnAddGRN) btnAddGRN.style.display = (tab === 'wh-grn' && canCreateGRN) ? 'inline-block' : 'none';
+    if (btnAddGRN) {
+        btnAddGRN.style.display = (tab === 'wh-grn' && canCreateGRN) ? 'inline-block' : 'none';
+    }
 
+    // ✅ Ẩn/hiện nút "Tạo STO"
     const btnAddSTO = document.querySelector('#page-inventory .page-header .btn[onclick*="showAddSTO"]');
-    if (btnAddSTO) btnAddSTO.style.display = (tab === 'wh-sto' && canCreateSTO) ? 'inline-block' : 'none';
+    if (btnAddSTO) {
+        btnAddSTO.style.display = (tab === 'wh-sto' && canCreateSTO) ? 'inline-block' : 'none';
+    }
 
     let html = `
         <div class="tab-bar">
@@ -390,32 +398,23 @@ async function renderGRNListHTML() {
 
                 let actions = `<button class="btn btn-info btn-sm" onclick="viewGRN(${g.id})"><i class="fas fa-eye"></i></button>`;
                 
-                // ✅ Kiểm tra điều kiện cho từng bước
+                // ✅ SỬ DỤNG canApprove (đã sửa với level === step)
                 const currentStep = g.approvalStep || 1;
                 
                 if (g.status === 'DRAFT' && canEditGRN) {
                     actions += ` <button class="btn btn-warning btn-sm" onclick="editGRN(${g.id})"><i class="fas fa-edit"></i></button>`;
                 }
                 
-                if (g.status === 'DRAFT' && canReceiveGRN) {
-                    const canReceive = canApprove(currentStep, 'grn.receive', null);
-                    if (canReceive) {
-                        actions += ` <button class="btn btn-primary btn-sm" onclick="receiveGRN(${g.id})">Nhận vật tư</button>`;
-                    }
+                if (g.status === 'DRAFT' && canReceiveGRN && canApprove(currentStep, 'grn.receive', null)) {
+                    actions += ` <button class="btn btn-primary btn-sm" onclick="receiveGRN(${g.id})">Nhận vật tư</button>`;
                 }
                 
-                if (g.status === 'RECEIVED' && canQCGRN) {
-                    const canQC = canApprove(currentStep, 'grn.qc', null);
-                    if (canQC) {
-                        actions += ` <button class="btn btn-primary btn-sm" onclick="qcCheckGRN(${g.id})">QC kiểm tra</button>`;
-                    }
+                if (g.status === 'RECEIVED' && canQCGRN && canApprove(currentStep, 'grn.qc', null)) {
+                    actions += ` <button class="btn btn-primary btn-sm" onclick="qcCheckGRN(${g.id})">QC kiểm tra</button>`;
                 }
                 
-                if (g.status === 'QC_CHECKED' && canCompleteGRN) {
-                    const canComplete = canApprove(currentStep, 'grn.complete', null);
-                    if (canComplete) {
-                        actions += ` <button class="btn btn-success btn-sm" onclick="completeGRN(${g.id})">Hoàn thành</button>`;
-                    }
+                if (g.status === 'QC_CHECKED' && canCompleteGRN && canApprove(currentStep, 'grn.complete', null)) {
+                    actions += ` <button class="btn btn-success btn-sm" onclick="completeGRN(${g.id})">Hoàn thành</button>`;
                 }
                 
                 if ((g.status === 'DRAFT' || g.status === 'RECEIVED') && canDeleteGRN) {
@@ -1294,31 +1293,23 @@ async function renderSTOListHTML() {
 
                 let actions = `<button class="btn btn-info btn-sm" onclick="viewSTO(${s.id})"><i class="fas fa-eye"></i></button>`;
                 
+                // ✅ SỬ DỤNG canApprove (đã sửa với level === step)
                 const currentStep = s.approvalStep || 1;
                 
                 if (s.status === 'DRAFT' && canEditSTO) {
                     actions += ` <button class="btn btn-warning btn-sm" onclick="editSTO(${s.id})"><i class="fas fa-edit"></i></button>`;
                 }
                 
-                if (s.status === 'DRAFT' && canSubmitSTO) {
-                    const canSubmit = canApprove(currentStep, 'sto.submit', null);
-                    if (canSubmit) {
-                        actions += ` <button class="btn btn-success btn-sm" onclick="submitSTO(${s.id})">Xác nhận</button>`;
-                    }
+                if (s.status === 'DRAFT' && canSubmitSTO && canApprove(currentStep, 'sto.submit', null)) {
+                    actions += ` <button class="btn btn-success btn-sm" onclick="submitSTO(${s.id})">Xác nhận</button>`;
                 }
                 
-                if (s.status === 'PENDING' && canApproveSTO) {
-                    const canApprove = canApprove(currentStep, 'sto.approve', null);
-                    if (canApprove) {
-                        actions += ` <button class="btn btn-success btn-sm" onclick="approveSTO(${s.id})">Duyệt</button>`;
-                    }
+                if (s.status === 'PENDING' && canApproveSTO && canApprove(currentStep, 'sto.approve', null)) {
+                    actions += ` <button class="btn btn-success btn-sm" onclick="approveSTO(${s.id})">Duyệt</button>`;
                 }
                 
-                if (s.status === 'APPROVED' && canCompleteSTO) {
-                    const canComplete = canApprove(currentStep, 'sto.complete', null);
-                    if (canComplete) {
-                        actions += ` <button class="btn btn-success btn-sm" onclick="completeSTO(${s.id})">Hoàn thành</button>`;
-                    }
+                if (s.status === 'APPROVED' && canCompleteSTO && canApprove(currentStep, 'sto.complete', null)) {
+                    actions += ` <button class="btn btn-success btn-sm" onclick="completeSTO(${s.id})">Hoàn thành</button>`;
                 }
                 
                 if ((s.status === 'DRAFT' || s.status === 'PENDING') && canDeleteSTO) {
@@ -1487,7 +1478,7 @@ async function viewSTO(id) {
                 <div style="grid-column:1/-1;"><span class="label">Chi tiết vật tư:</span>
                     <div class="table-responsive">
                         <table><thead><tr><th>Mã</th><th>Tên</th><th>Đề nghị</th><th>Thực xuất</th></tr></thead>
-                        <tbody>${itemsHtml}</tbody></table>
+                        <tbody>${itemsHtml}</tbody>
                     </div>
                 </div>
             </div>
@@ -2114,4 +2105,4 @@ window.resetSTOFilters = resetSTOFilters;
 window.toggleWarehouseFilter = toggleWarehouseFilter;
 window.showAllWarehouses = showAllWarehouses;
 
-console.log('✅ Warehouse module updated with approval level and canApprove.');
+console.log('✅ Warehouse module updated with approval level and permission checks for create buttons.');

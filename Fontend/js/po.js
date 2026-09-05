@@ -25,7 +25,7 @@ let _poSelectedItems = [];
 let _poMode = 'create';
 let _poEditId = null;
 
-// ====== HÀM LẤY ACTION (CÓ KIỂM TRA canApprove) ======
+// ====== HÀM LẤY ACTION (CÓ KIỂM TRA canApprove + currentStep) ======
 function getPOActions(po, statuses) {
     const user = getUser();
     let actions = '';
@@ -53,20 +53,25 @@ function getPOActions(po, statuses) {
         actions += ` <button class="btn btn-success btn-sm" onclick="submitPO(${po.id})">Xác nhận</button>`;
     }
 
-    // ✅ Kiểm tra điều kiện duyệt
+    // ✅ Nút Approve/Reject: kiểm tra currentStep (lấy từ workflow_progress)
     const pendingStatuses = ['PENDING', 'PENDING_PLANNING', 'PENDING_PROJECT', 'PENDING_CEO', 
                              'PLANNING_APPROVED', 'PROJECT_APPROVED'];
-    if (pendingStatuses.includes(po.status)) {
-        const currentStep = po.approvalStep || 1;
-        const canApprovePO = canApprove(currentStep, 'po.approve', null);
-        if (canApprovePO) {
+    if (pendingStatuses.includes(po.status) && !po.isCompleted) {
+        let currentStep = po.approvalStep || 1;
+        if (po._progress && po._progress.currentStep) {
+            currentStep = po._progress.currentStep;
+        }
+        if (canApprove(currentStep, 'po.approve', null)) {
             actions += ` <button class="btn btn-success btn-sm" onclick="approvePO(${po.id})">Duyệt</button>`;
             actions += ` <button class="btn btn-danger btn-sm" onclick="rejectPO(${po.id})">Từ chối</button>`;
         }
     }
 
-            // ✅ Nút tạo GRN (chỉ hiện khi PO đã APPROVED và user là bộ phận mua - level 0)
-    const canCreateGRN = hasPermission('grn.create') && po.status === 'APPROVED' && getUserApprovalLevel() === 0;
+    // ✅ Nút tạo GRN (khi PO đã APPROVED và user có permission grn.create và approvalLevel = 0)
+    const canCreateGRN = hasPermission('grn.create') &&
+                         (po.status === 'APPROVED' || po.isApproved) &&
+                         !po.isCompleted &&
+                         getUserApprovalLevel() === 0;
     if (canCreateGRN) {
         actions += ` <button class="btn btn-info btn-sm" onclick="showAddGRNFromPO(${po.id})">Tạo GRN</button>`;
     }
@@ -80,7 +85,6 @@ function filterPOData(pos, projects, vendors) {
     const keyword = filterText.toLowerCase().trim();
 
     return pos.filter(po => {
-        // Lọc theo từ khóa (mã, dự án, NCC, vật tư)
         let matchKeyword = true;
         if (keyword) {
             const codeMatch = (po.code || '').toLowerCase().includes(keyword);
@@ -106,17 +110,14 @@ function filterPOData(pos, projects, vendors) {
                            vendorNameMatch || vendorCodeMatch || itemsMatch;
         }
 
-        // Lọc theo status
         const matchStatus = statusFilter ? po.status === statusFilter : true;
 
-        // Lọc theo dự án
         let matchProject = true;
         if (projectFilter) {
             const selectedProject = projects.find(p => p.code === projectFilter || p.id === parseInt(projectFilter));
             matchProject = selectedProject ? po.projectCode === selectedProject.code : false;
         }
 
-        // Lọc theo nhà cung cấp
         let matchVendor = true;
         if (vendorFilter) {
             const selectedVendor = vendors.find(v => v.code === vendorFilter || v.name === vendorFilter);
@@ -149,7 +150,7 @@ function sortPOData(data) {
             valA = new Date(a.createdAt || 0);
             valB = new Date(b.createdAt || 0);
         } else if (sortBy === 'status') {
-            const statusOrder = { 'DRAFT': 0, 'PENDING': 1, 'PENDING_CEO': 2, 'APPROVED': 3, 'REJECTED': 4, 'COMPLETE': 5 };
+            const statusOrder = { 'DRAFT': 0, 'PENDING': 1, 'PENDING_CEO': 2, 'APPROVED': 3, 'REJECTED': 4, 'COMPLETED': 5 };
             valA = statusOrder[a.status] || 0;
             valB = statusOrder[b.status] || 0;
         }
@@ -170,7 +171,7 @@ async function renderPO(page = null) {
             api.getPOs(),
             api.getProjects(),
             api.getVendors(),
-            api.getStatuses('po')
+            api.getStatuses('po').catch(() => [])
         ]);
         
         window._projectsCache = projects;
@@ -335,11 +336,12 @@ async function renderPO(page = null) {
 // ====== VIEW PO (CHI TIẾT) ======
 async function viewPO(id) {
     try {
-        const [po, allPOs, items, statuses] = await Promise.all([
+        const [po, allPOs, items, statuses, progress] = await Promise.all([
             api.getPOById ? api.getPOById(id) : null,
             api.getPOs(),
             api.getItems(),
-            api.getStatuses('po')
+            api.getStatuses('po'),
+            api.getWorkflowProgress('po', id).catch(() => null) // ✅ Lấy tiến trình
         ]);
 
         let poData = po;
@@ -350,6 +352,9 @@ async function viewPO(id) {
             showError('Không tìm thấy PO!');
             return;
         }
+
+        // Gắn progress vào poData để dùng trong actions
+        poData._progress = progress;
 
         window._itemsCache = items;
         if (!window._statusesCache) window._statusesCache = {};
@@ -378,28 +383,34 @@ async function viewPO(id) {
             `;
         }).join('');
 
-        let stepsConfig = [
-            { id: 1, label: 'Phòng Kế hoạch' },
-            { id: 2, label: 'Phòng Dự án' },
-            { id: 3, label: 'Tổng Giám đốc' }
-        ];
-        if (poData.workflowId) {
-            try {
-                const wf = await api.getWorkflowById ? await api.getWorkflowById(poData.workflowId) : null;
-                if (wf && wf.steps) {
-                    const steps = JSON.parse(wf.steps);
-                    stepsConfig = steps.map(s => ({
-                        id: s.step || s.id,
-                        label: s.label || `Bước ${s.step || s.id}`
-                    }));
+        // ✅ Tạo progress bar từ workflow_progress
+        let progressHtml = '';
+        if (progress && progress.totalSteps > 0) {
+            progressHtml = renderWorkflowProgressBar(progress);
+        } else {
+            // Fallback: dùng cách cũ
+            let stepsConfig = [
+                { id: 1, label: 'Phòng Kế hoạch' },
+                { id: 2, label: 'Phòng Dự án' },
+                { id: 3, label: 'Tổng Giám đốc' }
+            ];
+            if (poData.workflowId) {
+                try {
+                    const wf = await api.getWorkflowById ? await api.getWorkflowById(poData.workflowId) : null;
+                    if (wf && wf.steps) {
+                        const steps = JSON.parse(wf.steps);
+                        stepsConfig = steps.map(s => ({
+                            id: s.step || s.id,
+                            label: s.label || `Bước ${s.step || s.id}`
+                        }));
+                    }
+                } catch (e) {
+                    console.warn('Không lấy được workflow steps:', e);
                 }
-            } catch (e) {
-                console.warn('Không lấy được workflow steps:', e);
             }
+            const currentStep = poData.approvalStep !== undefined && poData.approvalStep !== null ? poData.approvalStep : 1;
+            progressHtml = renderApprovalProgress(poData.status, currentStep, stepsConfig, statuses);
         }
-
-        const currentStep = poData.approvalStep !== undefined && poData.approvalStep !== null ? poData.approvalStep : 1;
-        const approvalHtml = renderApprovalProgress(poData.status, currentStep, stepsConfig, statuses);
 
         const projectId = getProjectIdByCode(poData.projectCode);
         const projectLink = projectId ?
@@ -419,13 +430,14 @@ async function viewPO(id) {
             </div>
         `;
 
-                const totalAmount = itemsList.reduce((sum, it) => sum + ((it.price || 0) * (it.quantity || 0)), 0);
+        const totalAmount = itemsList.reduce((sum, it) => sum + ((it.price || 0) * (it.quantity || 0)), 0);
         const statusBadge = getStatusBadgeWithInfo(poData.status, statuses);
 
-        // Nút tạo GRN ở chi tiết PO: chỉ cho bộ phận mua (level 0), PO đã duyệt
-        const canMakeGRN = poData.status === 'APPROVED'
-            && hasPermission('grn.create')
-            && getUserApprovalLevel() === 0;
+        // ✅ Nút tạo GRN ở chi tiết
+        const canMakeGRN = (poData.status === 'APPROVED' || poData.isApproved) &&
+            !poData.isCompleted &&
+            hasPermission('grn.create') &&
+            getUserApprovalLevel() === 0;
         const grnBtnHtml = canMakeGRN
             ? ` <button class="btn btn-info btn-sm" onclick="showAddGRNFromPO(${poData.id}); closeModal();">Tạo GRN</button>`
             : '';
@@ -439,7 +451,7 @@ async function viewPO(id) {
                 <div><span class="label">Nhà cung cấp:</span> <span class="value">${poData.vendorName || poData.vendorCode || '--'}</span></div>
                 <div><span class="label">Trạng thái:</span> <span class="value">${statusBadge}</span></div>
                 ${totalAmount > 0 ? `<div><span class="label">Tổng tiền:</span> <span class="value">${totalAmount.toLocaleString()} VND</span></div>` : ''}
-                <div style="grid-column:1/-1;"><span class="label">Tiến độ duyệt:</span><br>${approvalHtml}</div>
+                <div style="grid-column:1/-1;"><span class="label">Tiến độ duyệt:</span><br>${progressHtml}</div>
                 <div style="grid-column:1/-1;"><span class="label">Danh sách vật tư:</span><br>${itemsTable}</div>
                 <div style="grid-column:1/-1;"><span class="label">Ghi chú:</span> <span class="value">${poData.note || ''}</span></div>
             </div>
@@ -646,7 +658,6 @@ function showAddGRNFromPO(poId) {
         showWarning('Bạn không có quyền tạo GRN!');
         return;
     }
-    // Chuyển sang tab kho và mở modal tạo GRN với PO được chọn
     window.navigateTo('warehouse');
     setTimeout(() => {
         if (typeof showAddGRN === 'function') {
@@ -911,4 +922,4 @@ window.renderPOSelectedItems = renderPOSelectedItems;
 window.removePOItem = removePOItem;
 window.openItemSelectorForPO = openItemSelectorForPO;
 
-console.log('✅ PO module updated with approval level and canApprove.');
+console.log('✅ PO module updated with workflow progress.');

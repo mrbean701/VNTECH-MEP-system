@@ -2,16 +2,9 @@ package com.mep.mepbackend.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.mep.mepbackend.entity.ApprovalHistory;
-import com.mep.mepbackend.entity.Issue;
-import com.mep.mepbackend.entity.Status;
-import com.mep.mepbackend.entity.User;
-import com.mep.mepbackend.entity.Workflow;
+import com.mep.mepbackend.entity.*;
 import com.mep.mepbackend.exception.ResourceNotFoundException;
-import com.mep.mepbackend.repository.ApprovalHistoryRepository;
-import com.mep.mepbackend.repository.InventoryRepository;
-import com.mep.mepbackend.repository.IssueRepository;
-import com.mep.mepbackend.repository.WarehouseRepository;
+import com.mep.mepbackend.repository.*;
 import com.mep.mepbackend.util.CurrentUserUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -33,8 +26,9 @@ public class IssueService {
     private final ApprovalHistoryRepository approvalHistoryRepository;
     private final ObjectMapper objectMapper;
     private final WorkflowService workflowService;
-    private final StatusService statusService; // ✅ Đã thêm
+    private final StatusService statusService;
     private final CurrentUserUtil currentUserUtil;
+    private final WorkflowProgressService workflowProgressService; // ✅ Thêm
 
     private static final List<String> PENDING_STATUSES = Arrays.asList("PENDING");
 
@@ -75,15 +69,20 @@ public class IssueService {
         issue.setWorkflowId(activeWorkflow.getId());
 
         String defaultStatus = statusService.getDefaultStatus("issue").getCode();
-        issue.setStatus(defaultStatus);
-        issue.setApprovalStep(1);
+        issue.setStatus(defaultStatus); // DRAFT
+        issue.setApprovalStep(0);
 
         User currentUser = currentUserUtil.getCurrentUser();
         issue.setCreatedBy(currentUser.getId());
         issue.setCreatedByName(currentUser.getName());
-
         issue.setCreatedAt(LocalDate.now());
-        return issueRepository.save(issue);
+
+        Issue saved = issueRepository.save(issue);
+
+        // ✅ Khởi tạo workflow progress
+        workflowProgressService.initProgress("issue", saved.getId(), activeWorkflow.getId());
+
+        return saved;
     }
 
     // ===== UPDATE =====
@@ -133,26 +132,11 @@ public class IssueService {
             throw new RuntimeException("Workflow không có bước duyệt nào");
         }
 
-        if (steps.size() == 1) {
-            if (!currentUserUtil.hasPermission("issue.approve")) {
-                throw new RuntimeException("Bạn không có quyền duyệt phiếu cấp phát");
-            }
+        // ✅ Cập nhật tiến trình
+        workflowProgressService.submitProgress("issue", issue.getId());
 
-            Map<String, Object> firstStep = steps.get(0);
-            String statusCode = (String) firstStep.get("statusCode");
-            issue.setStatus(statusCode != null && !statusCode.isEmpty() ? statusCode : "PENDING");
-            issue.setApprovalStep(1);
-            issue.setUpdatedAt(LocalDate.now());
-            issueRepository.save(issue);
-
-            approve(id);
-            return;
-        }
-
-        Map<String, Object> firstStep = steps.get(0);
-        String statusCode = (String) firstStep.get("statusCode");
-        issue.setStatus(statusCode != null && !statusCode.isEmpty() ? statusCode : "PENDING");
-        issue.setApprovalStep(1);
+        issue.setApprovalStep(0);
+        issue.setStatus("PENDING");
         issue.setUpdatedAt(LocalDate.now());
         issueRepository.save(issue);
     }
@@ -167,7 +151,7 @@ public class IssueService {
 
         Workflow wf = workflowService.getById(issue.getWorkflowId());
         List<Map<String, Object>> steps = workflowService.getStepsByWorkflowId(wf.getId());
-        int currentStep = issue.getApprovalStep() != null ? issue.getApprovalStep() : 1;
+        int currentStep = issue.getApprovalStep() != null ? issue.getApprovalStep() + 1 : 1;
 
         Map<String, Object> step = steps.stream()
                 .filter(s -> (int) s.get("step") == currentStep)
@@ -176,7 +160,8 @@ public class IssueService {
 
         String permissionKey = (String) step.get("permissionKey");
         Long requiredDeptId = step.get("departmentId") != null ? ((Number) step.get("departmentId")).longValue() : null;
-        if (!currentUserUtil.hasPermissionAndDepartment(permissionKey, requiredDeptId)) {
+
+        if (!currentUserUtil.canApproveStep(currentStep, permissionKey, requiredDeptId)) {
             throw new RuntimeException("Bạn không có quyền duyệt bước này");
         }
 
@@ -194,28 +179,16 @@ public class IssueService {
         history.setApproverName(currentUser.getName());
         history.setStatusBefore(issue.getStatus());
 
-        if (currentStep == steps.size()) {
-            issue.setStatus("APPROVED");
-            issue.setApprovalStep(currentStep);
-        } else {
-            issue.setApprovalStep(currentStep + 1);
-            String nextStatusCode = workflowService.getStatusForStep(wf.getId(), currentStep + 1);
+        // ✅ Cập nhật tiến trình
+        WorkflowProgress progress = workflowProgressService.approveProgress("issue", issue.getId());
 
-            if (nextStatusCode == null || nextStatusCode.isEmpty()) {
-                try {
-                    Status defaultStatus = statusService.getDefaultStatus("issue");
-                    nextStatusCode = defaultStatus != null ? defaultStatus.getCode() : "PENDING";
-                } catch (Exception e) {
-                    nextStatusCode = "PENDING";
-                }
-            }
-            issue.setStatus(nextStatusCode);
-        }
-        history.setStatusAfter(issue.getStatus());
-
-        approvalHistoryRepository.save(history);
+        issue.setApprovalStep(progress.getApprovalStep());
+        issue.setStatus(progress.getStatus());
         issue.setApprovedBy(currentUser.getName());
         issue.setUpdatedAt(LocalDate.now());
+
+        history.setStatusAfter(issue.getStatus());
+        approvalHistoryRepository.save(history);
         issueRepository.save(issue);
     }
 
@@ -229,19 +202,22 @@ public class IssueService {
         if (!currentUserUtil.hasPermission("issue.reject")) {
             throw new RuntimeException("Bạn không có quyền từ chối phiếu cấp phát");
         }
+
+        workflowProgressService.rejectProgress("issue", issue.getId());
+
         issue.setStatus("REJECTED");
         issue.setUpdatedAt(LocalDate.now());
         issueRepository.save(issue);
     }
 
-    // ===== COMPLETE =====
+    // ===== COMPLETE (Cấp phát) =====
     @Transactional
     public void complete(Long id, Long warehouseId, String itemsUpdateJson) {
         Issue issue = getById(id);
         if (!currentUserUtil.hasPermission("issue.complete")) {
             throw new RuntimeException("Bạn không có quyền thực hiện cấp phát");
         }
-        if (!"APPROVED".equals(issue.getStatus())) {
+        if (!"APPROVED".equals(issue.getStatus()) && !issue.getIsApproved()) {
             throw new RuntimeException("Phiếu chưa được duyệt");
         }
 
@@ -250,7 +226,8 @@ public class IssueService {
 
         Workflow wf = workflowService.getById(issue.getWorkflowId());
         List<Map<String, Object>> steps = workflowService.getStepsByWorkflowId(wf.getId());
-        int currentStep = 3;
+        int currentStep = issue.getApprovalStep() != null ? issue.getApprovalStep() + 1 : 1;
+
         Map<String, Object> step = steps.stream()
                 .filter(s -> (int) s.get("step") == currentStep)
                 .findFirst()
@@ -258,7 +235,8 @@ public class IssueService {
 
         String permissionKey = (String) step.get("permissionKey");
         Long requiredDeptId = step.get("departmentId") != null ? ((Number) step.get("departmentId")).longValue() : null;
-        if (!currentUserUtil.hasPermissionAndDepartment(permissionKey, requiredDeptId)) {
+
+        if (!currentUserUtil.canApproveStep(currentStep, permissionKey, requiredDeptId)) {
             throw new RuntimeException("Bạn không có quyền cấp phát");
         }
 
@@ -267,8 +245,7 @@ public class IssueService {
             throw new RuntimeException("Bạn không thể tự cấp phát phiếu do chính mình tạo");
         }
 
-        String statusCode = (String) step.get("statusCode");
-
+        // Cập nhật tồn kho
         try {
             ArrayNode itemsArray = (ArrayNode) objectMapper.readTree(itemsUpdateJson);
             issue.setItems(itemsUpdateJson);
@@ -286,35 +263,31 @@ public class IssueService {
                 inventory.setUpdatedAt(LocalDate.now());
                 inventoryRepository.save(inventory);
             }
-
-            ApprovalHistory history = new ApprovalHistory();
-            history.setEntityType("ISSUE");
-            history.setEntityId(issue.getId());
-            history.setWorkflowId(wf.getId());
-            history.setStep(currentStep);
-            history.setApproverId(currentUser.getId());
-            history.setApproverName(currentUser.getName());
-            history.setStatusBefore(issue.getStatus());
-
-            if (statusCode == null || statusCode.isEmpty()) {
-                try {
-                    Status nextStatus = statusService.getByEntityTypeAndCode("issue", "COMPLETED");
-                    statusCode = nextStatus != null ? nextStatus.getCode() : "COMPLETED";
-                } catch (Exception e) {
-                    statusCode = "COMPLETED";
-                }
-            }
-            issue.setStatus(statusCode);
-            issue.setApprovalStep(currentStep);
-            issue.setCompletedBy(currentUser.getName());
-            history.setStatusAfter(issue.getStatus());
-
-            approvalHistoryRepository.save(history);
-            issue.setUpdatedAt(LocalDate.now());
-            issueRepository.save(issue);
         } catch (Exception e) {
-            throw new RuntimeException("Lỗi cập nhật: " + e.getMessage());
+            throw new RuntimeException("Lỗi cập nhật tồn kho: " + e.getMessage());
         }
+
+        // ✅ Cập nhật tiến trình
+        WorkflowProgress progress = workflowProgressService.completeProgress("issue", issue.getId());
+
+        issue.setApprovalStep(progress.getApprovalStep());
+        issue.setStatus(progress.getStatus());
+        issue.setCompletedBy(currentUser.getName());
+        issue.setUpdatedAt(LocalDate.now());
+
+        // Ghi log
+        ApprovalHistory history = new ApprovalHistory();
+        history.setEntityType("ISSUE");
+        history.setEntityId(issue.getId());
+        history.setWorkflowId(wf.getId());
+        history.setStep(currentStep);
+        history.setApproverId(currentUser.getId());
+        history.setApproverName(currentUser.getName());
+        history.setStatusBefore(issue.getStatus());
+        history.setStatusAfter(issue.getStatus());
+        approvalHistoryRepository.save(history);
+
+        issueRepository.save(issue);
     }
 
     // ===== CONFIRM =====
@@ -324,13 +297,14 @@ public class IssueService {
         if (!currentUserUtil.hasPermission("issue.confirm")) {
             throw new RuntimeException("Bạn không có quyền xác nhận phiếu cấp phát");
         }
-        if (!"COMPLETED".equals(issue.getStatus())) {
+        if (!"COMPLETED".equals(issue.getStatus()) && !issue.getIsCompleted()) {
             throw new RuntimeException("Phiếu chưa được hoàn thành cấp phát");
         }
 
         Workflow wf = workflowService.getById(issue.getWorkflowId());
         List<Map<String, Object>> steps = workflowService.getStepsByWorkflowId(wf.getId());
-        int currentStep = 4;
+        int currentStep = issue.getApprovalStep() != null ? issue.getApprovalStep() + 1 : 1;
+
         Map<String, Object> step = steps.stream()
                 .filter(s -> (int) s.get("step") == currentStep)
                 .findFirst()
@@ -338,7 +312,8 @@ public class IssueService {
 
         String permissionKey = (String) step.get("permissionKey");
         Long requiredDeptId = step.get("departmentId") != null ? ((Number) step.get("departmentId")).longValue() : null;
-        if (!currentUserUtil.hasPermissionAndDepartment(permissionKey, requiredDeptId)) {
+
+        if (!currentUserUtil.canApproveStep(currentStep, permissionKey, requiredDeptId)) {
             throw new RuntimeException("Bạn không có quyền xác nhận");
         }
 
@@ -347,8 +322,16 @@ public class IssueService {
             throw new RuntimeException("Bạn không thể tự xác nhận phiếu do chính mình tạo");
         }
 
-        String statusCode = (String) step.get("statusCode");
+        // ✅ Cập nhật tiến trình (đánh dấu hoàn thành thực sự)
+        WorkflowProgress progress = workflowProgressService.completeProgress("issue", issue.getId());
 
+        issue.setApprovalStep(progress.getApprovalStep());
+        issue.setStatus(progress.getStatus());
+        issue.setConfirmedBy(currentUser.getName());
+        issue.setCompletionDate(LocalDate.now());
+        issue.setUpdatedAt(LocalDate.now());
+
+        // Ghi log
         ApprovalHistory history = new ApprovalHistory();
         history.setEntityType("ISSUE");
         history.setEntityId(issue.getId());
@@ -357,23 +340,9 @@ public class IssueService {
         history.setApproverId(currentUser.getId());
         history.setApproverName(currentUser.getName());
         history.setStatusBefore(issue.getStatus());
-
-        if (statusCode == null || statusCode.isEmpty()) {
-            try {
-                Status nextStatus = statusService.getByEntityTypeAndCode("issue", "CONFIRMED");
-                statusCode = nextStatus != null ? nextStatus.getCode() : "CONFIRMED";
-            } catch (Exception e) {
-                statusCode = "CONFIRMED";
-            }
-        }
-        issue.setStatus(statusCode);
-        issue.setApprovalStep(currentStep);
-        issue.setConfirmedBy(currentUser.getName());
-        issue.setCompletionDate(LocalDate.now());
         history.setStatusAfter(issue.getStatus());
-
         approvalHistoryRepository.save(history);
-        issue.setUpdatedAt(LocalDate.now());
+
         issueRepository.save(issue);
     }
 

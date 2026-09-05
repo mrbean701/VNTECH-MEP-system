@@ -63,8 +63,11 @@ async function renderItems(page = null) {
         const canEdit = hasPermission('items.edit');
         const canDelete = hasPermission('items.delete');
 
+        // ✅ KIỂM TRA QUYỀN TẠO VẬT TƯ
         const btnAdd = document.getElementById('btn-add-item');
-        if (btnAdd) btnAdd.style.display = canCreate ? 'inline-block' : 'none';
+        if (btnAdd) {
+            btnAdd.style.display = canCreate ? 'inline-block' : 'none';
+        }
 
         // Nhóm theo code để hiển thị alias
         const grouped = {};
@@ -561,4 +564,4 @@ window.addItemAliasInput = addItemAliasInput;
 window.removeItemAliasInput = removeItemAliasInput;
 window.resetItemsFilters = resetItemsFilters;
 
-console.log('✅ Items module updated with alias support.');
+console.log('✅ Items module updated with alias support and permission check for create button.');

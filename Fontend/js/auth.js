@@ -22,7 +22,7 @@ function clearUser() {
 }
 
 // ================================================================
-// PERMISSION HELPERS (CẬP NHẬT GIAI ĐOẠN 3)
+// PERMISSION HELPERS
 // ================================================================
 
 function getUserPermissionsCache() {
@@ -198,6 +198,12 @@ function showApp() {
     document.getElementById('user-name').textContent = user.name || 'User';
     document.getElementById('user-role').textContent = user.role || '--';
 
+    // ✅ Hiển thị cấp duyệt trên sidebar
+    const levelEl = document.getElementById('user-approval-level');
+    if (levelEl) {
+        levelEl.textContent = user.approvalLevel !== undefined ? `Cấp duyệt: ${user.approvalLevel}` : '';
+    }
+
     // Click tên user để mở hồ sơ cá nhân
     const userNameEl = document.getElementById('user-name');
     if (userNameEl) {
@@ -233,7 +239,7 @@ function showApp() {
         }
     });
 
-    // ======== ẨN/HIỆN NÚT CHỨC NĂNG (các nút trong header) ========
+    // ======== ẨN/HIỆN NÚT CHỨC NĂNG ========
     const btnAddItem = document.getElementById('btn-add-item');
     if (btnAddItem) btnAddItem.style.display = hasPermission('items.create') ? 'inline-block' : 'none';
 
@@ -296,4 +302,4 @@ window.getUserPermissionsCache = getUserPermissionsCache;
 window.getDepartmentPermissionMap = getDepartmentPermissionMap;
 window.getAdminPermissions = getAdminPermissions;
 
-console.log('✅ Auth module updated – role-based permission removed (only ADMIN).');
+console.log('✅ Auth module updated – with approvalLevel display.');

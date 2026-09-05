@@ -83,6 +83,7 @@ async function renderProjects(page = null) {
         const canEdit = hasPermission('projects.edit');
         const canDelete = hasPermission('projects.delete');
 
+        // ✅ KIỂM TRA QUYỀN TẠO DỰ ÁN
         const btnCreate = document.getElementById('btn-create-project');
         if (btnCreate) {
             btnCreate.style.display = canCreate ? 'inline-block' : 'none';
@@ -328,12 +329,9 @@ async function updateProject(id) {
                 status: newStatus,
                 note: document.getElementById('f-project-note').value.trim(),
             };
-            // Lưu tạm để confirm
             window._pendingProjectUpdate = { projectId: id, updatedProject };
             await handleProjectInactivation(id, updatedProject);
-            // Không cần close modal ngay vì handle sẽ đóng
         } else {
-            // Trường hợp khác: cập nhật bình thường
             const updatedProject = {
                 code,
                 name,
@@ -401,10 +399,9 @@ async function renderProjectModal(project) {
         const projectPOs = poList.filter(p => p.projectCode === project.code);
         const wh = warehouses.find(w => w.projectId === project.id);
 
-        // ✅ Lấy danh sách thành viên dự án
         let membersData = [];
         try {
-            membersData = await api.getProjectMembers(project.id, false); // false = chỉ active
+            membersData = await api.getProjectMembers(project.id, false);
         } catch (e) {
             console.warn('Không lấy được thành viên dự án:', e);
         }
@@ -488,68 +485,68 @@ async function renderProjectModal(project) {
         }
 
         // ===== THÔNG TIN KHO =====
-let whHtml = '';
-const canManageWh = hasPermission('inventory.edit');
+        let whHtml = '';
+        const canManageWh = hasPermission('inventory.edit');
 
-if (!wh) {
-    whHtml = `
-        <div style="background:#fef9e7; border:1px solid #fecba1; padding:16px; border-radius:8px; text-align:center;">
-            <div style="font-size:16px; color:#b45309; margin-bottom:8px;">
-                <i class="fas fa-warehouse" style="font-size:24px;"></i>
-            </div>
-            <div style="font-weight:500; margin-bottom:8px;">Dự án này chưa có kho</div>
-            ${canManageWh ? `
-                <button class="btn" onclick="showCreateWarehouseFromProject(${project.id})">
-                    <i class="fas fa-plus"></i> Tạo kho cho dự án
-                </button>
-            ` : `
-                <span style="color:#888; font-size:14px;">Bạn không có quyền tạo kho</span>
-            `}
-        </div>
-    `;
-} else {
-    const whStatusLabel = wh.status === 'ACTIVE'
-        ? '<span class="badge badge-status-active">🟢 Đang hoạt động</span>'
-        : '<span class="badge badge-status-inactive">🔴 Ngừng hoạt động</span>';
-    const whTypeLabel = wh.type === 'CENTRAL' ? 'Kho tổng' : 'Kho dự án';
-
-    whHtml = `
-        <div style="background:#f8fafc; border:1px solid #e2e8f0; padding:16px; border-radius:8px;">
-            <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap;">
-                <div>
-                    <div style="font-size:16px; font-weight:600; color:#1a3c6e;">
-                        <span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="showWarehouseInfoModal(${wh.id})">
-                            ${wh.code || '--'} - ${wh.name || '--'}
-                        </span>
+        if (!wh) {
+            whHtml = `
+                <div style="background:#fef9e7; border:1px solid #fecba1; padding:16px; border-radius:8px; text-align:center;">
+                    <div style="font-size:16px; color:#b45309; margin-bottom:8px;">
+                        <i class="fas fa-warehouse" style="font-size:24px;"></i>
                     </div>
-                    <div style="margin-top:4px;">
-                        <span class="badge-wh ${wh.type === 'CENTRAL' ? 'badge-central' : 'badge-site'}">${whTypeLabel}</span>
-                        ${whStatusLabel}
-                    </div>
-                    <div style="margin-top:4px; color:#666; font-size:14px;">
-                        <i class="fas fa-map-marker-alt"></i> ${wh.address || 'Chưa có địa chỉ'}
-                    </div>
-                    <div style="color:#666; font-size:14px;">
-                        <i class="fas fa-user"></i> ${wh.manager || 'Chưa có quản lý'}
-                    </div>
-                    ${wh.note ? `<div style="color:#666; font-size:14px;"><i class="fas fa-comment"></i> ${wh.note}</div>` : ''}
-                </div>
-                <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
+                    <div style="font-weight:500; margin-bottom:8px;">Dự án này chưa có kho</div>
                     ${canManageWh ? `
-                        <button class="btn btn-warning btn-sm" onclick="showChangeWhStatusModal(${project.id})">
-                            <i class="fas fa-sync-alt"></i> Đổi trạng thái kho
+                        <button class="btn" onclick="showCreateWarehouseFromProject(${project.id})">
+                            <i class="fas fa-plus"></i> Tạo kho cho dự án
                         </button>
-                    ` : ''}
-                    <button class="btn btn-info btn-sm" onclick="showWarehouseInfoModal(${wh.id})">
-                        <i class="fas fa-warehouse"></i> Chi tiết kho
-                    </button>
+                    ` : `
+                        <span style="color:#888; font-size:14px;">Bạn không có quyền tạo kho</span>
+                    `}
                 </div>
-            </div>
-        </div>
-    `;
-}
+            `;
+        } else {
+            const whStatusLabel = wh.status === 'ACTIVE'
+                ? '<span class="badge badge-status-active">🟢 Đang hoạt động</span>'
+                : '<span class="badge badge-status-inactive">🔴 Ngừng hoạt động</span>';
+            const whTypeLabel = wh.type === 'CENTRAL' ? 'Kho tổng' : 'Kho dự án';
 
-        // ===== TAB THÀNH VIÊN (MỚI) =====
+            whHtml = `
+                <div style="background:#f8fafc; border:1px solid #e2e8f0; padding:16px; border-radius:8px;">
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap;">
+                        <div>
+                            <div style="font-size:16px; font-weight:600; color:#1a3c6e;">
+                                <span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="showWarehouseInfoModal(${wh.id})">
+                                    ${wh.code || '--'} - ${wh.name || '--'}
+                                </span>
+                            </div>
+                            <div style="margin-top:4px;">
+                                <span class="badge-wh ${wh.type === 'CENTRAL' ? 'badge-central' : 'badge-site'}">${whTypeLabel}</span>
+                                ${whStatusLabel}
+                            </div>
+                            <div style="margin-top:4px; color:#666; font-size:14px;">
+                                <i class="fas fa-map-marker-alt"></i> ${wh.address || 'Chưa có địa chỉ'}
+                            </div>
+                            <div style="color:#666; font-size:14px;">
+                                <i class="fas fa-user"></i> ${wh.manager || 'Chưa có quản lý'}
+                            </div>
+                            ${wh.note ? `<div style="color:#666; font-size:14px;"><i class="fas fa-comment"></i> ${wh.note}</div>` : ''}
+                        </div>
+                        <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
+                            ${canManageWh ? `
+                                <button class="btn btn-warning btn-sm" onclick="showChangeWhStatusModal(${project.id})">
+                                    <i class="fas fa-sync-alt"></i> Đổi trạng thái kho
+                                </button>
+                            ` : ''}
+                            <button class="btn btn-info btn-sm" onclick="showWarehouseInfoModal(${wh.id})">
+                                <i class="fas fa-warehouse"></i> Chi tiết kho
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // ===== TAB THÀNH VIÊN =====
         const membersHtml = renderProjectMembersTab(project, membersData);
 
         // ===== MODAL CHI TIẾT =====
@@ -617,7 +614,6 @@ if (!wh) {
                 document.getElementById('tab-warehouse').style.display = tab === 'warehouse' ? 'block' : 'none';
                 document.getElementById('tab-members').style.display = tab === 'members' ? 'block' : 'none';
                 
-                // Nếu chuyển sang tab members, refresh danh sách
                 if (tab === 'members') {
                     refreshProjectMembers(project.id);
                 }
@@ -754,7 +750,6 @@ async function showAddProjectMemberModal(projectId) {
     }
 
     try {
-        // Lấy danh sách user chưa tham gia dự án (hoặc đã rời)
         const allUsers = await api.getUsers();
         const existingMembers = await api.getProjectMembers(projectId, true);
         const existingUserIds = existingMembers.map(m => m.userId);
@@ -765,7 +760,6 @@ async function showAddProjectMemberModal(projectId) {
             return;
         }
 
-        // Tạo danh sách checkbox
         let userCheckboxes = availableUsers.map(u => `
             <div style="display:flex; align-items:center; gap:8px; padding:4px 0; border-bottom:1px solid #f0f0f0;">
                 <input type="checkbox" class="f-add-member-user" value="${u.id}" style="width:16px; height:16px;">
@@ -850,7 +844,7 @@ async function saveProjectMembers(projectId) {
 // SỬA VAI TRÒ THÀNH VIÊN
 // ================================================================
 
-function showEditMemberModal(memberId, currentRole, currentJoinedAt) {
+function showEditMemberRoleModal(memberId, currentRole, currentJoinedAt) {
     if (!hasPermission('projects.edit') && !hasPermission('admin.view')) {
         showWarning('Bạn không có quyền sửa thông tin thành viên!');
         return;
@@ -957,7 +951,6 @@ async function confirmDeleteProjectMember(memberId, projectId) {
 // CÁC HÀM HỖ TRỢ KHÁC
 // ================================================================
 
-// Đổi trạng thái kho (giữ nguyên từ cũ)
 async function showChangeWhStatusModal(projectId) {
     if (!hasPermission('inventory.edit')) {
         showWarning('Bạn không có quyền thay đổi trạng thái kho!');
@@ -1156,23 +1149,18 @@ async function backToProjectList() {
     }
 }
 
-/**
- * Mở modal tạo kho với thông tin dự án được tự động fill
- */
 function showCreateWarehouseFromProject(projectId) {
     if (!hasPermission('inventory.edit')) {
         showWarning('Bạn không có quyền tạo kho');
         return;
     }
 
-    // Lấy thông tin dự án hiện tại (từ projectDetailState hoặc truyền vào)
     api.getProjectById(projectId).then(project => {
         if (!project) {
             showError('Không tìm thấy dự án!');
             return;
         }
 
-        // Lấy danh sách projects để fill dropdown (nếu cần)
         api.getProjects().then(projects => {
             const projectOpts = projects.map(p => 
                 `<option value="${p.id}" ${p.id === projectId ? 'selected' : ''}>${p.code} - ${p.name}</option>`
@@ -1228,15 +1216,11 @@ function showCreateWarehouseFromProject(projectId) {
                 </div>
             `);
 
-            // Gọi toggleProjectField để set đúng trạng thái
             toggleProjectField();
         });
     }).catch(err => showError('Lỗi tải dự án: ' + err.message));
 }
 
-/**
- * Lưu kho từ modal tạo kho trong chi tiết dự án
- */
 async function saveWarehouseFromProject(projectId) {
     const code = document.getElementById('f-wh-code').value.trim();
     const name = document.getElementById('f-wh-name').value.trim();
@@ -1270,7 +1254,6 @@ async function saveWarehouseFromProject(projectId) {
         await api.createWarehouse(newWh);
         closeModal();
         showSuccess('Tạo kho thành công!');
-        // Reload chi tiết dự án để hiển thị kho mới
         const project = await api.getProjectById(projectId);
         if (project) {
             await renderProjectModal(project);
@@ -1278,27 +1261,19 @@ async function saveWarehouseFromProject(projectId) {
     } catch (error) {
         showError('Lỗi khi tạo kho: ' + error.message);
     }
-}/**
- * Xử lý khi dự án chuyển từ ACTIVE sang INACTIVE
- * - Hiển thị danh sách kho của dự án
- * - Kiểm tra tồn kho
- * - Hỏi chuyển vật tư về kho tổng hay không
- */
+}
+
 async function handleProjectInactivation(projectId, updatedProject) {
     try {
-        // Lấy danh sách kho của dự án
         const allWarehouses = await api.getWarehouses();
         const projectWarehouses = allWarehouses.filter(w => w.projectId === projectId);
         
         if (projectWarehouses.length === 0) {
-            // Không có kho nào, tiếp tục cập nhật dự án
             return await doUpdateProject(projectId, updatedProject);
         }
 
-        // Lấy tồn kho
         const allInventory = await api.getInventory();
         
-        // Tính tổng tồn cho từng kho
         const warehouseInventory = projectWarehouses.map(wh => {
             const invs = allInventory.filter(i => i.warehouseId === wh.id);
             const totalQty = invs.reduce((sum, i) => sum + (i.quantity || 0), 0);
@@ -1312,7 +1287,6 @@ async function handleProjectInactivation(projectId, updatedProject) {
 
         const hasInventory = warehouseInventory.some(wh => wh.totalQty > 0);
 
-        // Xây dựng HTML modal
         let whListHtml = warehouseInventory.map(wh => `
             <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 10px; border-bottom:1px solid #f0f0f0; cursor:pointer;" onclick="showWarehouseInventoryDetail(${wh.id}, '${wh.name}')">
                 <div>
@@ -1382,7 +1356,6 @@ async function handleProjectInactivation(projectId, updatedProject) {
             </div>
         `;
 
-        // Lưu dữ liệu tạm để dùng trong confirm
         window._pendingProjectInactivation = {
             projectId,
             updatedProject,
@@ -1391,18 +1364,12 @@ async function handleProjectInactivation(projectId, updatedProject) {
         };
 
         showModal('Xác nhận ngừng hoạt động dự án', modalContent);
-        
-        // Thêm sự kiện click vào kho để xem chi tiết tồn
-        // Hàm showWarehouseInventoryDetail được định nghĩa bên dưới
 
     } catch (error) {
         showError('Lỗi khi xử lý ngừng hoạt động dự án: ' + error.message);
     }
 }
 
-/**
- * Xem chi tiết tồn kho của một kho (hiện modal nhỏ)
- */
 function showWarehouseInventoryDetail(warehouseId, warehouseName) {
     const data = window._pendingProjectInactivation?.inventoryData?.find(w => w.id === warehouseId);
     if (!data) {
@@ -1438,9 +1405,6 @@ function showWarehouseInventoryDetail(warehouseId, warehouseName) {
     `);
 }
 
-/**
- * Xác nhận ngừng hoạt động dự án
- */
 async function confirmProjectInactivation(projectId) {
     const data = window._pendingProjectInactivation;
     if (!data) {
@@ -1448,12 +1412,10 @@ async function confirmProjectInactivation(projectId) {
         return;
     }
 
-    // Lấy lựa chọn chuyển kho
     const transferOption = document.querySelector('input[name="transferOption"]:checked')?.value || 'no';
     const shouldTransfer = transferOption === 'yes';
 
     try {
-        // Nếu chọn chuyển kho, kiểm tra có kho tổng không
         if (shouldTransfer) {
             const allWarehouses = await api.getWarehouses();
             const centralWarehouses = allWarehouses.filter(w => w.type === 'CENTRAL' && w.status === 'ACTIVE');
@@ -1461,42 +1423,28 @@ async function confirmProjectInactivation(projectId) {
                 showWarning('Không có kho tổng nào đang hoạt động. Hãy tạo kho tổng trước khi chuyển.');
                 return;
             }
-            // Chọn kho tổng đầu tiên làm kho đến
             const targetWarehouse = centralWarehouses[0];
             
-            // Chuyển hướng đến STO với thông báo
             closeModal();
             showSuccess(`Vui lòng tạo STO từ các kho của dự án đến kho tổng ${targetWarehouse.code} để chuyển vật tư.`);
             navigateTo('inventory');
             setTimeout(() => {
                 switchWarehouseTab('wh-sto');
-                // Có thể truyền tham số để pre-fill? Tạm thời chỉ chuyển tab.
             }, 300);
             
-            // Không cập nhật trạng thái kho ngay, để user tự xử lý STO
-            // Nhưng vẫn cập nhật dự án thành INACTIVE? 
-            // Có thể chưa cập nhật dự án ngay mà đợi user xử lý xong?
-            // Theo yêu cầu: nếu chọn "có", nhảy đến tab GRN/STO. Không đổi trạng thái kho ngay.
-            // Nhưng dự án vẫn nên được cập nhật? Thường thì vẫn cập nhật dự án, nhưng kho vẫn active cho đến khi STO hoàn tất.
-            // Tạm thời, tôi vẫn cập nhật dự án nhưng kho giữ nguyên.
-            // Sau khi STO hoàn tất, user có thể tự đóng kho.
-            // Vậy ta chỉ cần cập nhật dự án.
             await doUpdateProject(projectId, data.updatedProject);
             return;
         }
 
-        // Không chuyển -> đóng tất cả kho của dự án
         const warehouses = data.warehouses;
         for (const wh of warehouses) {
             wh.status = 'INACTIVE';
             await api.updateWarehouse(wh.id, wh);
         }
-        // Cập nhật dự án
         await doUpdateProject(projectId, data.updatedProject);
         closeModal();
         showSuccess(`Đã ngừng hoạt động dự án và các kho liên quan.`);
         
-        // Refresh lại danh sách kho nếu đang ở tab kho
         if (currentWhTab === 'wh-list') {
             switchWarehouseTab('wh-list');
         }
@@ -1505,14 +1453,10 @@ async function confirmProjectInactivation(projectId) {
     }
 }
 
-/**
- * Hàm thực hiện cập nhật dự án (gọi API)
- */
 async function doUpdateProject(id, projectData) {
     try {
         await api.updateProject(id, projectData);
         await renderProjects();
-        // Nếu đang ở chi tiết dự án, reload
         if (projectDetailState.projectId === id) {
             const project = await api.getProjectById(id);
             if (project) {
@@ -1524,7 +1468,6 @@ async function doUpdateProject(id, projectData) {
         showError('Lỗi khi cập nhật dự án: ' + error.message);
     }
 }
-
 
 // ================================================================
 // CÁC HÀM HỖ TRỢ DUYỆT TỪ PROJECT
@@ -1583,9 +1526,6 @@ window.confirmChangeWhStatus = confirmChangeWhStatus;
 // Project Members exports
 window.refreshProjectMembers = refreshProjectMembers;
 window.showAddProjectMemberModal = showAddProjectMemberModal;
-window.saveProjectMember = saveProjectMember;
-window.showEditMemberRoleModal = showEditMemberRoleModal;
-window.updateMemberRole = updateMemberRole;
 window.confirmLeaveProject = confirmLeaveProject;
 window.confirmLeaveProjectAction = confirmLeaveProjectAction;
 window.confirmDeleteProjectMember = confirmDeleteProjectMember;
@@ -1595,4 +1535,4 @@ window.showWarehouseInventoryDetail = showWarehouseInventoryDetail;
 window.doUpdateProject = doUpdateProject;
 window.resetProjectsFilters = resetProjectsFilters;
 
-console.log('✅ Projects module updated with Project Members tab.');
+console.log('✅ Projects module updated with Project Members tab and permission check for create button.');

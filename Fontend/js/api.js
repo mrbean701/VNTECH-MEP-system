@@ -688,6 +688,37 @@ async function deleteProjectMember(id) {
     return apiRequest(`/project-members/${id}`, 'DELETE');
 }
 
+// ===== WORKFLOW PROGRESS =====
+async function getWorkflowProgress(entityType, entityId) {
+    try {
+        const data = await apiRequest(`/workflow-progress/${entityType}/${entityId}`);
+        return data;
+    } catch (e) {
+        console.warn('Không thể lấy workflow progress:', e);
+        return null;
+    }
+}
+
+async function getWorkflowProgressByStatus(entityType, status) {
+    try {
+        const data = await apiRequest(`/workflow-progress/${entityType}/status/${status}`);
+        return data;
+    } catch (e) {
+        console.warn('Không thể lấy workflow progress theo status:', e);
+        return [];
+    }
+}
+
+async function getActiveWorkflowProgress(entityType) {
+    try {
+        const data = await apiRequest(`/workflow-progress/${entityType}/active`);
+        return data;
+    } catch (e) {
+        console.warn('Không thể lấy workflow progress active:', e);
+        return [];
+    }
+}
+
 // ====== EXPORT ======
 window.api = {
     // Auth
@@ -726,7 +757,11 @@ window.api = {
     getPositions, createPosition, updatePosition, deletePosition,
     getAutoReorderConfig, updateAutoReorderConfig, checkAutoReorder,
     getTeams, createTeam, updateTeam, deleteTeam, getTeamMembers, addTeamMember, removeTeamMember,
-    getProjectMembers, getProjectsByUser, addProjectMember, updateProjectMemberRole, leaveProject, deleteProjectMember
+    getProjectMembers, getProjectsByUser, addProjectMember, updateProjectMemberRole, leaveProject, deleteProjectMember,
+
+    getWorkflowProgress,
+    getWorkflowProgressByStatus,
+    getActiveWorkflowProgress
 };
 
 console.log('✅ API layer updated with approvalLevel support.');

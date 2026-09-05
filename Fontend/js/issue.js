@@ -56,11 +56,10 @@ function getIssueActions(item, statuses) {
         actions += ` <button class="btn btn-success btn-sm" onclick="submitIssue(${item.id})">Xác nhận</button>`;
     }
 
-    // ✅ Kiểm tra điều kiện duyệt
+    // ✅ SỬ DỤNG canApprove (đã sửa với level === step)
     if (item.status === 'PENDING') {
         const currentStep = item.approvalStep || 1;
-        const canApproveIssue = canApprove(currentStep, 'issue.approve', null);
-        if (canApproveIssue) {
+        if (canApprove(currentStep, 'issue.approve', null)) {
             actions += ` <button class="btn btn-success btn-sm" onclick="approveIssue(${item.id})">Duyệt</button>`;
             actions += ` <button class="btn btn-danger btn-sm" onclick="rejectIssue(${item.id})">Từ chối</button>`;
         }
@@ -68,21 +67,62 @@ function getIssueActions(item, statuses) {
 
     if (item.status === 'APPROVED') {
         const currentStep = item.approvalStep || 2;
-        const canComplete = canApprove(currentStep, 'issue.complete', null);
-        if (canComplete) {
+        if (canApprove(currentStep, 'issue.complete', null)) {
             actions += ` <button class="btn btn-success btn-sm" onclick="showCompleteIssueModal(${item.id})">Cấp phát</button>`;
         }
     }
 
     if (item.status === 'COMPLETED') {
         const currentStep = item.approvalStep || 3;
-        const canConfirm = canApprove(currentStep, 'issue.confirm', null);
-        if (canConfirm) {
+        if (canApprove(currentStep, 'issue.confirm', null)) {
             actions += ` <button class="btn btn-success btn-sm" onclick="confirmIssue(${item.id})">Xác nhận</button>`;
         }
     }
 
     return actions || '-';
+}
+
+// ====== RENDER TRANG ======
+async function renderIssuePage() {
+    console.log('🔄 renderIssuePage được gọi');
+
+    let page = document.getElementById('page-issue');
+    if (!page) {
+        const content = document.querySelector('.content');
+        if (!content) {
+            console.error('❌ Không tìm thấy .content');
+            return;
+        }
+        page = document.createElement('div');
+        page.className = 'page';
+        page.id = 'page-issue';
+        const container = document.createElement('div');
+        container.id = 'issue-container';
+        page.appendChild(container);
+        content.appendChild(page);
+        console.log('✅ Đã tạo page-issue');
+    } else {
+        if (!document.getElementById('issue-container')) {
+            const container = document.createElement('div');
+            container.id = 'issue-container';
+            page.appendChild(container);
+        }
+    }
+
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    page.classList.add('active');
+
+    if (!hasPermission('issue.view')) {
+        document.getElementById('issue-container').innerHTML = `
+            <div style="padding:20px; text-align:center; color:#e74c3c;">
+                <i class="fas fa-lock" style="font-size:24px; display:block; margin-bottom:10px;"></i>
+                Bạn không có quyền xem danh sách cấp phát
+            </div>
+        `;
+        return;
+    }
+
+    await renderIssues();
 }
 
 // ====== HÀM FILTER DỮ LIỆU ======
@@ -209,6 +249,7 @@ async function renderIssues(page = null) {
         issueState.perPage = perPage;
         const paging = paginate(filtered, issueState.page, perPage);
 
+        // ✅ KIỂM TRA QUYỀN TẠO
         const canCreate = hasPermission('issue.create');
         const btnCreate = document.getElementById('btn-create-issue');
         if (btnCreate) {
@@ -342,49 +383,6 @@ async function renderIssues(page = null) {
     }
 }
 
-// ====== RENDER TRANG ======
-async function renderIssuePage() {
-    console.log('🔄 renderIssuePage được gọi');
-
-    let page = document.getElementById('page-issue');
-    if (!page) {
-        const content = document.querySelector('.content');
-        if (!content) {
-            console.error('❌ Không tìm thấy .content');
-            return;
-        }
-        page = document.createElement('div');
-        page.className = 'page';
-        page.id = 'page-issue';
-        const container = document.createElement('div');
-        container.id = 'issue-container';
-        page.appendChild(container);
-        content.appendChild(page);
-        console.log('✅ Đã tạo page-issue');
-    } else {
-        if (!document.getElementById('issue-container')) {
-            const container = document.createElement('div');
-            container.id = 'issue-container';
-            page.appendChild(container);
-        }
-    }
-
-    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-    page.classList.add('active');
-
-    if (!hasPermission('issue.view')) {
-        document.getElementById('issue-container').innerHTML = `
-            <div style="padding:20px; text-align:center; color:#e74c3c;">
-                <i class="fas fa-lock" style="font-size:24px; display:block; margin-bottom:10px;"></i>
-                Bạn không có quyền xem danh sách cấp phát
-            </div>
-        `;
-        return;
-    }
-
-    await renderIssues();
-}
-
 // ====== RESET FILTER ======
 function resetIssueFilters() {
     issueState.filterText = '';
@@ -447,7 +445,7 @@ function showCreateIssueModal() {
     }).catch(err => showError('Không thể tải dữ liệu: ' + err.message));
 }
 
-// ====== ITEM SELECTOR FOR ISSUE ======
+// ====== ITEM SELECTOR CHO ISSUE ======
 function issueItemSelectorCallback(selectedItems) {
     _issueSelectedItems = selectedItems.map(item => ({
         itemId: item.itemId,

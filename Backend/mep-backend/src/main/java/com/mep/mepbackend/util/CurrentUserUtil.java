@@ -113,7 +113,8 @@ public class CurrentUserUtil {
         return true;
     }
 
-    // ✅ PHƯƠNG THỨC MỚI: Kiểm tra duyệt theo cấp độ
+    // ✅ PHƯƠNG THỨC KIỂM TRA DUYỆT THEO CẤP ĐỘ - ĐÃ SỬA
+// ===== CAN APPROVE STEP (MỚI) =====
     public boolean canApproveStep(int step, String permissionKey, Long departmentId) {
         try {
             User user = getCurrentUser();
@@ -137,17 +138,20 @@ public class CurrentUserUtil {
                 }
             }
 
-                                                // 3. Kiểm tra approval level: so sánh currentStep với cấp duyệt của user
-            // User chỉ duyệt được bước khi cấp duyệt của họ >= bước hiện tại
+            // 3. Kiểm tra approval level: user có level >= step thì được duyệt
             Integer level = user.getApprovalLevel();
             if (level == null) level = 0;
+
+            // Nếu step = 0 (không cần duyệt) thì cho phép nếu có quyền
+            if (step == 0) return true;
+
+            // ✅ SỬA: level >= step (thay vì ==)
             return level >= step;
 
         } catch (Exception e) {
             return false;
         }
     }
-
     public boolean hasAnyPermission(String... permissionKeys) {
         for (String key : permissionKeys) {
             if (hasPermission(key)) return true;
