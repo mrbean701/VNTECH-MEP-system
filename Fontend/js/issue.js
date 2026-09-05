@@ -1,5 +1,5 @@
 // ================================================================
-// MATERIAL ISSUE - Cấp phát vật tư - ĐÃ TÍCH HỢP PHÂN QUYỀN
+// MATERIAL ISSUE - Cấp phát vật tư - ĐÃ TÍCH HỢP APPROVAL LEVEL
 // ================================================================
 
 // ====== STATE ======
@@ -20,52 +20,69 @@ const debouncedIssueFilter = debounce(() => {
     renderIssues();
 }, 300);
 
+// ====== BIẾN TOÀN CỤC CHO ITEM SELECTOR ======
+let _issueSelectedItems = [];
+
 // ====== HÀM TẠO MÃ TỰ ĐỘNG ======
 function generateIssueCode() {
     return 'ISS-' + String(Date.now()).slice(-6);
 }
 
-// ====== RENDER TRANG ======
-async function renderIssuePage() {
-    console.log('🔄 renderIssuePage được gọi');
+// ====== HÀM LẤY ACTION (CÓ KIỂM TRA canApprove) ======
+function getIssueActions(item, statuses) {
+    const user = getUser();
+    let actions = '';
 
-    let page = document.getElementById('page-issue');
-    if (!page) {
-        const content = document.querySelector('.content');
-        if (!content) {
-            console.error('❌ Không tìm thấy .content');
-            return;
-        }
-        page = document.createElement('div');
-        page.className = 'page';
-        page.id = 'page-issue';
-        const container = document.createElement('div');
-        container.id = 'issue-container';
-        page.appendChild(container);
-        content.appendChild(page);
-        console.log('✅ Đã tạo page-issue');
-    } else {
-        if (!document.getElementById('issue-container')) {
-            const container = document.createElement('div');
-            container.id = 'issue-container';
-            page.appendChild(container);
+    actions += `<button class="btn btn-info btn-sm" onclick="viewIssue(${item.id})"><i class="fas fa-eye"></i></button>`;
+
+    const canEdit = hasPermission('issue.edit') && 
+                   (item.status === 'DRAFT' || item.status === 'PENDING') && 
+                   (user?.role === 'ADMIN' || user?.id === item.createdBy);
+    if (canEdit) {
+        actions += ` <button class="btn btn-warning btn-sm" onclick="editIssue(${item.id})"><i class="fas fa-edit"></i></button>`;
+    }
+
+    const canDelete = hasPermission('issue.delete') && 
+                     item.status === 'DRAFT' && 
+                     (user?.role === 'ADMIN' || user?.id === item.createdBy);
+    if (canDelete) {
+        actions += ` <button class="btn btn-danger btn-sm" onclick="deleteIssue(${item.id})"><i class="fas fa-trash"></i></button>`;
+    }
+
+    const canSubmit = hasPermission('issue.submit') && 
+                     item.status === 'DRAFT' && 
+                     (user?.role === 'ADMIN' || user?.id === item.createdBy);
+    if (canSubmit) {
+        actions += ` <button class="btn btn-success btn-sm" onclick="submitIssue(${item.id})">Xác nhận</button>`;
+    }
+
+    // ✅ Kiểm tra điều kiện duyệt
+    if (item.status === 'PENDING') {
+        const currentStep = item.approvalStep || 1;
+        const canApproveIssue = canApprove(currentStep, 'issue.approve', null);
+        if (canApproveIssue) {
+            actions += ` <button class="btn btn-success btn-sm" onclick="approveIssue(${item.id})">Duyệt</button>`;
+            actions += ` <button class="btn btn-danger btn-sm" onclick="rejectIssue(${item.id})">Từ chối</button>`;
         }
     }
 
-    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-    page.classList.add('active');
-
-    if (!hasPermission('issue.view')) {
-        document.getElementById('issue-container').innerHTML = `
-            <div style="padding:20px; text-align:center; color:#e74c3c;">
-                <i class="fas fa-lock" style="font-size:24px; display:block; margin-bottom:10px;"></i>
-                Bạn không có quyền xem danh sách cấp phát
-            </div>
-        `;
-        return;
+    if (item.status === 'APPROVED') {
+        const currentStep = item.approvalStep || 2;
+        const canComplete = canApprove(currentStep, 'issue.complete', null);
+        if (canComplete) {
+            actions += ` <button class="btn btn-success btn-sm" onclick="showCompleteIssueModal(${item.id})">Cấp phát</button>`;
+        }
     }
 
-    await renderIssues();
+    if (item.status === 'COMPLETED') {
+        const currentStep = item.approvalStep || 3;
+        const canConfirm = canApprove(currentStep, 'issue.confirm', null);
+        if (canConfirm) {
+            actions += ` <button class="btn btn-success btn-sm" onclick="confirmIssue(${item.id})">Xác nhận</button>`;
+        }
+    }
+
+    return actions || '-';
 }
 
 // ====== HÀM FILTER DỮ LIỆU ======
@@ -168,13 +185,18 @@ async function renderIssues(page = null) {
     }
 
     try {
-        const [issues, projects, warehouses] = await Promise.all([
+        const [issues, projects, warehouses, statuses] = await Promise.all([
             api.getIssues(),
             api.getProjects(),
-            api.getWarehouses()
+            api.getWarehouses(),
+            api.getStatuses('issue')
         ]);
+        
         window._projectsCache = projects;
         window._warehousesCache = warehouses;
+        if (!window._statusesCache) window._statusesCache = {};
+        window._statusesCache['issue'] = statuses;
+        
         saveData('projects', projects);
         saveData('warehouses', warehouses);
 
@@ -198,12 +220,7 @@ async function renderIssues(page = null) {
                 <input type="text" id="issue-filter" placeholder="Tìm theo mã, dự án, vật tư, khu vực..." style="flex:2;" value="${issueState.filterText}">
                 <select id="issue-status-filter" style="flex:1;">
                     <option value="">Tất cả</option>
-                    <option value="DRAFT" ${issueState.statusFilter === 'DRAFT' ? 'selected' : ''}>DRAFT</option>
-                    <option value="PENDING" ${issueState.statusFilter === 'PENDING' ? 'selected' : ''}>PENDING</option>
-                    <option value="APPROVED" ${issueState.statusFilter === 'APPROVED' ? 'selected' : ''}>APPROVED</option>
-                    <option value="COMPLETED" ${issueState.statusFilter === 'COMPLETED' ? 'selected' : ''}>COMPLETED</option>
-                    <option value="CONFIRMED" ${issueState.statusFilter === 'CONFIRMED' ? 'selected' : ''}>CONFIRMED</option>
-                    <option value="REJECTED" ${issueState.statusFilter === 'REJECTED' ? 'selected' : ''}>REJECTED</option>
+                    ${statuses.map(s => `<option value="${s.code}" ${issueState.statusFilter === s.code ? 'selected' : ''}>${s.name}</option>`).join('')}
                 </select>
                 <select id="issue-project-filter" style="flex:1;">
                     <option value="">Tất cả dự án</option>
@@ -247,13 +264,13 @@ async function renderIssues(page = null) {
         }
 
         for (const item of paging.items) {
-            const statusBadge = getStatusBadge(item.status);
+            const statusBadge = getStatusBadgeWithInfo(item.status, statuses);
             const projectId = getProjectIdByCode(item.projectCode);
             const projectDisplay = projectId ?
                 `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="closeModal(); viewProject(${projectId})">${item.projectName || item.projectCode}</span>` :
                 (item.projectName || item.projectCode || '');
 
-            const actions = getIssueActions(item);
+            const actions = getIssueActions(item, statuses);
 
             html += `<tr>
                 <td style="cursor:pointer; color:#1a3c6e; font-weight:500;" onclick="viewIssue(${item.id})">${item.code}</td>
@@ -325,6 +342,49 @@ async function renderIssues(page = null) {
     }
 }
 
+// ====== RENDER TRANG ======
+async function renderIssuePage() {
+    console.log('🔄 renderIssuePage được gọi');
+
+    let page = document.getElementById('page-issue');
+    if (!page) {
+        const content = document.querySelector('.content');
+        if (!content) {
+            console.error('❌ Không tìm thấy .content');
+            return;
+        }
+        page = document.createElement('div');
+        page.className = 'page';
+        page.id = 'page-issue';
+        const container = document.createElement('div');
+        container.id = 'issue-container';
+        page.appendChild(container);
+        content.appendChild(page);
+        console.log('✅ Đã tạo page-issue');
+    } else {
+        if (!document.getElementById('issue-container')) {
+            const container = document.createElement('div');
+            container.id = 'issue-container';
+            page.appendChild(container);
+        }
+    }
+
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    page.classList.add('active');
+
+    if (!hasPermission('issue.view')) {
+        document.getElementById('issue-container').innerHTML = `
+            <div style="padding:20px; text-align:center; color:#e74c3c;">
+                <i class="fas fa-lock" style="font-size:24px; display:block; margin-bottom:10px;"></i>
+                Bạn không có quyền xem danh sách cấp phát
+            </div>
+        `;
+        return;
+    }
+
+    await renderIssues();
+}
+
 // ====== RESET FILTER ======
 function resetIssueFilters() {
     issueState.filterText = '';
@@ -336,61 +396,6 @@ function resetIssueFilters() {
     issueState.page = 1;
     renderIssues();
 }
-
-// ====== HÀM LẤY ACTION ======
-function getIssueActions(item) {
-    const user = getUser();
-    let actions = '';
-
-    actions += `<button class="btn btn-info btn-sm" onclick="viewIssue(${item.id})"><i class="fas fa-eye"></i></button>`;
-
-    const canEdit = hasPermission('issue.edit') && 
-                   (item.status === 'DRAFT' || item.status === 'PENDING') && 
-                   (user?.role === 'ADMIN' || user?.id === item.createdBy);
-    if (canEdit) {
-        actions += ` <button class="btn btn-warning btn-sm" onclick="editIssue(${item.id})"><i class="fas fa-edit"></i></button>`;
-    }
-
-    const canDelete = hasPermission('issue.delete') && 
-                     item.status === 'DRAFT' && 
-                     (user?.role === 'ADMIN' || user?.id === item.createdBy);
-    if (canDelete) {
-        actions += ` <button class="btn btn-danger btn-sm" onclick="deleteIssue(${item.id})"><i class="fas fa-trash"></i></button>`;
-    }
-
-    const canSubmit = hasPermission('issue.submit') && 
-                     item.status === 'DRAFT' && 
-                     (user?.role === 'ADMIN' || user?.id === item.createdBy);
-    if (canSubmit) {
-        actions += ` <button class="btn btn-success btn-sm" onclick="submitIssue(${item.id})">Xác nhận</button>`;
-    }
-
-    const canApprove = hasPermission('issue.approve') && item.status === 'PENDING';
-    if (canApprove) {
-        actions += ` <button class="btn btn-success btn-sm" onclick="approveIssue(${item.id})">Duyệt</button>`;
-        actions += ` <button class="btn btn-danger btn-sm" onclick="rejectIssue(${item.id})">Từ chối</button>`;
-    }
-
-    const canComplete = hasPermission('issue.complete') && item.status === 'APPROVED';
-    if (canComplete) {
-        actions += ` <button class="btn btn-success btn-sm" onclick="showCompleteIssueModal(${item.id})">Cấp phát</button>`;
-    }
-
-    const canConfirm = hasPermission('issue.confirm') && item.status === 'COMPLETED';
-    if (canConfirm) {
-        actions += ` <button class="btn btn-success btn-sm" onclick="confirmIssue(${item.id})">Xác nhận</button>`;
-    }
-
-    return actions || '-';
-}
-
-// ====== CÁC HÀM GIỮ NGUYÊN (CRUD, Modal, Xử lý) ======
-// [Tất cả các hàm sau đây được giữ nguyên từ file cũ]
-// showCreateIssueModal, buildIssueItemRows, addIssueItemRow, removeIssueItemRow,
-// collectIssueItemsFromForm, saveIssue, viewIssue, editIssue, updateIssue,
-// submitIssue, approveIssue, rejectIssue, getAvailableWarehousesForIssue,
-// showCompleteIssueModal, completeIssueWithWarehouse, completeIssue, confirmIssue,
-// deleteIssue, renderIssueProgress, exportIssues, printIssue
 
 // ====== TẠO PHIẾU (MODAL) ======
 function showCreateIssueModal() {
@@ -423,8 +428,11 @@ function showCreateIssueModal() {
             </div>
             <div class="form-group">
                 <label>Danh sách vật tư</label>
-                <div id="issue-items-container">
-                    ${buildIssueItemRows([{itemId: '', requestedQty: '', condition: ''}])}
+                <button type="button" class="btn btn-sm btn-info" onclick="openItemSelectorForIssue()">
+                    <i class="fas fa-plus"></i> Chọn vật tư
+                </button>
+                <div id="issue-selected-items-container" style="margin-top:8px; max-height:200px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:6px; padding:8px;">
+                    ${_renderIssueSelectedItemsHTML()}
                 </div>
             </div>
             <div class="form-group">
@@ -439,73 +447,78 @@ function showCreateIssueModal() {
     }).catch(err => showError('Không thể tải dữ liệu: ' + err.message));
 }
 
-// ====== BUILD DÒNG VẬT TƯ ======
-function buildIssueItemRows(itemsData) {
-    const allItems = window._itemsCache || [];
-    if (!itemsData || itemsData.length === 0) {
-        itemsData = [{ itemId: '', requestedQty: '', condition: '' }];
+// ====== ITEM SELECTOR FOR ISSUE ======
+function issueItemSelectorCallback(selectedItems) {
+    _issueSelectedItems = selectedItems.map(item => ({
+        itemId: item.itemId,
+        quantity: item.quantity || 1,
+        itemName: item.displayName || item.itemName || getItemName(item.itemId),
+        itemCode: item.itemCode || getItemCode(item.itemId),
+        unit: item.unit || getItemUnit(item.itemId),
+        model: item.model || getItemModel(item.itemId)
+    }));
+    renderIssueSelectedItems();
+}
+
+function renderIssueSelectedItems() {
+    const container = document.getElementById('issue-selected-items-container');
+    if (!container) return;
+    container.innerHTML = _renderIssueSelectedItemsHTML();
+    _attachIssueQuantityEvents();
+}
+
+function _renderIssueSelectedItemsHTML() {
+    const items = _issueSelectedItems || [];
+    if (items.length === 0) {
+        return '<div style="color:#999; text-align:center; padding:8px;">Chưa chọn vật tư nào</div>';
     }
     let html = '';
-    itemsData.forEach((item, index) => {
-        const selected = item.itemId || '';
-        html += `<div class="item-row" data-index="${index}">
-            <select class="issue-item-select" data-name="items[${index}].itemId">
-                <option value="">-- Chọn --</option>
-                ${allItems.map(it => `<option value="${it.id}" ${it.id == selected ? 'selected' : ''}>${it.code} - ${it.name}</option>`).join('')}
-            </select>
-            <input type="number" class="issue-item-qty" data-name="items[${index}].requestedQty" value="${item.requestedQty || ''}" placeholder="SL yêu cầu" style="width:120px;">
-            <input type="text" class="issue-item-condition" data-name="items[${index}].condition" value="${item.condition || ''}" placeholder="Tình trạng" style="width:120px;">
-            <button type="button" class="remove-item" onclick="removeIssueItemRow(this)"><i class="fas fa-minus"></i></button>
-        </div>`;
+    items.forEach((item, index) => {
+        const modelDisplay = item.model ? ` (${item.model})` : '';
+        const unitDisplay = item.unit ? ` [${item.unit}]` : '';
+        html += `
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 8px; margin-bottom:4px; background:#f8fafc; border-radius:4px; border:1px solid #e2e8f0;">
+                <span style="flex:1; font-size:14px;">
+                    <strong>${item.itemCode}</strong> - ${item.itemName}${modelDisplay}${unitDisplay}
+                </span>
+                <span style="display:flex; align-items:center; gap:6px;">
+                    <span style="font-size:13px; color:#555;">SL:</span>
+                    <input type="number" class="issue-item-qty" data-index="${index}" value="${item.quantity}" style="width:70px; padding:4px; border:1px solid #ccc; border-radius:4px;" min="0.01" step="0.01">
+                </span>
+                <button type="button" class="btn btn-sm btn-danger" onclick="removeIssueItem(${index})" style="margin-left:8px;"><i class="fas fa-times"></i></button>
+            </div>
+        `;
     });
-    html += `<button type="button" class="btn-add-item" onclick="addIssueItemRow(this)"><i class="fas fa-plus"></i> Thêm vật tư</button>`;
     return html;
 }
 
-function addIssueItemRow(btn) {
-    const container = btn.parentElement;
-    const index = container.querySelectorAll('.item-row').length;
-    const allItems = window._itemsCache || [];
-    let opts = allItems.map(it => `<option value="${it.id}">${it.code} - ${it.name}</option>`).join('');
-    const row = document.createElement('div');
-    row.className = 'item-row';
-    row.dataset.index = index;
-    row.innerHTML = `
-        <select class="issue-item-select"><option value="">-- Chọn --</option>${opts}</select>
-        <input type="number" class="issue-item-qty" placeholder="SL yêu cầu" style="width:120px;">
-        <input type="text" class="issue-item-condition" placeholder="Tình trạng" style="width:120px;">
-        <button type="button" class="remove-item" onclick="removeIssueItemRow(this)"><i class="fas fa-minus"></i></button>
-    `;
-    container.insertBefore(row, btn);
+function _attachIssueQuantityEvents() {
+    document.querySelectorAll('.issue-item-qty').forEach(input => {
+        input.removeEventListener('change', _onIssueQtyChange);
+        input.addEventListener('change', _onIssueQtyChange);
+    });
 }
 
-function removeIssueItemRow(btn) {
-    const row = btn.parentElement;
-    const container = row.parentElement;
-    if (container.querySelectorAll('.item-row').length <= 1) {
-        showWarning('Cần ít nhất một dòng');
-        return;
+function _onIssueQtyChange(e) {
+    const idx = parseInt(this.dataset.index);
+    const val = parseFloat(this.value) || 1;
+    if (val > 0 && _issueSelectedItems[idx]) {
+        _issueSelectedItems[idx].quantity = val;
+    } else {
+        this.value = _issueSelectedItems[idx]?.quantity || 1;
     }
-    row.remove();
-    container.querySelectorAll('.item-row').forEach((r, i) => {
-        r.dataset.index = i;
-    });
 }
 
-function collectIssueItemsFromForm(container) {
-    const rows = container.querySelectorAll('.item-row');
-    const items = [];
-    rows.forEach(row => {
-        const sel = row.querySelector('.issue-item-select');
-        const qty = row.querySelector('.issue-item-qty');
-        const condition = row.querySelector('.issue-item-condition');
-        const itemId = parseInt(sel.value);
-        const requestedQty = parseFloat(qty.value);
-        if (itemId && !isNaN(requestedQty) && requestedQty > 0) {
-            items.push({ itemId, requestedQty, actualQty: requestedQty, condition: condition.value || '' });
-        }
-    });
-    return items;
+function removeIssueItem(index) {
+    if (_issueSelectedItems && _issueSelectedItems.length > index) {
+        _issueSelectedItems.splice(index, 1);
+        renderIssueSelectedItems();
+    }
+}
+
+function openItemSelectorForIssue() {
+    const selected = _issueSelectedItems || [];
+    openItemSelectorHelper(selected, issueItemSelectorCallback, 'issue');
 }
 
 // ====== LƯU PHIẾU ======
@@ -521,8 +534,11 @@ async function saveIssue() {
     const team = document.getElementById('f-issue-team').value.trim();
     const requester = document.getElementById('f-issue-requester').value.trim();
     const note = document.getElementById('f-issue-note').value.trim();
-    const container = document.getElementById('issue-items-container');
-    const items = collectIssueItemsFromForm(container);
+    const items = _issueSelectedItems.map(item => ({
+        itemId: item.itemId,
+        requestedQty: item.quantity,
+        displayName: item.itemName
+    }));
 
     if (!projectCode || !date || items.length === 0) {
         showError('Vui lòng chọn dự án, ngày cấp và ít nhất một vật tư');
@@ -547,6 +563,7 @@ async function saveIssue() {
 
         await api.createIssue(newIssue);
         closeModal();
+        _issueSelectedItems = [];
         await renderIssues();
         showSuccess('Tạo phiếu cấp phát thành công! (Trạng thái DRAFT)');
     } catch (error) {
@@ -554,7 +571,7 @@ async function saveIssue() {
     }
 }
 
-// ====== XEM CHI TIẾT PHIẾU ======
+// ====== VIEW CHI TIẾT ======
 async function viewIssue(id) {
     try {
         let item = await api.getIssueById ? await api.getIssueById(id) : null;
@@ -566,18 +583,26 @@ async function viewIssue(id) {
                 return;
             }
         }
+        
+        const statuses = await api.getStatuses('issue');
+        if (!window._statusesCache) window._statusesCache = {};
+        window._statusesCache['issue'] = statuses;
 
         const items = item.items ? JSON.parse(item.items) : [];
-        const itemsHtml = items.map(it => `
-            <tr>
-                <td>${getItemCode(it.itemId)}</td>
-                <td>${it.displayName || getItemName(it.itemId)}</td>
-                <td>${getItemUnit(it.itemId)}</td>
-                <td>${it.requestedQty}</td>
-                <td>${it.actualQty !== undefined ? it.actualQty : it.requestedQty}</td>
-                <td>${it.condition || ''}</td>
-            </tr>
-        `).join('');
+        const itemsHtml = items.map(it => {
+            const itemName = it.displayName || getItemName(it.itemId);
+            const unit = getItemUnit(it.itemId);
+            return `
+                <tr>
+                    <td>${getItemCode(it.itemId)}</td>
+                    <td>${itemName}</td>
+                    <td>${unit}</td>
+                    <td>${it.requestedQty}</td>
+                    <td>${it.actualQty !== undefined ? it.actualQty : it.requestedQty}</td>
+                    <td>${it.condition || ''}</td>
+                </tr>
+            `;
+        }).join('');
 
         let stepsConfig = [
             { id: 1, label: 'Tạo phiếu' },
@@ -599,7 +624,9 @@ async function viewIssue(id) {
                 console.warn('Không lấy được workflow steps:', e);
             }
         }
-        const progressHtml = renderApprovalProgress(item.status, item.approvalStep || 1, stepsConfig);
+        const currentStep = item.approvalStep || 1;
+        const progressHtml = renderApprovalProgress(item.status, currentStep, stepsConfig, statuses);
+        const statusBadge = getStatusBadgeWithInfo(item.status, statuses);
         const projectId = getProjectIdByCode(item.projectCode);
         const projectDisplay = projectId ?
             `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="closeModal(); viewProject(${projectId})">${item.projectName || item.projectCode}</span>` :
@@ -614,7 +641,7 @@ async function viewIssue(id) {
                 <div><span class="label">Khu vực/Hạng mục:</span> <span class="value">${item.area || ''}</span></div>
                 <div><span class="label">Đội thi công nhận:</span> <span class="value">${item.team || ''}</span></div>
                 <div><span class="label">Người yêu cầu:</span> <span class="value">${item.requester || ''}</span></div>
-                <div><span class="label">Trạng thái:</span> <span class="value">${getStatusBadge(item.status)}</span></div>
+                <div><span class="label">Trạng thái:</span> <span class="value">${statusBadge}</span></div>
                 <div><span class="label">Ngày tạo:</span> <span class="value">${item.createdAt || ''}</span></div>
                 ${item.completionDate ? `<div><span class="label">Ngày hoàn tất:</span> <span class="value">${item.completionDate}</span></div>` : ''}
                 <div><span class="label">Kho xuất:</span> <span class="value">${warehouseDisplay}</span></div>
@@ -639,7 +666,7 @@ async function viewIssue(id) {
     }
 }
 
-// ====== SỬA PHIẾU (DRAFT) ======
+// ====== SỬA PHIẾU ======
 async function editIssue(id) {
     if (!hasPermission('issue.edit')) {
         showWarning('Bạn không có quyền sửa phiếu cấp phát!');
@@ -663,7 +690,7 @@ async function editIssue(id) {
             `<option value="${p.code}" ${p.code === item.projectCode ? 'selected' : ''}>${p.code} - ${p.name}</option>`
         ).join('');
 
-        const itemsData = item.items ? JSON.parse(item.items) : [{ itemId: '', requestedQty: '', condition: '' }];
+        const itemsData = item.items ? JSON.parse(item.items) : [];
 
         showModal('Sửa phiếu cấp phát', `
             <div class="form-group">
@@ -688,8 +715,11 @@ async function editIssue(id) {
             </div>
             <div class="form-group">
                 <label>Danh sách vật tư</label>
-                <div id="issue-items-container">
-                    ${buildIssueItemRows(itemsData)}
+                <button type="button" class="btn btn-sm btn-info" onclick="openItemSelectorForIssue()">
+                    <i class="fas fa-plus"></i> Chọn vật tư
+                </button>
+                <div id="issue-selected-items-container" style="margin-top:8px; max-height:200px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:6px; padding:8px;">
+                    ${_renderIssueSelectedItemsHTML()}
                 </div>
             </div>
             <div class="form-group">
@@ -713,8 +743,11 @@ async function updateIssue(id) {
     const team = document.getElementById('f-issue-team').value.trim();
     const requester = document.getElementById('f-issue-requester').value.trim();
     const note = document.getElementById('f-issue-note').value.trim();
-    const container = document.getElementById('issue-items-container');
-    const items = collectIssueItemsFromForm(container);
+    const items = _issueSelectedItems.map(item => ({
+        itemId: item.itemId,
+        requestedQty: item.quantity,
+        displayName: item.itemName
+    }));
 
     if (!projectCode || !date || items.length === 0) {
         showError('Vui lòng chọn dự án, ngày cấp và ít nhất một vật tư');
@@ -738,6 +771,7 @@ async function updateIssue(id) {
 
         await api.updateIssue(id, updatedIssue);
         closeModal();
+        _issueSelectedItems = [];
         await renderIssues();
         showSuccess('Cập nhật phiếu thành công!');
     } catch (error) {
@@ -745,7 +779,7 @@ async function updateIssue(id) {
     }
 }
 
-// ====== GỬI DUYỆT ======
+// ====== SUBMIT ======
 async function submitIssue(id) {
     if (!hasPermission('issue.submit')) {
         showWarning('Bạn không có quyền gửi duyệt phiếu cấp phát!');
@@ -760,7 +794,7 @@ async function submitIssue(id) {
     }
 }
 
-// ====== DUYỆT ======
+// ====== APPROVE ======
 async function approveIssue(id) {
     if (!hasPermission('issue.approve')) {
         showWarning('Bạn không có quyền duyệt phiếu cấp phát!');
@@ -775,7 +809,7 @@ async function approveIssue(id) {
     }
 }
 
-// ====== TỪ CHỐI ======
+// ====== REJECT ======
 async function rejectIssue(id) {
     if (!hasPermission('issue.reject')) {
         showWarning('Bạn không có quyền từ chối phiếu cấp phát!');
@@ -1003,25 +1037,6 @@ async function deleteIssue(id) {
     }
 }
 
-// ====== RENDER PROGRESS ======
-function renderIssueProgress(status) {
-    const steps = [
-        { id: 1, label: 'Tạo phiếu' },
-        { id: 2, label: 'Duyệt' },
-        { id: 3, label: 'Cấp phát' },
-        { id: 4, label: 'Xác nhận' }
-    ];
-
-    let currentStep = 1;
-    if (status === 'PENDING') currentStep = 2;
-    else if (status === 'APPROVED') currentStep = 2;
-    else if (status === 'COMPLETED') currentStep = 3;
-    else if (status === 'CONFIRMED') currentStep = 4;
-    else if (status === 'REJECTED') currentStep = 0;
-
-    return renderApprovalProgress(status, currentStep, steps);
-}
-
 // ====== EXPORT EXCEL ======
 function exportIssues() {
     api.getIssues().then(issues => {
@@ -1052,7 +1067,7 @@ function printIssue(id) {
     showInfo('Chức năng in đang được phát triển.');
 }
 
-// ====== EXPORT RA WINDOW ======
+// ====== EXPORT ======
 window.renderIssuePage = renderIssuePage;
 window.renderIssues = renderIssues;
 window.exportIssues = exportIssues;
@@ -1069,4 +1084,10 @@ window.completeIssueWithWarehouse = completeIssueWithWarehouse;
 window.printIssue = printIssue;
 window.resetIssueFilters = resetIssueFilters;
 
-console.log('✅ Issue module updated with full permission checks, filter/sort, and debounce.');
+// Item selector functions
+window.issueItemSelectorCallback = issueItemSelectorCallback;
+window.renderIssueSelectedItems = renderIssueSelectedItems;
+window.removeIssueItem = removeIssueItem;
+window.openItemSelectorForIssue = openItemSelectorForIssue;
+
+console.log('✅ Issue module updated with approval level and canApprove.');

@@ -20,8 +20,13 @@ const debouncedPOFilter = debounce(() => {
     renderPO();
 }, 300);
 
-// ====== HÀM LẤY ACTION ======
-function getPOActions(po) {
+// ====== BIẾN TOÀN CỤC CHO ITEM SELECTOR ======
+let _poSelectedItems = [];
+let _poMode = 'create';
+let _poEditId = null;
+
+// ====== HÀM LẤY ACTION (CÓ KIỂM TRA canApprove) ======
+function getPOActions(po, statuses) {
     const user = getUser();
     let actions = '';
 
@@ -48,21 +53,34 @@ function getPOActions(po) {
         actions += ` <button class="btn btn-success btn-sm" onclick="submitPO(${po.id})">Xác nhận</button>`;
     }
 
-    const canApprove = hasPermission('po.approve') && po.status === 'PENDING';
-    if (canApprove) {
-        actions += ` <button class="btn btn-success btn-sm" onclick="approvePO(${po.id})">Duyệt</button>`;
-        actions += ` <button class="btn btn-danger btn-sm" onclick="rejectPO(${po.id})">Từ chối</button>`;
+    // ✅ Kiểm tra điều kiện duyệt
+    const pendingStatuses = ['PENDING', 'PENDING_PLANNING', 'PENDING_PROJECT', 'PENDING_CEO', 
+                             'PLANNING_APPROVED', 'PROJECT_APPROVED'];
+    if (pendingStatuses.includes(po.status)) {
+        const currentStep = po.approvalStep || 1;
+        const canApprovePO = canApprove(currentStep, 'po.approve', null);
+        if (canApprovePO) {
+            actions += ` <button class="btn btn-success btn-sm" onclick="approvePO(${po.id})">Duyệt</button>`;
+            actions += ` <button class="btn btn-danger btn-sm" onclick="rejectPO(${po.id})">Từ chối</button>`;
+        }
+    }
+
+            // ✅ Nút tạo GRN (chỉ hiện khi PO đã APPROVED và user là bộ phận mua - level 0)
+    const canCreateGRN = hasPermission('grn.create') && po.status === 'APPROVED' && getUserApprovalLevel() === 0;
+    if (canCreateGRN) {
+        actions += ` <button class="btn btn-info btn-sm" onclick="showAddGRNFromPO(${po.id})">Tạo GRN</button>`;
     }
 
     return actions || '-';
 }
 
-// ====== HÀM FILTER DỮ LIỆU ======
+// ====== HÀM FILTER DỮ LIỆU PO ======
 function filterPOData(pos, projects, vendors) {
     const { filterText, statusFilter, projectFilter, vendorFilter } = poState;
     const keyword = filterText.toLowerCase().trim();
 
     return pos.filter(po => {
+        // Lọc theo từ khóa (mã, dự án, NCC, vật tư)
         let matchKeyword = true;
         if (keyword) {
             const codeMatch = (po.code || '').toLowerCase().includes(keyword);
@@ -84,29 +102,27 @@ function filterPOData(pos, projects, vendors) {
                 }
             } catch (e) {}
 
-            matchKeyword = codeMatch || projectNameMatch || projectCodeMatch || 
+            matchKeyword = codeMatch || projectNameMatch || projectCodeMatch ||
                            vendorNameMatch || vendorCodeMatch || itemsMatch;
         }
 
+        // Lọc theo status
         const matchStatus = statusFilter ? po.status === statusFilter : true;
 
+        // Lọc theo dự án
         let matchProject = true;
         if (projectFilter) {
             const selectedProject = projects.find(p => p.code === projectFilter || p.id === parseInt(projectFilter));
-            if (selectedProject) {
-                matchProject = po.projectCode === selectedProject.code;
-            } else {
-                matchProject = false;
-            }
+            matchProject = selectedProject ? po.projectCode === selectedProject.code : false;
         }
 
+        // Lọc theo nhà cung cấp
         let matchVendor = true;
         if (vendorFilter) {
-            const selectedVendor = vendors.find(v => v.code === vendorFilter || v.id === parseInt(vendorFilter));
-            if (selectedVendor) {
-                matchVendor = po.vendorCode === selectedVendor.code;
-            } else {
-                matchVendor = false;
+            const selectedVendor = vendors.find(v => v.code === vendorFilter || v.name === vendorFilter);
+            matchVendor = po.vendorCode === vendorFilter || po.vendorName === vendorFilter;
+            if (!matchVendor && selectedVendor) {
+                matchVendor = po.vendorCode === selectedVendor.code || po.vendorName === selectedVendor.name;
             }
         }
 
@@ -114,7 +130,7 @@ function filterPOData(pos, projects, vendors) {
     });
 }
 
-// ====== HÀM SORT DỮ LIỆU ======
+// ====== HÀM SORT DỮ LIỆU PO ======
 function sortPOData(data) {
     const { sortBy, sortOrder } = poState;
     const order = sortOrder === 'asc' ? 1 : -1;
@@ -133,7 +149,7 @@ function sortPOData(data) {
             valA = new Date(a.createdAt || 0);
             valB = new Date(b.createdAt || 0);
         } else if (sortBy === 'status') {
-            const statusOrder = { 'DRAFT': 0, 'PENDING': 1, 'PENDING_PLANNING': 2, 'PLANNING_APPROVED': 3, 'PENDING_PROJECT': 4, 'PROJECT_APPROVED': 5, 'PENDING_CEO': 6, 'APPROVED': 7, 'REJECTED': 8 };
+            const statusOrder = { 'DRAFT': 0, 'PENDING': 1, 'PENDING_CEO': 2, 'APPROVED': 3, 'REJECTED': 4, 'COMPLETE': 5 };
             valA = statusOrder[a.status] || 0;
             valB = statusOrder[b.status] || 0;
         }
@@ -150,13 +166,18 @@ function sortPOData(data) {
 // ====== RENDER DANH SÁCH PO ======
 async function renderPO(page = null) {
     try {
-        const [pos, projects, vendors] = await Promise.all([
+        const [pos, projects, vendors, statuses] = await Promise.all([
             api.getPOs(),
             api.getProjects(),
-            api.getVendors()
+            api.getVendors(),
+            api.getStatuses('po')
         ]);
+        
         window._projectsCache = projects;
         window._vendorsCache = vendors;
+        if (!window._statusesCache) window._statusesCache = {};
+        window._statusesCache['po'] = statuses;
+        
         saveData('projects', projects);
         saveData('vendors', vendors);
 
@@ -180,15 +201,7 @@ async function renderPO(page = null) {
                 <input type="text" id="po-filter" placeholder="Tìm theo mã, dự án, NCC, vật tư..." style="flex:2;" value="${poState.filterText}">
                 <select id="po-status-filter" style="flex:1;">
                     <option value="">Tất cả trạng thái</option>
-                    <option value="DRAFT" ${poState.statusFilter === 'DRAFT' ? 'selected' : ''}>DRAFT</option>
-                    <option value="PENDING" ${poState.statusFilter === 'PENDING' ? 'selected' : ''}>PENDING</option>
-                    <option value="PENDING_PLANNING" ${poState.statusFilter === 'PENDING_PLANNING' ? 'selected' : ''}>PENDING_PLANNING</option>
-                    <option value="PLANNING_APPROVED" ${poState.statusFilter === 'PLANNING_APPROVED' ? 'selected' : ''}>PLANNING_APPROVED</option>
-                    <option value="PENDING_PROJECT" ${poState.statusFilter === 'PENDING_PROJECT' ? 'selected' : ''}>PENDING_PROJECT</option>
-                    <option value="PROJECT_APPROVED" ${poState.statusFilter === 'PROJECT_APPROVED' ? 'selected' : ''}>PROJECT_APPROVED</option>
-                    <option value="PENDING_CEO" ${poState.statusFilter === 'PENDING_CEO' ? 'selected' : ''}>PENDING_CEO</option>
-                    <option value="APPROVED" ${poState.statusFilter === 'APPROVED' ? 'selected' : ''}>APPROVED</option>
-                    <option value="REJECTED" ${poState.statusFilter === 'REJECTED' ? 'selected' : ''}>REJECTED</option>
+                    ${statuses.map(s => `<option value="${s.code}" ${poState.statusFilter === s.code ? 'selected' : ''}>${s.name}</option>`).join('')}
                 </select>
                 <select id="po-project-filter" style="flex:1;">
                     <option value="">Tất cả dự án</option>
@@ -242,8 +255,8 @@ async function renderPO(page = null) {
                 }
             } catch (e) { itemsStr = 'Lỗi parse'; }
 
-            const statusBadge = getStatusBadge(p.status);
-            const actions = getPOActions(p);
+            const statusBadge = getStatusBadgeWithInfo(p.status, statuses);
+            const actions = getPOActions(p, statuses);
             const projectId = getProjectIdByCode(p.projectCode);
             const projectLink = projectId ?
                 `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="viewProject(${projectId})">${p.projectName || p.projectCode || '--'}</span>` :
@@ -319,6 +332,128 @@ async function renderPO(page = null) {
     }
 }
 
+// ====== VIEW PO (CHI TIẾT) ======
+async function viewPO(id) {
+    try {
+        const [po, allPOs, items, statuses] = await Promise.all([
+            api.getPOById ? api.getPOById(id) : null,
+            api.getPOs(),
+            api.getItems(),
+            api.getStatuses('po')
+        ]);
+
+        let poData = po;
+        if (!poData) {
+            poData = allPOs.find(p => p.id === id);
+        }
+        if (!poData) {
+            showError('Không tìm thấy PO!');
+            return;
+        }
+
+        window._itemsCache = items;
+        if (!window._statusesCache) window._statusesCache = {};
+        window._statusesCache['po'] = statuses;
+
+        let itemsList = [];
+        try {
+            if (poData.items) {
+                itemsList = typeof poData.items === 'string' ? JSON.parse(poData.items) : poData.items;
+            }
+        } catch (e) { itemsList = []; }
+
+        const itemsHtml = itemsList.map(it => {
+            const item = items.find(i => i.id === it.itemId);
+            const code = item ? item.code : 'N/A';
+            const name = item ? (it.displayName || item.name) : (it.displayName || 'N/A');
+            const unit = item ? item.unit : '';
+            const model = item ? (item.model ? ` (${item.model})` : '') : '';
+            return `
+                <tr>
+                    <td><strong>${code}</strong></td>
+                    <td>${name}${model}</td>
+                    <td>${unit || '--'}</td>
+                    <td>${it.quantity}</td>
+                </tr>
+            `;
+        }).join('');
+
+        let stepsConfig = [
+            { id: 1, label: 'Phòng Kế hoạch' },
+            { id: 2, label: 'Phòng Dự án' },
+            { id: 3, label: 'Tổng Giám đốc' }
+        ];
+        if (poData.workflowId) {
+            try {
+                const wf = await api.getWorkflowById ? await api.getWorkflowById(poData.workflowId) : null;
+                if (wf && wf.steps) {
+                    const steps = JSON.parse(wf.steps);
+                    stepsConfig = steps.map(s => ({
+                        id: s.step || s.id,
+                        label: s.label || `Bước ${s.step || s.id}`
+                    }));
+                }
+            } catch (e) {
+                console.warn('Không lấy được workflow steps:', e);
+            }
+        }
+
+        const currentStep = poData.approvalStep !== undefined && poData.approvalStep !== null ? poData.approvalStep : 1;
+        const approvalHtml = renderApprovalProgress(poData.status, currentStep, stepsConfig, statuses);
+
+        const projectId = getProjectIdByCode(poData.projectCode);
+        const projectLink = projectId ?
+            `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="closeModal(); viewProject(${projectId});">${poData.projectName || poData.projectCode || '--'}</span>` :
+            (poData.projectName || poData.projectCode || '--');
+
+        const prLink = poData.prId ?
+            `<a href="#" onclick="event.preventDefault(); closeModal(); viewPR(${poData.prId});" style="color:#1a3c6e; text-decoration:underline;">PR-${String(poData.prId).padStart(3, '0')}</a>` :
+            '--';
+
+        const itemsTable = `
+            <div class="table-responsive">
+                <table>
+                    <thead><tr><th>Mã</th><th>Tên</th><th>ĐVT</th><th>Số lượng</th></tr></thead>
+                    <tbody>${itemsHtml}</tbody>
+                </table>
+            </div>
+        `;
+
+                const totalAmount = itemsList.reduce((sum, it) => sum + ((it.price || 0) * (it.quantity || 0)), 0);
+        const statusBadge = getStatusBadgeWithInfo(poData.status, statuses);
+
+        // Nút tạo GRN ở chi tiết PO: chỉ cho bộ phận mua (level 0), PO đã duyệt
+        const canMakeGRN = poData.status === 'APPROVED'
+            && hasPermission('grn.create')
+            && getUserApprovalLevel() === 0;
+        const grnBtnHtml = canMakeGRN
+            ? ` <button class="btn btn-info btn-sm" onclick="showAddGRNFromPO(${poData.id}); closeModal();">Tạo GRN</button>`
+            : '';
+
+        showModal('Chi tiết PO', `
+            <div class="detail-grid">
+                <div><span class="label">Mã PO:</span> <span class="value">${poData.code || '--'}</span></div>
+                <div><span class="label">Ngày tạo:</span> <span class="value">${poData.createdAt || ''}</span></div>
+                <div><span class="label">PR liên quan:</span> <span class="value">${prLink}</span></div>
+                <div><span class="label">Dự án:</span> <span class="value">${projectLink}</span></div>
+                <div><span class="label">Nhà cung cấp:</span> <span class="value">${poData.vendorName || poData.vendorCode || '--'}</span></div>
+                <div><span class="label">Trạng thái:</span> <span class="value">${statusBadge}</span></div>
+                ${totalAmount > 0 ? `<div><span class="label">Tổng tiền:</span> <span class="value">${totalAmount.toLocaleString()} VND</span></div>` : ''}
+                <div style="grid-column:1/-1;"><span class="label">Tiến độ duyệt:</span><br>${approvalHtml}</div>
+                <div style="grid-column:1/-1;"><span class="label">Danh sách vật tư:</span><br>${itemsTable}</div>
+                <div style="grid-column:1/-1;"><span class="label">Ghi chú:</span> <span class="value">${poData.note || ''}</span></div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-info" onclick="printPO(${poData.id}); closeModal();"><i class="fas fa-print"></i> In phiếu</button>
+                ${grnBtnHtml}
+                <button class="btn btn-danger" onclick="closeModal()">Đóng</button>
+            </div>
+        `);
+    } catch (error) {
+        showError('Lỗi khi tải chi tiết PO: ' + error.message);
+    }
+}
+
 // ====== RESET FILTER ======
 function resetPOFilters() {
     poState.filterText = '';
@@ -331,11 +466,6 @@ function resetPOFilters() {
     renderPO();
 }
 
-// ====== BIẾN TOÀN CỤC CHO ITEM SELECTOR ======
-let _poSelectedItems = [];
-let _poMode = 'create';
-let _poEditId = null;
-
 // ====== CALLBACK TỪ MODAL CHỌN VẬT TƯ ======
 function poItemSelectorCallback(selectedItems) {
     _poSelectedItems = selectedItems.map(item => ({
@@ -343,7 +473,8 @@ function poItemSelectorCallback(selectedItems) {
         quantity: item.quantity || 1,
         itemName: item.displayName || item.itemName || getItemName(item.itemId),
         itemCode: item.itemCode || getItemCode(item.itemId),
-        unit: item.unit || getItemUnit(item.itemId)
+        unit: item.unit || getItemUnit(item.itemId),
+        model: item.model || getItemModel(item.itemId)
     }));
     renderPOSelectedItems();
 }
@@ -362,11 +493,18 @@ function _renderPOSelectedItemsHTML() {
     }
     let html = '';
     items.forEach((item, index) => {
+        const modelDisplay = item.model ? ` (${item.model})` : '';
+        const unitDisplay = item.unit ? ` [${item.unit}]` : '';
         html += `
-            <div style="display:flex; justify-content:space-between; align-items:center; padding:4px 8px; margin-bottom:4px; background:#f0f4f8; border-radius:4px;">
-                <span><strong>${item.itemCode}</strong> - ${item.itemName} (${item.unit})</span>
-                <span>Số lượng: <input type="number" class="po-item-qty" data-index="${index}" value="${item.quantity}" style="width:70px; padding:4px; border:1px solid #ccc; border-radius:4px;" min="0.01" step="0.01"></span>
-                <button type="button" class="btn btn-sm btn-danger" onclick="removePOItem(${index})"><i class="fas fa-times"></i></button>
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 8px; margin-bottom:4px; background:#f8fafc; border-radius:4px; border:1px solid #e2e8f0;">
+                <span style="flex:1; font-size:14px;">
+                    <strong>${item.itemCode}</strong> - ${item.itemName}${modelDisplay}${unitDisplay}
+                </span>
+                <span style="display:flex; align-items:center; gap:6px;">
+                    <span style="font-size:13px; color:#555;">SL:</span>
+                    <input type="number" class="po-item-qty" data-index="${index}" value="${item.quantity}" style="width:70px; padding:4px; border:1px solid #ccc; border-radius:4px;" min="0.01" step="0.01">
+                </span>
+                <button type="button" class="btn btn-sm btn-danger" onclick="removePOItem(${index})" style="margin-left:8px;"><i class="fas fa-times"></i></button>
             </div>
         `;
     });
@@ -405,11 +543,15 @@ function openItemSelectorForPO() {
 // ====== TẠO PO MỚI ======
 async function showCreatePOModal(pr = null) {
     try {
-        const projects = await api.getProjects();
+        const [projects, vendors, items] = await Promise.all([
+            api.getProjects(),
+            api.getVendors(),
+            api.getItems()
+        ]);
+
         const projectOpts = projects.map(p => 
             `<option value="${p.code}" ${pr && p.code === pr.projectCode ? 'selected' : ''}>${p.code} - ${p.name}</option>`
         ).join('');
-        const vendors = await api.getVendors();
         const vendorOpts = vendors.map(v => 
             `<option value="${v.code}" ${pr && v.code === pr.vendorCode ? 'selected' : ''}>${v.code} - ${v.name}</option>`
         ).join('');
@@ -418,20 +560,35 @@ async function showCreatePOModal(pr = null) {
         if (pr && pr.items) {
             try {
                 const items = typeof pr.items === 'string' ? JSON.parse(pr.items) : pr.items;
-                initialItems = items.map(it => ({
-                    itemId: it.itemId,
-                    quantity: it.quantity || 1,
-                    itemName: it.displayName || getItemName(it.itemId),
-                    itemCode: getItemCode(it.itemId),
-                    unit: getItemUnit(it.itemId)
-                }));
+                initialItems = items.map(it => {
+                    const item = items.find(i => i.id === it.itemId);
+                    return {
+                        itemId: it.itemId,
+                        quantity: it.quantity || 1,
+                        itemName: it.displayName || (item ? item.name : getItemName(it.itemId)),
+                        itemCode: item ? item.code : getItemCode(it.itemId),
+                        unit: item ? item.unit : getItemUnit(it.itemId),
+                        model: item ? item.model : ''
+                    };
+                });
             } catch (e) {}
         }
         _poSelectedItems = initialItems;
         _poMode = 'create';
         _poEditId = null;
 
+        let prInfoHtml = '';
+        if (pr) {
+            prInfoHtml = `
+                <div style="background:#f0fdf4; padding:12px; border-radius:6px; border:1px solid #bbf7d0; margin-bottom:12px;">
+                    <strong><i class="fas fa-file-invoice"></i> PR nguồn:</strong> ${pr.code}
+                    <span style="margin-left:16px;"><strong>Dự án:</strong> ${pr.projectName || pr.projectCode}</span>
+                </div>
+            `;
+        }
+
         showModal('Tạo Purchase Order (PO)', `
+            ${prInfoHtml}
             <div class="form-group"><label>Dự án</label>
                 <select id="f-po-project">${projectOpts}</select>
             </div>
@@ -446,10 +603,11 @@ async function showCreatePOModal(pr = null) {
                 <div id="po-selected-items-container" style="margin-top:8px; max-height:200px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:6px; padding:8px;">
                     ${_renderPOSelectedItemsHTML()}
                 </div>
+                ${pr ? '<div style="font-size:13px; color:#888; margin-top:4px;"><i class="fas fa-info-circle"></i> Vật tư được lấy từ PR. Bạn có thể điều chỉnh số lượng.</div>' : ''}
             </div>
             <div class="form-group"><label>Ghi chú</label><textarea id="f-po-note" rows="2">${pr ? pr.note || '' : ''}</textarea></div>
             <div class="modal-actions">
-                <button class="btn" onclick="savePOManual()">Lưu</button>
+                <button class="btn" onclick="savePOManual()"><i class="fas fa-save"></i> Lưu</button>
                 <button class="btn btn-danger" onclick="closeModal()">Hủy</button>
             </div>
         `);
@@ -460,6 +618,43 @@ async function showCreatePOModal(pr = null) {
     } catch (error) {
         showError('Lỗi tải dữ liệu: ' + error.message);
     }
+}
+
+// ====== TẠO PO TỪ PR ======
+async function showCreatePOFromPRModal(prId) {
+    if (!hasPermission('po.create')) {
+        showWarning('Bạn không có quyền tạo PO!');
+        return;
+    }
+
+    try {
+        const prs = await api.getPRs();
+        const pr = prs.find(p => p.id === prId);
+        if (!pr) {
+            showError('Không tìm thấy PR!');
+            return;
+        }
+        await showCreatePOModal(pr);
+    } catch (error) {
+        showError('Lỗi tải dữ liệu: ' + error.message);
+    }
+}
+
+// ====== TẠO GRN TỪ PO ======
+function showAddGRNFromPO(poId) {
+    if (!hasPermission('grn.create')) {
+        showWarning('Bạn không có quyền tạo GRN!');
+        return;
+    }
+    // Chuyển sang tab kho và mở modal tạo GRN với PO được chọn
+    window.navigateTo('warehouse');
+    setTimeout(() => {
+        if (typeof showAddGRN === 'function') {
+            showAddGRN(poId);
+        } else {
+            showError('Chức năng tạo GRN chưa sẵn sàng');
+        }
+    }, 300);
 }
 
 // ====== LƯU PO ======
@@ -509,92 +704,6 @@ async function savePOManual() {
     }
 }
 
-// ====== XEM CHI TIẾT PO ======
-async function viewPO(id) {
-    try {
-        let po = null;
-        const allPOs = await api.getPOs();
-        po = allPOs.find(p => p.id === id);
-        if (!po) {
-            showError('Không tìm thấy PO!');
-            return;
-        }
-
-        let items = [];
-        try {
-            if (po.items) {
-                items = typeof po.items === 'string' ? JSON.parse(po.items) : po.items;
-            }
-        } catch (e) { items = []; }
-
-        const itemsHtml = items.map(it => `
-            <tr>
-                <td>${getItemCode(it.itemId)}</td>
-                <td>${it.displayName || getItemName(it.itemId)}</td>
-                <td>${getItemUnit(it.itemId)}</td>
-                <td>${it.quantity}</td>
-            </tr>
-        `).join('');
-
-        let stepsConfig = [
-            { id: 1, label: 'Phòng Kế hoạch' },
-            { id: 2, label: 'Phòng Dự án' },
-            { id: 3, label: 'Tổng Giám đốc' }
-        ];
-        if (po.workflowId) {
-            try {
-                const wf = await api.getWorkflowById ? await api.getWorkflowById(po.workflowId) : null;
-                if (wf && wf.steps) {
-                    const steps = JSON.parse(wf.steps);
-                    stepsConfig = steps.map(s => ({
-                        id: s.step || s.id,
-                        label: s.label || `Bước ${s.step || s.id}`
-                    }));
-                }
-            } catch (e) {
-                console.warn('Không lấy được workflow steps:', e);
-            }
-        }
-
-        const approvalHtml = renderApprovalProgress(po.status, po.approvalStep || 1, stepsConfig);
-        const projectId = getProjectIdByCode(po.projectCode);
-        const projectLink = projectId ?
-            `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="closeModal(); viewProject(${projectId});">${po.projectName || po.projectCode || '--'}</span>` :
-            (po.projectName || po.projectCode || '--');
-        const totalAmount = items.reduce((sum, it) => sum + ((it.price || 0) * (it.quantity || 0)), 0);
-
-        const itemsTable = `
-            <div class="table-responsive">
-                <table>
-                    <thead><tr><th>Mã</th><th>Tên</th><th>ĐVT</th><th>Số lượng</th></tr></thead>
-                    <tbody>${itemsHtml}</tbody>
-                </table>
-            </div>
-        `;
-
-        showModal('Chi tiết PO', `
-            <div class="detail-grid">
-                <div><span class="label">Mã PO:</span> <span class="value">${po.code || '--'}</span></div>
-                <div><span class="label">Ngày tạo:</span> <span class="value">${po.createdAt || ''}</span></div>
-                <div><span class="label">PR liên quan:</span> <span class="value">${po.prId ? 'PR-'+String(po.prId).padStart(3,'0') : ''}</span></div>
-                <div><span class="label">Dự án:</span> <span class="value">${projectLink}</span></div>
-                <div><span class="label">Nhà cung cấp:</span> <span class="value">${po.vendorName || po.vendorCode || '--'}</span></div>
-                <div><span class="label">Trạng thái:</span> <span class="value">${getStatusBadge(po.status)}</span></div>
-                ${totalAmount > 0 ? `<div><span class="label">Tổng tiền:</span> <span class="value">${totalAmount.toLocaleString()} VND</span></div>` : ''}
-                <div style="grid-column:1/-1;"><span class="label">Tiến độ duyệt:</span><br>${approvalHtml}</div>
-                <div style="grid-column:1/-1;"><span class="label">Danh sách vật tư:</span><br>${itemsTable}</div>
-                <div style="grid-column:1/-1;"><span class="label">Ghi chú:</span> <span class="value">${po.note || ''}</span></div>
-            </div>
-            <div class="modal-actions">
-                <button class="btn btn-info" onclick="printPO(${po.id}); closeModal();"><i class="fas fa-print"></i> In phiếu</button>
-                <button class="btn btn-danger" onclick="closeModal()">Đóng</button>
-            </div>
-        `);
-    } catch (error) {
-        showError('Lỗi khi tải chi tiết PO: ' + error.message);
-    }
-}
-
 // ====== SỬA PO ======
 async function editPO(id) {
     if (!hasPermission('po.edit')) {
@@ -632,7 +741,8 @@ async function editPO(id) {
                     quantity: it.quantity || 1,
                     itemName: it.displayName || getItemName(it.itemId),
                     itemCode: getItemCode(it.itemId),
-                    unit: getItemUnit(it.itemId)
+                    unit: getItemUnit(it.itemId),
+                    model: getItemModel(it.itemId)
                 }));
             }
         } catch (e) {}
@@ -671,7 +781,6 @@ async function editPO(id) {
     }
 }
 
-// ====== CẬP NHẬT PO ======
 async function updatePO(id) {
     const projectCode = document.getElementById('f-po-project').value;
     const vendorCode = document.getElementById('f-po-vendor').value;
@@ -713,7 +822,7 @@ async function updatePO(id) {
     }
 }
 
-// ====== GỬI DUYỆT ======
+// ====== SUBMIT ======
 async function submitPO(id) {
     if (!hasPermission('po.submit')) {
         showWarning('Bạn không có quyền gửi duyệt PO!');
@@ -728,7 +837,7 @@ async function submitPO(id) {
     }
 }
 
-// ====== DUYỆT PO ======
+// ====== APPROVE ======
 async function approvePO(id) {
     if (!hasPermission('po.approve')) {
         showWarning('Bạn không có quyền duyệt PO!');
@@ -743,7 +852,7 @@ async function approvePO(id) {
     }
 }
 
-// ====== TỪ CHỐI PO ======
+// ====== REJECT ======
 async function rejectPO(id) {
     if (!hasPermission('po.reject')) {
         showWarning('Bạn không có quyền từ chối PO!');
@@ -758,7 +867,7 @@ async function rejectPO(id) {
     }
 }
 
-// ====== XÓA PO ======
+// ====== DELETE ======
 async function deletePO(id) {
     if (!hasPermission('po.delete')) {
         showWarning('Bạn không có quyền xóa PO!');
@@ -772,22 +881,6 @@ async function deletePO(id) {
     } catch (error) {
         showError('Lỗi khi xóa PO: ' + error.message);
     }
-}
-
-// ====== TẠO PO TỪ PR ======
-function showCreatePOFromPRModal(prId) {
-    if (!hasPermission('po.create')) {
-        showWarning('Bạn không có quyền tạo PO!');
-        return;
-    }
-    api.getPRs().then(prs => {
-        const pr = prs.find(p => p.id === prId);
-        if (pr) {
-            showCreatePOModal(pr);
-        } else {
-            showError('Không tìm thấy PR');
-        }
-    }).catch(err => showError('Lỗi tải PR: ' + err.message));
 }
 
 // ====== IN PHIẾU PO ======
@@ -809,6 +902,7 @@ window.getPOActions = getPOActions;
 window.savePOManual = savePOManual;
 window.showCreatePOFromPRModal = showCreatePOFromPRModal;
 window.showCreatePOModal = showCreatePOModal;
+window.showAddGRNFromPO = showAddGRNFromPO;
 window.resetPOFilters = resetPOFilters;
 
 // Item selector functions
@@ -817,4 +911,4 @@ window.renderPOSelectedItems = renderPOSelectedItems;
 window.removePOItem = removePOItem;
 window.openItemSelectorForPO = openItemSelectorForPO;
 
-console.log('✅ PO module updated with multi-field search, sort, and advanced filters.');
+console.log('✅ PO module updated with approval level and canApprove.');

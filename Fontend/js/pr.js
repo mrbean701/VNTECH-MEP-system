@@ -25,8 +25,8 @@ let _prSelectedItems = [];
 let _prMode = 'create';
 let _prEditId = null;
 
-// ====== HÀM LẤY ACTION ======
-function getPRActions(pr) {
+// ====== HÀM LẤY ACTION (CÓ KIỂM TRA canApprove) ======
+function getPRActions(pr, statuses) {
     const user = getUser();
     let actions = '';
 
@@ -55,15 +55,23 @@ function getPRActions(pr) {
         actions += ` <button class="btn btn-success btn-sm" onclick="submitPR(${pr.id})">Xác nhận</button>`;
     }
 
+    // ✅ Kiểm tra điều kiện duyệt
     const pendingStatuses = ['PENDING', 'PENDING_PLANNING', 'PENDING_PROJECT', 'PENDING_CEO', 
                              'PLANNING_APPROVED', 'PROJECT_APPROVED'];
-    const canApprove = hasPermission('pr.approve') && pendingStatuses.includes(pr.status);
-    if (canApprove) {
-        actions += ` <button class="btn btn-success btn-sm" onclick="approvePR(${pr.id})">Duyệt</button>`;
-        actions += ` <button class="btn btn-danger btn-sm" onclick="rejectPR(${pr.id})">Từ chối</button>`;
+    if (pendingStatuses.includes(pr.status)) {
+        // Lấy thông tin step hiện tại từ workflow
+        const currentStep = pr.approvalStep || 1;
+        // Lấy permissionKey và departmentId từ workflow (cần parse từ steps)
+        // Ở đây tôi giả định lấy từ pr.workflowId và gọi API
+        // Thực tế nên cache workflow steps để tránh gọi API nhiều
+        const canApprovePR = canApprove(currentStep, 'pr.approve', null);
+        if (canApprovePR) {
+            actions += ` <button class="btn btn-success btn-sm" onclick="approvePR(${pr.id})">Duyệt</button>`;
+            actions += ` <button class="btn btn-danger btn-sm" onclick="rejectPR(${pr.id})">Từ chối</button>`;
+        }
     }
 
-    const canCreatePO = hasPermission('po.create') && pr.status === 'APPROVED';
+            const canCreatePO = hasPermission('po.create') && pr.status === 'APPROVED' && getUserApprovalLevel() === 0;
     if (canCreatePO) {
         actions += ` <button class="btn btn-warning btn-sm" onclick="createPOFromPR(${pr.id})">Tạo PO</button>`;
     }
@@ -71,18 +79,19 @@ function getPRActions(pr) {
     return actions || '-';
 }
 
-// ====== HÀM FILTER DỮ LIỆU ======
+// ====== HÀM FILTER DỮ LIỆU PR ======
 function filterPRData(prs, projects, vendors) {
     const { filterText, statusFilter, projectFilter, vendorFilter } = prState;
     const keyword = filterText.toLowerCase().trim();
 
     return prs.filter(pr => {
+        // Lọc theo từ khóa (mã, dự án, NCC, vật tư)
         let matchKeyword = true;
         if (keyword) {
             const codeMatch = (pr.code || '').toLowerCase().includes(keyword);
             const projectNameMatch = (pr.projectName || '').toLowerCase().includes(keyword);
             const projectCodeMatch = (pr.projectCode || '').toLowerCase().includes(keyword);
-            const vendorNameMatch = (pr.vendorName || '').toLowerCase().includes(keyword);
+                        const vendorNameMatch = (pr.vendorName || '').toLowerCase().includes(keyword);
             const vendorCodeMatch = (pr.vendorCode || '').toLowerCase().includes(keyword);
 
             let itemsMatch = false;
@@ -98,29 +107,27 @@ function filterPRData(prs, projects, vendors) {
                 }
             } catch (e) {}
 
-            matchKeyword = codeMatch || projectNameMatch || projectCodeMatch || 
+            matchKeyword = codeMatch || projectNameMatch || projectCodeMatch ||
                            vendorNameMatch || vendorCodeMatch || itemsMatch;
         }
 
+        // Lọc theo status
         const matchStatus = statusFilter ? pr.status === statusFilter : true;
 
+        // Lọc theo dự án
         let matchProject = true;
         if (projectFilter) {
             const selectedProject = projects.find(p => p.code === projectFilter || p.id === parseInt(projectFilter));
-            if (selectedProject) {
-                matchProject = pr.projectCode === selectedProject.code;
-            } else {
-                matchProject = false;
-            }
+            matchProject = selectedProject ? pr.projectCode === selectedProject.code : false;
         }
 
+        // Lọc theo nhà cung cấp
         let matchVendor = true;
         if (vendorFilter) {
-            const selectedVendor = vendors.find(v => v.code === vendorFilter || v.id === parseInt(vendorFilter));
-            if (selectedVendor) {
-                matchVendor = pr.vendorCode === selectedVendor.code;
-            } else {
-                matchVendor = false;
+            const selectedVendor = vendors.find(v => v.code === vendorFilter || v.name === vendorFilter);
+            matchVendor = pr.vendorCode === vendorFilter || pr.vendorName === vendorFilter;
+            if (!matchVendor && selectedVendor) {
+                matchVendor = pr.vendorCode === selectedVendor.code || pr.vendorName === selectedVendor.name;
             }
         }
 
@@ -128,7 +135,7 @@ function filterPRData(prs, projects, vendors) {
     });
 }
 
-// ====== HÀM SORT DỮ LIỆU ======
+// ====== HÀM SORT DỮ LIỆU PR ======
 function sortPRData(data) {
     const { sortBy, sortOrder } = prState;
     const order = sortOrder === 'asc' ? 1 : -1;
@@ -147,7 +154,7 @@ function sortPRData(data) {
             valA = new Date(a.createdAt || 0);
             valB = new Date(b.createdAt || 0);
         } else if (sortBy === 'status') {
-            const statusOrder = { 'DRAFT': 0, 'PENDING': 1, 'PENDING_PLANNING': 2, 'PLANNING_APPROVED': 3, 'PENDING_PROJECT': 4, 'PROJECT_APPROVED': 5, 'PENDING_CEO': 6, 'APPROVED': 7, 'REJECTED': 8 };
+            const statusOrder = { 'DRAFT': 0, 'PENDING': 1, 'APPROVED': 2, 'REJECTED': 3 };
             valA = statusOrder[a.status] || 0;
             valB = statusOrder[b.status] || 0;
         }
@@ -254,7 +261,7 @@ async function renderPR(page = null) {
             } catch (e) { itemsStr = 'Lỗi parse'; }
 
             const statusBadge = getStatusBadgeWithInfo(p.status, statuses);
-            const actions = getPRActions(p);
+            const actions = getPRActions(p, statuses);
             const projectId = getProjectIdByCode(p.projectCode);
             const projectLink = projectId ?
                 `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="viewProject(${projectId})">${p.projectName || p.projectCode || '--'}</span>` :
@@ -384,6 +391,7 @@ async function viewPR(id) {
             `;
         }).join('');
 
+        // Lấy workflow steps
         let stepsConfig = [
             { id: 1, label: 'Phòng Kế hoạch' },
             { id: 2, label: 'Phòng Dự án' },
@@ -404,7 +412,7 @@ async function viewPR(id) {
             }
         }
 
-        const currentStep = prData.approvalStep || 1;
+        const currentStep = prData.approvalStep !== undefined && prData.approvalStep !== null ? prData.approvalStep : 1;
         const approvalHtml = renderApprovalProgress(prData.status, currentStep, stepsConfig, statuses);
 
         const projectId = getProjectIdByCode(prData.projectCode);
@@ -425,8 +433,16 @@ async function viewPR(id) {
             </div>
         `;
 
-        const totalAmount = itemsList.reduce((sum, it) => sum + ((it.price || 0) * (it.quantity || 0)), 0);
+                        const totalAmount = itemsList.reduce((sum, it) => sum + ((it.price || 0) * (it.quantity || 0)), 0);
         const statusBadge = getStatusBadgeWithInfo(prData.status, statuses);
+
+        // Nút tạo PO ở chi tiết PR: chỉ cho bộ phận mua (level 0), khóa khi PR đã duyệt
+        const canMakePO = prData.status === 'APPROVED'
+            && hasPermission('po.create')
+            && getUserApprovalLevel() === 0;
+        const poBtnHtml = canMakePO
+            ? ` <button class="btn btn-warning btn-sm" onclick="createPOFromPR(${prData.id}); closeModal();">Tạo PO</button>`
+            : '';
 
         showModal('Chi tiết PR', `
             <div class="detail-grid">
@@ -443,6 +459,7 @@ async function viewPR(id) {
             </div>
             <div class="modal-actions">
                 <button class="btn btn-info" onclick="printPR(${prData.id}); closeModal();"><i class="fas fa-print"></i> In phiếu</button>
+                ${poBtnHtml}
                 <button class="btn btn-danger" onclick="closeModal()">Đóng</button>
             </div>
         `);
@@ -803,7 +820,7 @@ async function updatePR(id) {
     }
 }
 
-// ====== GỬI DUYỆT ======
+// ====== SUBMIT ======
 async function submitPR(id) {
     if (!hasPermission('pr.submit')) {
         showWarning('Bạn không có quyền gửi duyệt PR!');
@@ -818,7 +835,7 @@ async function submitPR(id) {
     }
 }
 
-// ====== DUYỆT PR ======
+// ====== APPROVE ======
 async function approvePR(id) {
     if (!hasPermission('pr.approve')) {
         showWarning('Bạn không có quyền duyệt PR!');
@@ -833,7 +850,7 @@ async function approvePR(id) {
     }
 }
 
-// ====== TỪ CHỐI PR ======
+// ====== REJECT ======
 async function rejectPR(id) {
     if (!hasPermission('pr.reject')) {
         showWarning('Bạn không có quyền từ chối PR!');
@@ -848,7 +865,7 @@ async function rejectPR(id) {
     }
 }
 
-// ====== XÓA PR ======
+// ====== DELETE ======
 async function deletePR(id) {
     if (!hasPermission('pr.delete')) {
         showWarning('Bạn không có quyền xóa PR!');
@@ -908,4 +925,4 @@ window.renderPRSelectedItems = renderPRSelectedItems;
 window.removePRItem = removePRItem;
 window.openItemSelectorForPR = openItemSelectorForPR;
 
-console.log('✅ PR module updated with status synchronization.');
+console.log('✅ PR module updated with approval level and canApprove.');

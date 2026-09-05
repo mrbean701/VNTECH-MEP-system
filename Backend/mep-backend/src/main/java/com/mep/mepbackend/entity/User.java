@@ -46,13 +46,16 @@ public class User {
     @Column(length = 100)
     private String education;
 
+    // ✅ Thêm field approvalLevel
+    @Column(name = "approval_level", nullable = false)
+    private Integer approvalLevel = 0;
+
     @Column(name = "created_at")
     private LocalDate createdAt;
 
     @Column(name = "updated_at")
     private LocalDate updatedAt;
 
-    // ✅ Trường tạm thời (không lưu database)
     @Transient
     private Boolean grantAllDeptPermissions;
 }

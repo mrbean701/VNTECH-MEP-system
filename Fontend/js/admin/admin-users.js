@@ -48,6 +48,7 @@ function renderUsersTab() {
                         <th>Role</th>
                         <th>Phòng ban</th>
                         <th>Chức vụ</th>
+                        <th>Cấp duyệt</th>
                         <th>Điện thoại</th>
                         <th>Hành động</th>
                     </tr>
@@ -66,7 +67,7 @@ function renderUsersTab() {
     });
 
     if (!filtered.length) {
-        html += `<tr><td colspan="8" style="text-align:center; color:#999;">Không có người dùng nào</td></tr>`;
+        html += `<tr><td colspan="9" style="text-align:center; color:#999;">Không có người dùng nào</td></tr>`;
     }
 
     for (const u of filtered) {
@@ -82,6 +83,7 @@ function renderUsersTab() {
                 <td>${roleLabel}</td>
                 <td>${deptName}</td>
                 <td>${u.position || '--'}</td>
+                <td>${u.approvalLevel ?? 0}</td>
                 <td>${u.phone || '--'}</td>
                 <td>
                     <button class="btn btn-info btn-sm" onclick="viewUser(${u.id})"><i class="fas fa-eye"></i></button>
@@ -241,6 +243,7 @@ async function viewUser(id, returnToProjectId = null) {
             <div><span class="label">Role:</span> <span class="value">${roleLabel}</span></div>
             <div><span class="label">Phòng ban:</span> <span class="value">${dept ? dept.name : (u.department || '--')}</span></div>
             <div><span class="label">Chức vụ:</span> <span class="value">${u.position || '--'}</span></div>
+            <div><span class="label">Cấp duyệt:</span> <span class="value">${u.approvalLevel ?? 0}</span></div>
             <div><span class="label">Điện thoại:</span> <span class="value">${u.phone || '--'}</span></div>
             <div><span class="label">Địa chỉ:</span> <span class="value">${u.address || '--'}</span></div>
             <div><span class="label">Trình độ học vấn:</span> <span class="value">${u.education || '--'}</span></div>
@@ -407,7 +410,19 @@ function showAddUserModal() {
                     <option value="">-- Chọn chức vụ --</option>
                     ${positionOpts}
                 </select>
+            </div>            <div class="form-group">
+                <label>Cấp duyệt (Approval Level)</label>
+                <select id="f-admin-approval-level">
+                    <option value="1">1 - Duyệt bước 1</option>
+                    <option value="2">2 - Duyệt đến bước 2</option>
+                    <option value="3">3 - Duyệt đến bước 3</option>
+                    <option value="0" selected>0 - Không duyệt (chỉ thao tác đơn)</option>
+                </select>
+                <div style="font-size:12px; color:#666; margin-top:4px;">
+                    <i class="fas fa-info-circle"></i> Người dùng chỉ duyệt được bước khi Cấp duyệt ≥ bước hiện tại.
+                </div>
             </div>
+
             <!-- Checkbox gán quyền -->
             <div id="grant-permission-group" style="display:none; padding:8px 12px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; margin-bottom:12px;">
                 <label style="display:flex; align-items:center; gap:8px; font-weight:500; cursor:pointer;">
@@ -453,6 +468,13 @@ function showAddUserModal() {
 
         positionSelect.addEventListener('change', toggleGrantPermission);
         setTimeout(toggleGrantPermission, 100);
+    // Preselect cap duyet khi sua (add: khong co u nen giu mac dinh 0)
+    try {
+        const __alSel = document.getElementById('f-admin-approval-level');
+        if (__alSel && typeof u !== 'undefined' && u && u.approvalLevel != null) {
+            __alSel.value = String(u.approvalLevel);
+        }
+    } catch (e) {}
     });
 }
 
@@ -466,6 +488,7 @@ async function saveUser() {
     const phone = document.getElementById('f-admin-phone').value.trim();
     const address = document.getElementById('f-admin-address').value.trim();
     const education = document.getElementById('f-admin-education').value.trim();
+    const approvalLevel = parseInt(document.getElementById('f-admin-approval-level')?.value) || 0;
     const grantAllDeptPermissions = document.getElementById('f-admin-grant-permissions')?.checked || false;
 
     if (!name || !email) {
@@ -478,8 +501,8 @@ async function saveUser() {
     }
 
     try {
-        const newUser = { 
-            name, email, password, role, departmentId, position, phone, address, education,
+                const newUser = { 
+            name, email, password, role, departmentId, position, phone, address, education, approvalLevel,
             grantAllDeptPermissions
         };
         await api.createUser(newUser);
@@ -552,7 +575,19 @@ async function editUser(id) {
                 <option value="">-- Chọn chức vụ --</option>
                 ${positionOpts}
             </select>
-        </div>
+        </div>            <div class="form-group">
+                <label>Cấp duyệt (Approval Level)</label>
+                <select id="f-admin-approval-level">
+                    <option value="1">1 - Duyệt bước 1</option>
+                    <option value="2">2 - Duyệt đến bước 2</option>
+                    <option value="3">3 - Duyệt đến bước 3</option>
+                    <option value="0" selected>0 - Không duyệt (chỉ thao tác đơn)</option>
+                </select>
+                <div style="font-size:12px; color:#666; margin-top:4px;">
+                    <i class="fas fa-info-circle"></i> Người dùng chỉ duyệt được bước khi Cấp duyệt ≥ bước hiện tại.
+                </div>
+            </div>
+
         <!-- Checkbox gán quyền -->
         <div id="grant-permission-group" style="display:none; padding:8px 12px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; margin-bottom:12px;">
             <label style="display:flex; align-items:center; gap:8px; font-weight:500; cursor:pointer;">
@@ -597,6 +632,13 @@ async function editUser(id) {
 
     positionSelect.addEventListener('change', toggleGrantPermission);
     setTimeout(toggleGrantPermission, 100);
+    // Preselect cap duyet khi sua (add: khong co u nen giu mac dinh 0)
+    try {
+        const __alSel = document.getElementById('f-admin-approval-level');
+        if (__alSel && typeof u !== 'undefined' && u && u.approvalLevel != null) {
+            __alSel.value = String(u.approvalLevel);
+        }
+    } catch (e) {}
 }
 
 async function updateUser(id) {
@@ -609,6 +651,7 @@ async function updateUser(id) {
     const phone = document.getElementById('f-admin-phone').value.trim();
     const address = document.getElementById('f-admin-address').value.trim();
     const education = document.getElementById('f-admin-education').value.trim();
+    const approvalLevel = parseInt(document.getElementById('f-admin-approval-level')?.value) || 0;
     const grantAllDeptPermissions = document.getElementById('f-admin-grant-permissions')?.checked || false;
 
     if (!name || !email) {
@@ -621,8 +664,8 @@ async function updateUser(id) {
     }
 
     try {
-        const updatedUser = { 
-            name, email, role, departmentId, position, phone, address, education,
+                const updatedUser = { 
+            name, email, role, departmentId, position, phone, address, education, approvalLevel,
             grantAllDeptPermissions
         };
         if (password) updatedUser.password = password;

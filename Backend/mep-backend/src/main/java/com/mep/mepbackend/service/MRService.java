@@ -3,7 +3,6 @@ package com.mep.mepbackend.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mep.mepbackend.entity.ApprovalHistory;
 import com.mep.mepbackend.entity.MR;
-import com.mep.mepbackend.entity.Status;
 import com.mep.mepbackend.entity.User;
 import com.mep.mepbackend.entity.Workflow;
 import com.mep.mepbackend.exception.ResourceNotFoundException;
@@ -27,12 +26,20 @@ public class MRService {
     private final ApprovalHistoryRepository approvalHistoryRepository;
     private final ObjectMapper objectMapper;
     private final WorkflowService workflowService;
-    private final StatusService statusService; // ✅ Đã thêm
+    private final StatusService statusService;
     private final CurrentUserUtil currentUserUtil;
 
-    private static final List<String> PENDING_STATUSES = Arrays.asList("PENDING", "PENDING_PLANNING", "PENDING_PROJECT", "PENDING_CEO");
+            private static final List<String> PENDING_STATUSES = Arrays.asList("PENDING", "PENDING_PLANNING", "PENDING_PROJECT", "PENDING_CEO");
 
-    // ===== HELPERS =====
+    // Các trạng thái "kết thúc / hoàn tất" không được tự áp dụng khi vẫn còn bước duyệt phía sau
+    private static final List<String> FINAL_STATUS_CODES = Arrays.asList(
+            "APPROVED", "COMPLETED", "COMPLETE", "CONFIRMED", "RECEIVED", "QC_CHECKED"
+    );
+
+    private static boolean isFinalStatusCode(String code) {
+        return code != null && FINAL_STATUS_CODES.contains(code);
+    }
+
     private String generateCode(String prefix) {
         long count = mrRepository.count() + 1;
         String code = prefix + "-" + String.format("%03d", count);
@@ -47,7 +54,6 @@ public class MRService {
         return PENDING_STATUSES.contains(status);
     }
 
-    // ===== GETTERS =====
     public List<MR> getAll() {
         return mrRepository.findAll();
     }
@@ -70,7 +76,6 @@ public class MRService {
         return mrRepository.findByStatus(status);
     }
 
-    // ===== CREATE =====
     @Transactional
     public MR create(MR mr) {
         if (!currentUserUtil.hasPermission("mr.create")) {
@@ -93,7 +98,6 @@ public class MRService {
         return mrRepository.save(mr);
     }
 
-    // ===== UPDATE =====
     @Transactional
     public MR update(Long id, MR details) {
         MR mr = getById(id);
@@ -122,7 +126,7 @@ public class MRService {
         return mrRepository.save(mr);
     }
 
-    // ===== SUBMIT =====
+    // ✅ SUBMIT - Bắt đầu tính currentStep
     @Transactional
     public void submit(Long id) {
         MR mr = getById(id);
@@ -139,33 +143,15 @@ public class MRService {
             throw new RuntimeException("Workflow không có bước duyệt nào");
         }
 
-        // Nếu workflow có 1 bước → tự động duyệt luôn
-        if (steps.size() == 1) {
-            if (!currentUserUtil.hasPermission("mr.approve")) {
-                throw new RuntimeException("Bạn không có quyền duyệt MR");
-            }
-
-            Map<String, Object> firstStep = steps.get(0);
-            String statusCode = (String) firstStep.get("statusCode");
-            mr.setStatus(statusCode != null && !statusCode.isEmpty() ? statusCode : "PENDING");
-            mr.setApprovalStep(1);
-            mr.setUpdatedAt(LocalDate.now());
-            mrRepository.save(mr);
-
-            approve(id);
-            return;
-        }
-
-        // Nhiều bước → chuyển sang PENDING bước 1
-        Map<String, Object> firstStep = steps.get(0);
-        String statusCode = (String) firstStep.get("statusCode");
-        mr.setStatus(statusCode != null && !statusCode.isEmpty() ? statusCode : "PENDING");
+        // ✅ Bắt đầu tính currentStep = 1
         mr.setApprovalStep(1);
+        String statusCode = workflowService.getStatusForStep(wf.getId(), 1);
+        mr.setStatus(statusCode != null && !statusCode.isEmpty() ? statusCode : "PENDING");
         mr.setUpdatedAt(LocalDate.now());
         mrRepository.save(mr);
     }
 
-    // ===== APPROVE =====
+    // ✅ APPROVE
     @Transactional
     public void approve(Long id) {
         MR mr = getById(id);
@@ -184,14 +170,13 @@ public class MRService {
 
         String permissionKey = (String) step.get("permissionKey");
         Long requiredDeptId = step.get("departmentId") != null ? ((Number) step.get("departmentId")).longValue() : null;
-        if (!currentUserUtil.hasPermissionAndDepartment(permissionKey, requiredDeptId)) {
+
+        // ✅ Kiểm tra điều kiện duyệt
+        if (!currentUserUtil.canApproveStep(currentStep, permissionKey, requiredDeptId)) {
             throw new RuntimeException("Bạn không có quyền duyệt bước này");
         }
 
         User currentUser = currentUserUtil.getCurrentUser();
-        if (steps.size() > 1 && currentUser.getId().equals(mr.getCreatedBy())) {
-            throw new RuntimeException("Bạn không thể tự duyệt MR do chính mình tạo");
-        }
 
         ApprovalHistory history = new ApprovalHistory();
         history.setEntityType("MR");
@@ -200,27 +185,24 @@ public class MRService {
         history.setStep(currentStep);
         history.setApproverId(currentUser.getId());
         history.setApproverName(currentUser.getName());
-        history.setStatusBefore(mr.getStatus());
+                history.setStatusBefore(mr.getStatus());
 
+        // ✅ Nếu là bước cuối cùng
         if (currentStep == steps.size()) {
-            // Bước cuối → APPROVED
             mr.setStatus("APPROVED");
-            mr.setApprovalStep(currentStep);
+            mr.setApprovalStep(0); // Kết thúc
         } else {
-            // Chuyển sang bước tiếp theo
+            // ✅ Vẫn còn các bước phía sau → chỉ di chuyển tới bước kế tiếp, không tự "kết thúc" sớm
             mr.setApprovalStep(currentStep + 1);
-            String nextStatusCode = workflowService.getStatusForStep(wf.getId(), currentStep + 1);
 
-            // ✅ Fallback an toàn: nếu không có mapping, lấy status mặc định của MR
-            if (nextStatusCode == null || nextStatusCode.isEmpty()) {
-                try {
-                    Status defaultStatus = statusService.getDefaultStatus("mr");
-                    nextStatusCode = defaultStatus != null ? defaultStatus.getCode() : "PENDING";
-                } catch (Exception e) {
-                    nextStatusCode = "PENDING";
-                }
-            }
-            mr.setStatus(nextStatusCode);
+            int nextStep = currentStep + 1;
+            String nextStatusCode = workflowService.getStatusForStep(wf.getId(), nextStep);
+            // Trạng thái kế tiếp chỉ dùng được khi KHÔNG phải trạng thái kết thúc.
+            // Nếu người quản trị cấu hình code của bước sau bằng code kết thúc (APPROVED, CONFIRMED, ...),
+            // thì phải chuyển về PENDING chờ người duyệt cuối xác nhận, tuyệt đối không áp dụng sớm.
+            boolean lastCodeIsFinal = isFinalStatusCode(nextStatusCode);
+            mr.setStatus((!lastCodeIsFinal && nextStatusCode != null && !nextStatusCode.isEmpty())
+                    ? nextStatusCode : "PENDING");
         }
 
         history.setStatusAfter(mr.getStatus());
@@ -230,7 +212,6 @@ public class MRService {
         mrRepository.save(mr);
     }
 
-    // ===== REJECT =====
     @Transactional
     public void reject(Long id) {
         MR mr = getById(id);
@@ -245,7 +226,6 @@ public class MRService {
         mrRepository.save(mr);
     }
 
-    // ===== DELETE =====
     @Transactional
     public void delete(Long id) {
         MR mr = getById(id);

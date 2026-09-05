@@ -20,34 +20,28 @@ public class UserService {
     private final AuditLogService auditLogService;
     private final PermissionService permissionService;
 
-    // Lấy tất cả user
     public List<User> getAll() {
         return userRepository.findAll();
     }
 
-    // Lấy user theo ID
     public User getById(Long id) {
         return userRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + id));
     }
 
-    // Lấy user theo email
     public User getByEmail(String email) {
         return userRepository.findByEmail(email)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found with email: " + email));
     }
 
-    // Lấy danh sách user theo role
     public List<User> getByRole(String role) {
         return userRepository.findByRole(role);
     }
 
-    // Lấy danh sách user theo departmentId
     public List<User> getByDepartmentId(Long departmentId) {
         return userRepository.findByDepartmentId(departmentId);
     }
 
-    // Tạo user mới
     @Transactional
     public User create(User user) {
         if (userRepository.existsByEmail(user.getEmail())) {
@@ -55,9 +49,14 @@ public class UserService {
         }
         user.setPassword(passwordEncoder.encode(user.getPassword()));
         user.setCreatedAt(LocalDate.now());
+
+        // ✅ Đảm bảo approvalLevel có giá trị mặc định
+        if (user.getApprovalLevel() == null) {
+            user.setApprovalLevel(0);
+        }
+
         User saved = userRepository.save(user);
 
-        // ✅ Nếu có flag, gán toàn bộ quyền phòng ban cho user
         if (user.getGrantAllDeptPermissions() != null &&
                 user.getGrantAllDeptPermissions() &&
                 user.getDepartmentId() != null) {
@@ -69,7 +68,6 @@ public class UserService {
         return saved;
     }
 
-    // Cập nhật user (chỉ admin)
     @Transactional
     public User update(Long id, User userDetails) {
         User user = getById(id);
@@ -81,19 +79,22 @@ public class UserService {
         user.setAddress(userDetails.getAddress());
         user.setPhone(userDetails.getPhone());
         user.setEducation(userDetails.getEducation());
+
+        // ✅ Cập nhật approvalLevel
+        if (userDetails.getApprovalLevel() != null) {
+            user.setApprovalLevel(userDetails.getApprovalLevel());
+        }
+
         if (userDetails.getPassword() != null && !userDetails.getPassword().isEmpty()) {
             user.setPassword(passwordEncoder.encode(userDetails.getPassword()));
         }
         user.setUpdatedAt(LocalDate.now());
         User saved = userRepository.save(user);
 
-        // ✅ Nếu có flag, xóa quyền cũ và gán lại toàn bộ quyền phòng ban mới
         if (userDetails.getGrantAllDeptPermissions() != null &&
                 userDetails.getGrantAllDeptPermissions() &&
                 user.getDepartmentId() != null) {
-            // Xóa tất cả user permission cũ
             permissionService.removeAllUserPermissions(id);
-            // Gán lại toàn bộ quyền từ department mới
             permissionService.grantAllDepartmentPermissionsToUser(id, user.getDepartmentId());
         }
 
@@ -102,7 +103,6 @@ public class UserService {
         return saved;
     }
 
-    // Cập nhật hồ sơ cá nhân
     @Transactional
     public User updateProfile(Long userId, User details) {
         User user = getById(userId);
@@ -117,11 +117,9 @@ public class UserService {
         return saved;
     }
 
-    // Xóa user
     @Transactional
     public void delete(Long id) {
         User user = getById(id);
-        // Xóa tất cả user permission khi xóa user
         permissionService.removeAllUserPermissions(id);
         userRepository.delete(user);
         auditLogService.log("DELETE", "USER", String.valueOf(id),

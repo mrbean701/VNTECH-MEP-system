@@ -1,24 +1,18 @@
 package com.mep.mepbackend.service;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.mep.mepbackend.entity.ApprovalHistory;
-import com.mep.mepbackend.entity.PR;
-import com.mep.mepbackend.entity.Status;
-import com.mep.mepbackend.entity.User;
-import com.mep.mepbackend.entity.Workflow;
+import com.mep.mepbackend.entity.*;
 import com.mep.mepbackend.exception.ResourceNotFoundException;
-import com.mep.mepbackend.repository.ApprovalHistoryRepository;
-import com.mep.mepbackend.repository.MRRepository;
-import com.mep.mepbackend.repository.PRRepository;
+import com.mep.mepbackend.repository.*;
 import com.mep.mepbackend.util.CurrentUserUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -26,10 +20,11 @@ public class PRService {
 
     private final PRRepository prRepository;
     private final MRRepository mrRepository;
+    private final PORepository poRepository;
     private final ApprovalHistoryRepository approvalHistoryRepository;
     private final ObjectMapper objectMapper;
-    private final WorkflowService workflowService;
-    private final StatusService statusService; // ✅ Đã thêm
+        private final WorkflowService workflowService;
+    private final StatusService statusService;
     private final CurrentUserUtil currentUserUtil;
 
     private static final List<String> PENDING_STATUSES = Arrays.asList(
@@ -37,7 +32,15 @@ public class PRService {
             "PLANNING_APPROVED", "PROJECT_APPROVED"
     );
 
-    // ===== HELPERS =====
+    // Các trạng thái "kết thúc / hoàn tất" không được tự áp dụng khi vẫn còn bước duyệt phía sau
+    private static final java.util.Set<String> FINAL_STATUS_CODES = new java.util.HashSet<>(Arrays.asList(
+            "APPROVED", "COMPLETED", "COMPLETE", "CONFIRMED", "RECEIVED", "QC_CHECKED"
+    ));
+
+    private static boolean isFinalStatusCode(String code) {
+        return code != null && FINAL_STATUS_CODES.contains(code);
+    }
+
     private String generateCode(String prefix) {
         long count = prRepository.count() + 1;
         String code = prefix + "-" + String.format("%03d", count);
@@ -50,6 +53,15 @@ public class PRService {
 
     private boolean isPendingStatus(String status) {
         return PENDING_STATUSES.contains(status);
+    }
+
+    private List<Map<String, Object>> parseItems(String itemsJson) {
+        try {
+            if (itemsJson == null || itemsJson.isEmpty()) return new ArrayList<>();
+            return objectMapper.readValue(itemsJson, new TypeReference<List<Map<String, Object>>>() {});
+        } catch (Exception e) {
+            return new ArrayList<>();
+        }
     }
 
     // ===== GETTERS =====
@@ -168,28 +180,9 @@ public class PRService {
             throw new RuntimeException("Workflow không có bước duyệt nào");
         }
 
-        // Nếu workflow có 1 bước → tự động duyệt luôn
-        if (steps.size() == 1) {
-            if (!currentUserUtil.hasPermission("pr.approve")) {
-                throw new RuntimeException("Bạn không có quyền duyệt PR");
-            }
-
-            Map<String, Object> firstStep = steps.get(0);
-            String statusCode = (String) firstStep.get("statusCode");
-            pr.setStatus(statusCode != null && !statusCode.isEmpty() ? statusCode : "PENDING");
-            pr.setApprovalStep(1);
-            pr.setUpdatedAt(LocalDate.now());
-            prRepository.save(pr);
-
-            approve(id);
-            return;
-        }
-
-        // Nhiều bước → chuyển sang PENDING bước 1
-        Map<String, Object> firstStep = steps.get(0);
-        String statusCode = (String) firstStep.get("statusCode");
-        pr.setStatus(statusCode != null && !statusCode.isEmpty() ? statusCode : "PENDING");
         pr.setApprovalStep(1);
+        String statusCode = workflowService.getStatusForStep(wf.getId(), 1);
+        pr.setStatus(statusCode != null && !statusCode.isEmpty() ? statusCode : "PENDING");
         pr.setUpdatedAt(LocalDate.now());
         prRepository.save(pr);
     }
@@ -213,7 +206,8 @@ public class PRService {
 
         String permissionKey = (String) step.get("permissionKey");
         Long requiredDeptId = step.get("departmentId") != null ? ((Number) step.get("departmentId")).longValue() : null;
-        if (!currentUserUtil.hasPermissionAndDepartment(permissionKey, requiredDeptId)) {
+
+        if (!currentUserUtil.canApproveStep(currentStep, permissionKey, requiredDeptId)) {
             throw new RuntimeException("Bạn không có quyền duyệt bước này");
         }
 
@@ -228,28 +222,31 @@ public class PRService {
         history.setWorkflowId(wf.getId());
         history.setStep(currentStep);
         history.setApproverId(currentUser.getId());
-        history.setApproverName(currentUser.getName());
+                history.setApproverName(currentUser.getName());
         history.setStatusBefore(pr.getStatus());
 
         if (currentStep == steps.size()) {
-            // Bước cuối → APPROVED
             pr.setStatus("APPROVED");
-            pr.setApprovalStep(currentStep);
+            pr.setApprovalStep(0);
         } else {
-            // Chuyển sang bước tiếp theo
-            pr.setApprovalStep(currentStep + 1);
-            String nextStatusCode = workflowService.getStatusForStep(wf.getId(), currentStep + 1);
+            // ✅ Vẫn còn các bước phía sau → chỉ di chuyển tới bước kế tiếp,
+            //    tuyệt đối không được tự đánh dấu trạng thái "kết thúc" trước hạn.
+            int nextStep = currentStep + 1;
+            pr.setApprovalStep(nextStep);
 
-            // ✅ Fallback an toàn: nếu không có mapping, lấy status mặc định của PR
-            if (nextStatusCode == null || nextStatusCode.isEmpty()) {
-                try {
-                    Status defaultStatus = statusService.getDefaultStatus("pr");
-                    nextStatusCode = defaultStatus != null ? defaultStatus.getCode() : "PENDING";
-                } catch (Exception e) {
-                    nextStatusCode = "PENDING";
-                }
+            String nextStatusCode = workflowService.getStatusForStep(wf.getId(), nextStep);
+            // Trạng thái "kế tiếp" chỉ dùng được khi nó KHÔNG phải trạng thái kết thúc
+            // (vd APPROVED / COMPLETED / CONFIRMED...). Nếu người quản trị cấu hình code
+            // của bước (như bước CEO) bằng một trạng thái kết thúc thì không được áp dụng
+            // ngay — vì người duyệt bước cuối chưa bấm duyệt.
+            if (nextStep < steps.size()) {
+                pr.setStatus(nextStatusCode != null && !nextStatusCode.isEmpty() ? nextStatusCode : "PENDING");
+            } else {
+                // Đang dừng ở bước cuối chờ người duyệt cuối cùng → giữ trạng thái chờ duyệt
+                boolean lastCodeIsFinal = isFinalStatusCode(nextStatusCode);
+                pr.setStatus((!lastCodeIsFinal && nextStatusCode != null && !nextStatusCode.isEmpty())
+                        ? nextStatusCode : "PENDING");
             }
-            pr.setStatus(nextStatusCode);
         }
 
         history.setStatusAfter(pr.getStatus());
@@ -285,5 +282,46 @@ public class PRService {
             throw new RuntimeException("Bạn không có quyền xóa PR");
         }
         prRepository.delete(pr);
+    }
+
+    // ===== ✅ KIỂM TRA VÀ CẬP NHẬT MR COMPLETE =====
+    @Transactional
+    public void checkAndUpdateMRComplete(Long prId) {
+        PR pr = getById(prId);
+        if (pr.getMrId() == null) return;
+
+        MR mr = mrRepository.findById(pr.getMrId()).orElse(null);
+        if (mr == null) return;
+
+        // Lấy tất cả PR của MR
+        List<PR> prs = prRepository.findByMrId(mr.getId());
+
+        // Kiểm tra tất cả PR đã COMPLETE chưa
+        boolean allComplete = prs.stream().allMatch(p -> "COMPLETE".equals(p.getStatus()));
+        if (!allComplete) return;
+
+        // Lấy danh sách item trong MR
+        List<Map<String, Object>> mrItems = parseItems(mr.getItems());
+        Set<Long> mrItemIds = mrItems.stream()
+                .map(item -> ((Number) item.get("itemId")).longValue())
+                .collect(Collectors.toSet());
+
+        // Lấy danh sách item từ tất cả PR đã COMPLETE
+        Set<Long> prItemIds = new HashSet<>();
+        for (PR p : prs) {
+            if ("COMPLETE".equals(p.getStatus())) {
+                List<Map<String, Object>> prItems = parseItems(p.getItems());
+                prItemIds.addAll(prItems.stream()
+                        .map(item -> ((Number) item.get("itemId")).longValue())
+                        .collect(Collectors.toSet()));
+            }
+        }
+
+        // Nếu tất cả item trong MR đã có trong PR
+        if (mrItemIds.containsAll(prItemIds) && mrItemIds.size() == prItemIds.size()) {
+            mr.setStatus("COMPLETE");
+            mr.setUpdatedAt(LocalDate.now());
+            mrRepository.save(mr);
+        }
     }
 }

@@ -184,8 +184,8 @@ public class DataInitializer implements CommandLineRunner {
 
         // PR - 3 bước với statusCode
         String prSteps = objectMapper.writeValueAsString(Arrays.asList(
-                new WorkflowStepDTO(1, "pr.approve", "Kế hoạch duyệt", 2L, "PENDING_PROJECT"),
-                new WorkflowStepDTO(2, "pr.approve", "Dự án duyệt", 3L, "PENDING_CEO"),
+                new WorkflowStepDTO(1, "pr.approve", "Dự án duyệt", 4L, "PENDING_PLANNING"),
+                new WorkflowStepDTO(2, "pr.approve", "Kế hoạch duyệt", 3L, "PENDING_CEO"),
                 new WorkflowStepDTO(3, "pr.approve", "CEO duyệt", 1L, "APPROVED")
         ));
 

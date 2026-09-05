@@ -1,18 +1,11 @@
 package com.mep.mepbackend.service;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.mep.mepbackend.entity.ApprovalHistory;
-import com.mep.mepbackend.entity.GRN;
-import com.mep.mepbackend.entity.Inventory;
-import com.mep.mepbackend.entity.Status;
-import com.mep.mepbackend.entity.User;
-import com.mep.mepbackend.entity.Workflow;
+import com.mep.mepbackend.entity.*;
 import com.mep.mepbackend.exception.ResourceNotFoundException;
-import com.mep.mepbackend.repository.ApprovalHistoryRepository;
-import com.mep.mepbackend.repository.GRNRepository;
-import com.mep.mepbackend.repository.InventoryRepository;
-import com.mep.mepbackend.repository.PORepository;
+import com.mep.mepbackend.repository.*;
 import com.mep.mepbackend.util.CurrentUserUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -20,9 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 @Service
 @RequiredArgsConstructor
@@ -30,16 +21,17 @@ public class GRNService {
 
     private final GRNRepository grnRepository;
     private final PORepository poRepository;
+    private final PRRepository prRepository;
+    private final MRRepository mrRepository;
     private final InventoryRepository inventoryRepository;
     private final ApprovalHistoryRepository approvalHistoryRepository;
     private final ObjectMapper objectMapper;
     private final WorkflowService workflowService;
-    private final StatusService statusService; // ✅ Đã thêm
+    private final StatusService statusService;
     private final CurrentUserUtil currentUserUtil;
 
     private static final List<String> PENDING_STATUSES = Arrays.asList("DRAFT", "RECEIVED", "QC_CHECKED");
 
-    // ===== HELPERS =====
     private String generateCode(String prefix) {
         long count = grnRepository.count() + 1;
         String code = prefix + "-" + String.format("%03d", count);
@@ -54,7 +46,16 @@ public class GRNService {
         return PENDING_STATUSES.contains(status);
     }
 
-    // ===== GETTERS =====
+    // Helper parse items
+    private List<Map<String, Object>> parseItems(String itemsJson) {
+        try {
+            if (itemsJson == null || itemsJson.isEmpty()) return new ArrayList<>();
+            return objectMapper.readValue(itemsJson, new TypeReference<List<Map<String, Object>>>() {});
+        } catch (Exception e) {
+            return new ArrayList<>();
+        }
+    }
+
     public List<GRN> getAll() {
         return grnRepository.findAll();
     }
@@ -77,7 +78,6 @@ public class GRNService {
         return grnRepository.findByProjectCode(projectCode);
     }
 
-    // ===== CREATE =====
     @Transactional
     public GRN create(GRN grn) {
         if (!currentUserUtil.hasPermission("grn.create")) {
@@ -106,7 +106,6 @@ public class GRNService {
         return grnRepository.save(grn);
     }
 
-    // ===== UPDATE =====
     @Transactional
     public GRN update(Long id, GRN details) {
         GRN grn = getById(id);
@@ -136,9 +135,9 @@ public class GRNService {
         return grnRepository.save(grn);
     }
 
-    // ===== RECEIVE =====
     @Transactional
     public void receive(Long id, String warehouseStaff, LocalDate receiptDate) {
+        // ... giữ nguyên logic cũ (không thay đổi)
         GRN grn = getById(id);
         if (!currentUserUtil.hasPermission("grn.receive")) {
             throw new RuntimeException("Bạn không có quyền nhận GRN");
@@ -157,7 +156,8 @@ public class GRNService {
 
         String permissionKey = (String) step.get("permissionKey");
         Long requiredDeptId = step.get("departmentId") != null ? ((Number) step.get("departmentId")).longValue() : null;
-        if (!currentUserUtil.hasPermissionAndDepartment(permissionKey, requiredDeptId)) {
+
+        if (!currentUserUtil.canApproveStep(currentStep, permissionKey, requiredDeptId)) {
             throw new RuntimeException("Bạn không có quyền nhận hàng");
         }
 
@@ -179,15 +179,8 @@ public class GRNService {
 
         grn.setWarehouseStaff(warehouseStaff);
         grn.setReceiptDate(receiptDate);
-
-        // ✅ Fallback nếu không có statusCode trong mapping
         if (statusCode == null || statusCode.isEmpty()) {
-            try {
-                Status nextStatus = statusService.getByEntityTypeAndCode("grn", "RECEIVED");
-                statusCode = nextStatus != null ? nextStatus.getCode() : "RECEIVED";
-            } catch (Exception e) {
-                statusCode = "RECEIVED";
-            }
+            statusCode = "RECEIVED";
         }
         grn.setStatus(statusCode);
         grn.setApprovalStep(currentStep);
@@ -198,9 +191,9 @@ public class GRNService {
         grnRepository.save(grn);
     }
 
-    // ===== QC CHECK =====
     @Transactional
     public void qcCheck(Long id, String qcName, String result, String note) {
+        // ... giữ nguyên logic cũ (không thay đổi)
         GRN grn = getById(id);
         if (!currentUserUtil.hasPermission("grn.qc")) {
             throw new RuntimeException("Bạn không có quyền QC GRN");
@@ -219,7 +212,8 @@ public class GRNService {
 
         String permissionKey = (String) step.get("permissionKey");
         Long requiredDeptId = step.get("departmentId") != null ? ((Number) step.get("departmentId")).longValue() : null;
-        if (!currentUserUtil.hasPermissionAndDepartment(permissionKey, requiredDeptId)) {
+
+        if (!currentUserUtil.canApproveStep(currentStep, permissionKey, requiredDeptId)) {
             throw new RuntimeException("Bạn không có quyền kiểm tra QC");
         }
 
@@ -245,15 +239,8 @@ public class GRNService {
                     "QC: " + qcName + " - KHÔNG ĐẠT - " + note);
         } else {
             grn.setQcConfirm(qcName);
-
-            // ✅ Fallback nếu không có statusCode trong mapping
             if (statusCode == null || statusCode.isEmpty()) {
-                try {
-                    Status nextStatus = statusService.getByEntityTypeAndCode("grn", "QC_CHECKED");
-                    statusCode = nextStatus != null ? nextStatus.getCode() : "QC_CHECKED";
-                } catch (Exception e) {
-                    statusCode = "QC_CHECKED";
-                }
+                statusCode = "QC_CHECKED";
             }
             grn.setStatus(statusCode);
             grn.setApprovalStep(currentStep);
@@ -267,7 +254,7 @@ public class GRNService {
         grnRepository.save(grn);
     }
 
-    // ===== COMPLETE =====
+    // ✅ COMPLETE - Cập nhật inventory và set PO/PR/MR complete
     @Transactional
     public void complete(Long id) {
         GRN grn = getById(id);
@@ -288,7 +275,8 @@ public class GRNService {
 
         String permissionKey = (String) step.get("permissionKey");
         Long requiredDeptId = step.get("departmentId") != null ? ((Number) step.get("departmentId")).longValue() : null;
-        if (!currentUserUtil.hasPermissionAndDepartment(permissionKey, requiredDeptId)) {
+
+        if (!currentUserUtil.canApproveStep(currentStep, permissionKey, requiredDeptId)) {
             throw new RuntimeException("Bạn không có quyền hoàn thành GRN");
         }
 
@@ -338,14 +326,8 @@ public class GRNService {
         history.setApproverName(currentUser.getName());
         history.setStatusBefore(grn.getStatus());
 
-        // ✅ Fallback nếu không có statusCode trong mapping
         if (statusCode == null || statusCode.isEmpty()) {
-            try {
-                Status nextStatus = statusService.getByEntityTypeAndCode("grn", "COMPLETED");
-                statusCode = nextStatus != null ? nextStatus.getCode() : "COMPLETED";
-            } catch (Exception e) {
-                statusCode = "COMPLETED";
-            }
+            statusCode = "COMPLETED";
         }
         grn.setStatus(statusCode);
         grn.setApprovalStep(currentStep);
@@ -354,9 +336,119 @@ public class GRNService {
         approvalHistoryRepository.save(history);
         grn.setUpdatedAt(LocalDate.now());
         grnRepository.save(grn);
+
+        // ✅ Sau khi GRN complete, kiểm tra và set PO complete
+        if (grn.getPoId() != null) {
+            checkAndUpdatePOComplete(grn.getPoId());
+        }
     }
 
-    // ===== DELETE =====
+    // ✅ Kiểm tra và set PO complete
+    private void checkAndUpdatePOComplete(Long poId) {
+        PO po = poRepository.findById(poId).orElse(null);
+        if (po == null) return;
+
+        // Lấy tất cả GRN của PO
+        List<GRN> grns = grnRepository.findByPoId(poId);
+
+                // Tính tổng số mã vật tư đã nhập (chỉ tính GRN đã HOÀN THÀNH - bỏ qua GRN còn DRAFT/RECEIVED/QC hoặc bị REJECTED)
+        Set<Long> itemsInGRN = new HashSet<>();
+        for (GRN g : grns) {
+            if (g.getStatus() == null || isPendingStatus(g.getStatus()) || "REJECTED".equals(g.getStatus())) {
+                continue;
+            }
+            List<Map<String, Object>> items = parseItems(g.getItems());
+            for (Map<String, Object> item : items) {
+                Long itemId = ((Number) item.get("itemId")).longValue();
+                BigDecimal actualQty = new BigDecimal(item.get("actualQty").toString());
+                if (actualQty.compareTo(BigDecimal.ZERO) > 0) {
+                    itemsInGRN.add(itemId);
+                }
+            }
+        }
+
+        // Lấy danh sách mã vật tư trong PO
+        List<Map<String, Object>> poItems = parseItems(po.getItems());
+        Set<Long> itemsInPO = new HashSet<>();
+        for (Map<String, Object> item : poItems) {
+            itemsInPO.add(((Number) item.get("itemId")).longValue());
+        }
+
+        // Nếu tất cả mã vật tư trong PO đã được nhập đủ số lượng
+        if (itemsInGRN.containsAll(itemsInPO) && itemsInGRN.size() == itemsInPO.size()) {
+            po.setStatus("COMPLETE");
+            poRepository.save(po);
+
+            // ✅ Kiểm tra PR complete
+            if (po.getPrId() != null) {
+                checkAndUpdatePRComplete(po.getPrId());
+            }
+        }
+    }
+
+    // ✅ Kiểm tra và set PR complete
+    private void checkAndUpdatePRComplete(Long prId) {
+        PR pr = prRepository.findById(prId).orElse(null);
+        if (pr == null) return;
+
+        List<PO> pos = poRepository.findByPrId(prId);
+        Set<Long> itemsInPO = new HashSet<>();
+        for (PO po : pos) {
+            if (!"COMPLETE".equals(po.getStatus())) {
+                return; // Có PO chưa complete → chưa thể set PR complete
+            }
+            List<Map<String, Object>> items = parseItems(po.getItems());
+            for (Map<String, Object> item : items) {
+                itemsInPO.add(((Number) item.get("itemId")).longValue());
+            }
+        }
+
+        List<Map<String, Object>> prItems = parseItems(pr.getItems());
+        Set<Long> itemsInPR = new HashSet<>();
+        for (Map<String, Object> item : prItems) {
+            itemsInPR.add(((Number) item.get("itemId")).longValue());
+        }
+
+        if (itemsInPO.containsAll(itemsInPR) && itemsInPO.size() == itemsInPR.size()) {
+            pr.setStatus("COMPLETE");
+            prRepository.save(pr);
+
+            // ✅ Kiểm tra MR complete
+            if (pr.getMrId() != null) {
+                checkAndUpdateMRComplete(pr.getMrId());
+            }
+        }
+    }
+
+    // ✅ Kiểm tra và set MR complete
+    private void checkAndUpdateMRComplete(Long mrId) {
+        MR mr = mrRepository.findById(mrId).orElse(null);
+        if (mr == null) return;
+
+        List<PR> prs = prRepository.findByMrId(mrId);
+        Set<Long> itemsInPR = new HashSet<>();
+        for (PR pr : prs) {
+            if (!"COMPLETE".equals(pr.getStatus())) {
+                return; // Có PR chưa complete → chưa thể set MR complete
+            }
+            List<Map<String, Object>> items = parseItems(pr.getItems());
+            for (Map<String, Object> item : items) {
+                itemsInPR.add(((Number) item.get("itemId")).longValue());
+            }
+        }
+
+        List<Map<String, Object>> mrItems = parseItems(mr.getItems());
+        Set<Long> itemsInMR = new HashSet<>();
+        for (Map<String, Object> item : mrItems) {
+            itemsInMR.add(((Number) item.get("itemId")).longValue());
+        }
+
+        if (itemsInPR.containsAll(itemsInMR) && itemsInPR.size() == itemsInMR.size()) {
+            mr.setStatus("COMPLETE");
+            mrRepository.save(mr);
+        }
+    }
+
     @Transactional
     public void delete(Long id) {
         GRN grn = getById(id);

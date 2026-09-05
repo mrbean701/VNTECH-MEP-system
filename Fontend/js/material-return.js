@@ -1,5 +1,5 @@
 // ================================================================
-// MATERIAL RETURN - Hoàn trả vật tư - ĐÃ TÍCH HỢP PHÂN QUYỀN
+// MATERIAL RETURN - Hoàn trả vật tư - ĐÃ TÍCH HỢP APPROVAL LEVEL
 // ================================================================
 
 // ====== STATE ======
@@ -20,9 +20,61 @@ const debouncedReturnFilter = debounce(() => {
     renderMaterialReturns();
 }, 300);
 
+// ====== BIẾN TOÀN CỤC CHO ITEM SELECTOR ======
+let _returnSelectedItems = [];
+
 // ====== HÀM TẠO MÃ TỰ ĐỘNG ======
 function generateReturnCode() {
     return 'MRET-' + String(Date.now()).slice(-6);
+}
+
+// ====== HÀM LẤY ACTION (CÓ KIỂM TRA canApprove) ======
+function getReturnActions(item, statuses) {
+    const user = getUser();
+    let actions = '';
+
+    actions += `<button class="btn btn-info btn-sm" onclick="viewMaterialReturn(${item.id})"><i class="fas fa-eye"></i></button>`;
+
+    const canEdit = hasPermission('materialreturn.edit') && 
+                   (item.status === 'DRAFT' || item.status === 'PENDING') && 
+                   (user?.role === 'ADMIN' || user?.id === item.createdBy);
+    if (canEdit) {
+        actions += ` <button class="btn btn-warning btn-sm" onclick="editMaterialReturn(${item.id})"><i class="fas fa-edit"></i></button>`;
+    }
+
+    const canDelete = hasPermission('materialreturn.delete') && 
+                     item.status === 'DRAFT' && 
+                     (user?.role === 'ADMIN' || user?.id === item.createdBy);
+    if (canDelete) {
+        actions += ` <button class="btn btn-danger btn-sm" onclick="deleteMaterialReturn(${item.id})"><i class="fas fa-trash"></i></button>`;
+    }
+
+    const canSubmit = hasPermission('materialreturn.submit') && 
+                     item.status === 'DRAFT' && 
+                     (user?.role === 'ADMIN' || user?.id === item.createdBy);
+    if (canSubmit) {
+        actions += ` <button class="btn btn-success btn-sm" onclick="submitMaterialReturn(${item.id})">Xác nhận</button>`;
+    }
+
+    // ✅ Kiểm tra điều kiện duyệt
+    if (item.status === 'PENDING') {
+        const currentStep = item.approvalStep || 1;
+        const canApprove = canApprove(currentStep, 'materialreturn.approve', null);
+        if (canApprove) {
+            actions += ` <button class="btn btn-success btn-sm" onclick="approveMaterialReturn(${item.id})">Nhận vật tư</button>`;
+            actions += ` <button class="btn btn-danger btn-sm" onclick="rejectMaterialReturn(${item.id})">Từ chối</button>`;
+        }
+    }
+
+    if (item.status === 'APPROVED') {
+        const currentStep = item.approvalStep || 2;
+        const canConfirm = canApprove(currentStep, 'materialreturn.confirm', null);
+        if (canConfirm) {
+            actions += ` <button class="btn btn-success btn-sm" onclick="confirmMaterialReturn(${item.id})">Xác nhận hoàn tất</button>`;
+        }
+    }
+
+    return actions || '-';
 }
 
 // ====== RENDER TRANG ======
@@ -167,13 +219,18 @@ async function renderMaterialReturns(page = null) {
     }
 
     try {
-        const [returns, projects, warehouses] = await Promise.all([
+        const [returns, projects, warehouses, statuses] = await Promise.all([
             api.getMaterialReturns(),
             api.getProjects(),
-            api.getWarehouses()
+            api.getWarehouses(),
+            api.getStatuses('materialreturn')
         ]);
+        
         window._projectsCache = projects;
         window._warehousesCache = warehouses;
+        if (!window._statusesCache) window._statusesCache = {};
+        window._statusesCache['materialreturn'] = statuses;
+        
         saveData('projects', projects);
         saveData('warehouses', warehouses);
 
@@ -197,11 +254,7 @@ async function renderMaterialReturns(page = null) {
                 <input type="text" id="return-filter" placeholder="Tìm theo mã, dự án, vật tư..." style="flex:2;" value="${materialReturnState.filterText}">
                 <select id="return-status-filter" style="flex:1;">
                     <option value="">Tất cả</option>
-                    <option value="DRAFT" ${materialReturnState.statusFilter === 'DRAFT' ? 'selected' : ''}>DRAFT</option>
-                    <option value="PENDING" ${materialReturnState.statusFilter === 'PENDING' ? 'selected' : ''}>PENDING</option>
-                    <option value="APPROVED" ${materialReturnState.statusFilter === 'APPROVED' ? 'selected' : ''}>APPROVED</option>
-                    <option value="CONFIRMED" ${materialReturnState.statusFilter === 'CONFIRMED' ? 'selected' : ''}>CONFIRMED</option>
-                    <option value="REJECTED" ${materialReturnState.statusFilter === 'REJECTED' ? 'selected' : ''}>REJECTED</option>
+                    ${statuses.map(s => `<option value="${s.code}" ${materialReturnState.statusFilter === s.code ? 'selected' : ''}>${s.name}</option>`).join('')}
                 </select>
                 <select id="return-project-filter" style="flex:1;">
                     <option value="">Tất cả dự án</option>
@@ -246,14 +299,14 @@ async function renderMaterialReturns(page = null) {
         }
 
         for (const item of paging.items) {
-            const statusBadge = getStatusBadge(item.status);
+            const statusBadge = getStatusBadgeWithInfo(item.status, statuses);
             const projectId = getProjectIdByCode(item.projectCode);
             const projectDisplay = projectId ?
                 `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="closeModal(); viewProject(${projectId})">${item.projectName || item.projectCode}</span>` :
                 (item.projectName || item.projectCode || '');
 
             const whName = getWarehouseCode(item.warehouseId);
-            const actions = getReturnActions(item);
+            const actions = getReturnActions(item, statuses);
 
             html += `<tr>
                 <td style="cursor:pointer; color:#1a3c6e; font-weight:500;" onclick="viewMaterialReturn(${item.id})">${item.code}</td>
@@ -338,62 +391,15 @@ function resetReturnFilters() {
     renderMaterialReturns();
 }
 
-// ====== HÀM LẤY ACTION ======
-function getReturnActions(item) {
-    const user = getUser();
-    let actions = '';
-
-    actions += `<button class="btn btn-info btn-sm" onclick="viewMaterialReturn(${item.id})"><i class="fas fa-eye"></i></button>`;
-
-    const canEdit = hasPermission('materialreturn.edit') && 
-                   (item.status === 'DRAFT' || item.status === 'PENDING') && 
-                   (user?.role === 'ADMIN' || user?.id === item.createdBy);
-    if (canEdit) {
-        actions += ` <button class="btn btn-warning btn-sm" onclick="editMaterialReturn(${item.id})"><i class="fas fa-edit"></i></button>`;
-    }
-
-    const canDelete = hasPermission('materialreturn.delete') && 
-                     item.status === 'DRAFT' && 
-                     (user?.role === 'ADMIN' || user?.id === item.createdBy);
-    if (canDelete) {
-        actions += ` <button class="btn btn-danger btn-sm" onclick="deleteMaterialReturn(${item.id})"><i class="fas fa-trash"></i></button>`;
-    }
-
-    // ✅ SỬA: Gửi duyệt → Xác nhận
-    const canSubmit = hasPermission('materialreturn.submit') && 
-                     item.status === 'DRAFT' && 
-                     (user?.role === 'ADMIN' || user?.id === item.createdBy);
-    if (canSubmit) {
-        actions += ` <button class="btn btn-success btn-sm" onclick="submitMaterialReturn(${item.id})">Xác nhận</button>`;
-    }
-
-    const canApprove = hasPermission('materialreturn.approve') && item.status === 'PENDING';
-    if (canApprove) {
-        actions += ` <button class="btn btn-success btn-sm" onclick="approveMaterialReturn(${item.id})">Nhận vật tư</button>`;
-        actions += ` <button class="btn btn-danger btn-sm" onclick="rejectMaterialReturn(${item.id})">Từ chối</button>`;
-    }
-
-    const canConfirm = hasPermission('materialreturn.confirm') && item.status === 'APPROVED';
-    if (canConfirm) {
-        actions += ` <button class="btn btn-success btn-sm" onclick="confirmMaterialReturn(${item.id})">Xác nhận hoàn tất</button>`;
-    }
-
-    return actions || '-';
-}
-
-// ====== BIẾN TOÀN CỤC CHO ITEM SELECTOR ======
-let _returnSelectedItems = [];
-let _returnMode = 'create';
-let _returnEditId = null;
-
-// ====== CALLBACK TỪ MODAL CHỌN VẬT TƯ ======
+// ====== ITEM SELECTOR CHO MATERIAL RETURN ======
 function returnItemSelectorCallback(selectedItems) {
     _returnSelectedItems = selectedItems.map(item => ({
         itemId: item.itemId,
         quantity: item.quantity || 1,
         itemName: item.displayName || item.itemName || getItemName(item.itemId),
         itemCode: item.itemCode || getItemCode(item.itemId),
-        unit: item.unit || getItemUnit(item.itemId)
+        unit: item.unit || getItemUnit(item.itemId),
+        model: item.model || getItemModel(item.itemId)
     }));
     renderReturnSelectedItems();
 }
@@ -412,11 +418,18 @@ function _renderReturnSelectedItemsHTML() {
     }
     let html = '';
     items.forEach((item, index) => {
+        const modelDisplay = item.model ? ` (${item.model})` : '';
+        const unitDisplay = item.unit ? ` [${item.unit}]` : '';
         html += `
-            <div style="display:flex; justify-content:space-between; align-items:center; padding:4px 8px; margin-bottom:4px; background:#f0f4f8; border-radius:4px;">
-                <span><strong>${item.itemCode}</strong> - ${item.itemName} (${item.unit})</span>
-                <span>Số lượng: <input type="number" class="return-item-qty" data-index="${index}" value="${item.quantity}" style="width:70px; padding:4px; border:1px solid #ccc; border-radius:4px;" min="0.01" step="0.01"></span>
-                <button type="button" class="btn btn-sm btn-danger" onclick="removeReturnItem(${index})"><i class="fas fa-times"></i></button>
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 8px; margin-bottom:4px; background:#f8fafc; border-radius:4px; border:1px solid #e2e8f0;">
+                <span style="flex:1; font-size:14px;">
+                    <strong>${item.itemCode}</strong> - ${item.itemName}${modelDisplay}${unitDisplay}
+                </span>
+                <span style="display:flex; align-items:center; gap:6px;">
+                    <span style="font-size:13px; color:#555;">SL:</span>
+                    <input type="number" class="return-item-qty" data-index="${index}" value="${item.quantity}" style="width:70px; padding:4px; border:1px solid #ccc; border-radius:4px;" min="0.01" step="0.01">
+                </span>
+                <button type="button" class="btn btn-sm btn-danger" onclick="removeReturnItem(${index})" style="margin-left:8px;"><i class="fas fa-times"></i></button>
             </div>
         `;
     });
@@ -460,8 +473,6 @@ function showCreateMaterialReturnModal() {
         const projectOpts = projects.map(p => `<option value="${p.code}">${p.code} - ${p.name}</option>`).join('');
         const whOpts = warehouses.map(w => `<option value="${w.id}">${w.code} - ${w.name}</option>`).join('');
         _returnSelectedItems = [];
-        _returnMode = 'create';
-        _returnEditId = null;
 
         showModal('Tạo phiếu hoàn trả vật tư', `
             <div class="form-group">
@@ -526,10 +537,9 @@ async function saveMaterialReturn() {
     const items = _returnSelectedItems.map(item => ({
         itemId: item.itemId,
         requestedQty: item.quantity,
-        actualQty: item.quantity,
         displayName: item.itemName,
-        condition: item.condition || '',
-        note: item.note || ''
+        condition: '',
+        note: ''
     }));
 
     if (!projectCode || !returnDate || !warehouseId || items.length === 0) {
@@ -563,7 +573,7 @@ async function saveMaterialReturn() {
     }
 }
 
-// ====== XEM CHI TIẾT PHIẾU ======
+// ====== VIEW CHI TIẾT ======
 async function viewMaterialReturn(id) {
     try {
         let item = await api.getMaterialReturnById ? await api.getMaterialReturnById(id) : null;
@@ -575,19 +585,27 @@ async function viewMaterialReturn(id) {
                 return;
             }
         }
+        
+        const statuses = await api.getStatuses('materialreturn');
+        if (!window._statusesCache) window._statusesCache = {};
+        window._statusesCache['materialreturn'] = statuses;
 
         const items = item.items ? JSON.parse(item.items) : [];
-        const itemsHtml = items.map(it => `
-            <tr>
-                <td>${getItemCode(it.itemId)}</td>
-                <td>${it.displayName || getItemName(it.itemId)}</td>
-                <td>${getItemUnit(it.itemId)}</td>
-                <td>${it.requestedQty}</td>
-                <td>${it.actualQty !== undefined ? it.actualQty : it.requestedQty}</td>
-                <td>${it.condition || ''}</td>
-                <td>${it.note || ''}</td>
-            </tr>
-        `).join('');
+        const itemsHtml = items.map(it => {
+            const itemName = it.displayName || getItemName(it.itemId);
+            const unit = getItemUnit(it.itemId);
+            return `
+                <tr>
+                    <td>${getItemCode(it.itemId)}</td>
+                    <td>${itemName}</td>
+                    <td>${unit}</td>
+                    <td>${it.requestedQty}</td>
+                    <td>${it.actualQty !== undefined ? it.actualQty : it.requestedQty}</td>
+                    <td>${it.condition || ''}</td>
+                    <td>${it.note || ''}</td>
+                </tr>
+            `;
+        }).join('');
 
         let stepsConfig = [
             { id: 1, label: 'Tạo phiếu' },
@@ -608,7 +626,9 @@ async function viewMaterialReturn(id) {
                 console.warn('Không lấy được workflow steps:', e);
             }
         }
-        const progressHtml = renderApprovalProgress(item.status, item.approvalStep || 1, stepsConfig);
+        const currentStep = item.approvalStep || 1;
+        const progressHtml = renderApprovalProgress(item.status, currentStep, stepsConfig, statuses);
+        const statusBadge = getStatusBadgeWithInfo(item.status, statuses);
         const projectId = getProjectIdByCode(item.projectCode);
         const projectDisplay = projectId ?
             `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="closeModal(); viewProject(${projectId})">${item.projectName || item.projectCode}</span>` :
@@ -632,7 +652,7 @@ async function viewMaterialReturn(id) {
                 <div><span class="label">Kho nhận:</span> <span class="value">${whName}</span></div>
                 <div><span class="label">Trả từ:</span> <span class="value">${item.returnFrom || ''}</span></div>
                 <div><span class="label">Người trả:</span> <span class="value">${item.returner || ''}</span></div>
-                <div><span class="label">Trạng thái:</span> <span class="value">${getStatusBadge(item.status)}</span></div>
+                <div><span class="label">Trạng thái:</span> <span class="value">${statusBadge}</span></div>
                 <div><span class="label">Ngày tạo:</span> <span class="value">${item.createdAt || ''}</span></div>
                 ${item.completionDate ? `<div><span class="label">Ngày hoàn tất:</span> <span class="value">${item.completionDate}</span></div>` : ''}
                 <div style="grid-column:1/-1;"><span class="label">Tiến độ thực hiện:</span><br>${progressHtml}</div>
@@ -649,7 +669,7 @@ async function viewMaterialReturn(id) {
     }
 }
 
-// ====== SỬA PHIẾU (DRAFT) ======
+// ====== SỬA PHIẾU ======
 async function editMaterialReturn(id) {
     if (!hasPermission('materialreturn.edit')) {
         showWarning('Bạn không có quyền sửa phiếu hoàn trả!');
@@ -677,25 +697,7 @@ async function editMaterialReturn(id) {
             `<option value="${w.id}" ${w.id === item.warehouseId ? 'selected' : ''}>${w.code} - ${w.name}</option>`
         ).join('');
 
-        let itemsData = [];
-        try {
-            if (item.items) {
-                const items = typeof item.items === 'string' ? JSON.parse(item.items) : item.items;
-                itemsData = items.map(it => ({
-                    itemId: it.itemId,
-                    requestedQty: it.requestedQty || 0,
-                    actualQty: it.actualQty || 0,
-                    itemName: it.displayName || getItemName(it.itemId),
-                    itemCode: getItemCode(it.itemId),
-                    unit: getItemUnit(it.itemId),
-                    condition: it.condition || '',
-                    note: it.note || ''
-                }));
-            }
-        } catch (e) {}
-        _returnSelectedItems = itemsData;
-        _returnMode = 'edit';
-        _returnEditId = id;
+        const itemsData = item.items ? JSON.parse(item.items) : [];
 
         showModal('Sửa phiếu hoàn trả', `
             <div class="form-group">
@@ -755,11 +757,10 @@ async function updateMaterialReturn(id) {
 
     const items = _returnSelectedItems.map(item => ({
         itemId: item.itemId,
-        requestedQty: item.requestedQty || item.quantity || 0,
-        actualQty: item.actualQty || item.quantity || 0,
-        displayName: item.itemName || getItemName(item.itemId),
-        condition: item.condition || '',
-        note: item.note || ''
+        requestedQty: item.quantity,
+        displayName: item.itemName,
+        condition: '',
+        note: ''
     }));
 
     if (!projectCode || !returnDate || !warehouseId || items.length === 0) {
@@ -792,7 +793,7 @@ async function updateMaterialReturn(id) {
     }
 }
 
-// ====== GỬI DUYỆT ======
+// ====== SUBMIT ======
 async function submitMaterialReturn(id) {
     if (!hasPermission('materialreturn.submit')) {
         showWarning('Bạn không có quyền gửi duyệt phiếu hoàn trả!');
@@ -807,7 +808,7 @@ async function submitMaterialReturn(id) {
     }
 }
 
-// ====== THỦ KHO NHẬN (APPROVED) ======
+// ====== APPROVE (THỦ KHO NHẬN) ======
 async function approveMaterialReturn(id) {
     if (!hasPermission('materialreturn.approve')) {
         showWarning('Bạn không có quyền xác nhận nhập kho hoàn trả!');
@@ -894,7 +895,7 @@ async function updateMaterialReturnApproval(id) {
     }
 }
 
-// ====== CHỈ HUY TRƯỞNG XÁC NHẬN HOÀN TẤT ======
+// ====== CONFIRM ======
 async function confirmMaterialReturn(id) {
     if (!hasPermission('materialreturn.confirm')) {
         showWarning('Bạn không có quyền xác nhận hoàn tất phiếu hoàn trả!');
@@ -910,7 +911,7 @@ async function confirmMaterialReturn(id) {
     }
 }
 
-// ====== TỪ CHỐI ======
+// ====== REJECT ======
 async function rejectMaterialReturn(id) {
     if (!hasPermission('materialreturn.reject')) {
         showWarning('Bạn không có quyền từ chối phiếu hoàn trả!');
@@ -926,7 +927,7 @@ async function rejectMaterialReturn(id) {
     }
 }
 
-// ====== XÓA PHIẾU ======
+// ====== DELETE ======
 async function deleteMaterialReturn(id) {
     if (!hasPermission('materialreturn.delete')) {
         showWarning('Bạn không có quyền xóa phiếu hoàn trả!');
@@ -940,22 +941,6 @@ async function deleteMaterialReturn(id) {
     } catch (error) {
         showError('Lỗi khi xóa phiếu: ' + error.message);
     }
-}
-
-// ====== RENDER PROGRESS ======
-function renderReturnProgress(status) {
-    const steps = [
-        { id: 1, label: 'Tạo phiếu' },
-        { id: 2, label: 'Thủ kho nhận' },
-        { id: 3, label: 'Xác nhận hoàn tất' }
-    ];
-
-    let currentStep = 1;
-    if (status === 'PENDING') currentStep = 2;
-    else if (status === 'APPROVED') currentStep = 2;
-    else if (status === 'CONFIRMED') currentStep = 3;
-
-    return renderApprovalProgress(status, currentStep, steps);
 }
 
 // ====== EXPORT EXCEL ======
@@ -987,7 +972,7 @@ function printMaterialReturn(id) {
     showInfo('Chức năng in đang được phát triển.');
 }
 
-// ====== EXPORT RA WINDOW ======
+// ====== EXPORT ======
 window.renderMaterialReturnPage = renderMaterialReturnPage;
 window.renderMaterialReturns = renderMaterialReturns;
 window.exportMaterialReturns = exportMaterialReturns;
@@ -1007,4 +992,4 @@ window.renderReturnSelectedItems = renderReturnSelectedItems;
 window.removeReturnItem = removeReturnItem;
 window.openItemSelectorForReturn = openItemSelectorForReturn;
 
-console.log('✅ Material Return module updated with multi-field search, sort, and advanced filters.');
+console.log('✅ Material Return module updated with approval level and canApprove.');

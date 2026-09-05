@@ -9,12 +9,14 @@ public class UserDTO {
     private String email;
     private String name;
     private String role;
-    private Long departmentId;      // ✅ Thêm trường này
-    private String department;      // Tên phòng ban (optional)
+    private Long departmentId;
+    private String department;
     private String position;
     private LocalDate createdAt;
     private LocalDate updatedAt;
-    // Không bao gồm password
-    private Boolean grantAllDeptPermissions; // Gán toàn bộ quyền phòng ban cho user
 
+    // ✅ Thêm field approvalLevel
+    private Integer approvalLevel;
+
+    private Boolean grantAllDeptPermissions;
 }

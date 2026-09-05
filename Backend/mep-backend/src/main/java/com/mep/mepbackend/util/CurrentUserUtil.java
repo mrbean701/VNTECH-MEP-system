@@ -53,13 +53,9 @@ public class CurrentUserUtil {
         }
     }
 
-    /**
-     * Kiểm tra override permission - chỉ ADMIN mới có thể override
-     */
     private boolean hasOverridePermission() {
         try {
             User user = getCurrentUser();
-            // ADMIN luôn có override
             if ("ADMIN".equals(user.getRole())) {
                 return true;
             }
@@ -69,30 +65,20 @@ public class CurrentUserUtil {
         }
     }
 
-    /**
-     * Kiểm tra quyền dựa trên:
-     * 1. ADMIN -> true
-     * 2. UserPermission (nếu có) -> theo enabled
-     * 3. DepartmentPermission (nếu user có departmentId) -> theo enabled
-     * 4. Mặc định -> false
-     */
     public boolean hasPermission(String permissionKey) {
         try {
             User user = getCurrentUser();
 
-            // ADMIN luôn có toàn quyền
             if ("ADMIN".equals(user.getRole())) {
                 return true;
             }
 
-            // Bước 1: User permission (ghi đè)
             Optional<UserPermission> userPermOpt =
                     userPermissionRepository.findByUserIdAndPermissionKey(user.getId(), permissionKey);
             if (userPermOpt.isPresent()) {
                 return userPermOpt.get().getEnabled();
             }
 
-            // Bước 2: Department permission (nếu có)
             if (user.getDepartmentId() != null) {
                 Optional<Permission> deptPermOpt =
                         permissionRepository.findByDepartmentIdAndPermissionKey(user.getDepartmentId(), permissionKey);
@@ -101,7 +87,6 @@ public class CurrentUserUtil {
                 }
             }
 
-            // Bước 3: Không có quyền
             return false;
 
         } catch (Exception e) {
@@ -109,17 +94,10 @@ public class CurrentUserUtil {
         }
     }
 
-    /**
-     * Kiểm tra quyền và phòng ban (nếu có yêu cầu)
-     * - Nếu user là ADMIN: luôn true
-     * - Nếu departmentId != null: user phải thuộc phòng ban đó
-     * - Nếu departmentId == null: chỉ cần có permission
-     */
     public boolean hasPermissionAndDepartment(String permissionKey, Long departmentId) {
         if (permissionKey == null || permissionKey.isEmpty()) return true;
         if (!hasPermission(permissionKey)) return false;
 
-        // Nếu user là ADMIN, bỏ qua kiểm tra phòng ban
         try {
             User user = getCurrentUser();
             if ("ADMIN".equals(user.getRole())) {
@@ -129,11 +107,45 @@ public class CurrentUserUtil {
             return false;
         }
 
-        // Nếu có yêu cầu phòng ban, kiểm tra
         if (departmentId != null) {
             return isInDepartment(departmentId);
         }
         return true;
+    }
+
+    // ✅ PHƯƠNG THỨC MỚI: Kiểm tra duyệt theo cấp độ
+    public boolean canApproveStep(int step, String permissionKey, Long departmentId) {
+        try {
+            User user = getCurrentUser();
+
+            // ADMIN luôn có quyền
+            if ("ADMIN".equals(user.getRole())) {
+                return true;
+            }
+
+            // 1. Kiểm tra permission
+            if (permissionKey != null && !permissionKey.isEmpty()) {
+                if (!hasPermission(permissionKey)) {
+                    return false;
+                }
+            }
+
+            // 2. Kiểm tra department (nếu có yêu cầu)
+            if (departmentId != null) {
+                if (user.getDepartmentId() == null || !user.getDepartmentId().equals(departmentId)) {
+                    return false;
+                }
+            }
+
+                                                // 3. Kiểm tra approval level: so sánh currentStep với cấp duyệt của user
+            // User chỉ duyệt được bước khi cấp duyệt của họ >= bước hiện tại
+            Integer level = user.getApprovalLevel();
+            if (level == null) level = 0;
+            return level >= step;
+
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     public boolean hasAnyPermission(String... permissionKeys) {

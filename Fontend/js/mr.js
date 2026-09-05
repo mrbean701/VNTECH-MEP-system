@@ -50,9 +50,10 @@ function getMRActions(mr, hasPR = false, prCode = null) {
         actions += ` <button class="btn btn-danger btn-sm" onclick="rejectMR(${mr.id})">Từ chối</button>`;
     }
 
-    // ===== THAY ĐỔI Ở ĐÂY =====
-    // Chỉ hiển thị nút "Tạo PR" nếu MR đã APPROVED, user có quyền, và CHƯA có PR
-    const canCreatePR = hasPermission('pr.create') && mr.status === 'APPROVED' && !hasPR;
+    const canCreatePR = hasPermission('pr.create')
+        && mr.status === 'APPROVED'
+        && !hasPR
+        && getUserApprovalLevel() === 0;
     if (canCreatePR) {
         actions += ` <button class="btn btn-warning btn-sm" onclick="createPRFromMR(${mr.id})">Tạo PR</button>`;
     }
@@ -507,7 +508,7 @@ async function viewMR(id) {
             </div>
         `;
 
-        // Hiển thị thông tin PR đã tạo (nếu có)
+                // Hiển thị thông tin PR đã tạo (nếu có)
         let prInfoHtml = '';
         if (existingPR) {
             prInfoHtml = `
@@ -521,6 +522,15 @@ async function viewMR(id) {
                 </div>
             `;
         }
+
+        // Nút tạo PR ở chi tiết MR: chỉ bộ phận mua (level 0), khi MR đã duyệt & chưa có PR
+        const canMakePR = mr.status === 'APPROVED'
+            && !existingPR
+            && hasPermission('pr.create')
+            && getUserApprovalLevel() === 0;
+        const prBtnHtml = canMakePR
+            ? ` <button class="btn btn-warning btn-sm" onclick="createPRFromMR(${mr.id}); closeModal();">Tạo PR</button>`
+            : '';
 
         showModal('Chi tiết MR', `
             <div class="detail-grid">
@@ -536,8 +546,14 @@ async function viewMR(id) {
                 <div style="grid-column:1/-1;"><span class="label">Danh sách vật tư:</span><br>${itemsTable}</div>
                 <div style="grid-column:1/-1;"><span class="label">Ghi chú:</span> <span class="value">${mr.note || ''}</span></div>
             </div>
+
+
+
+
+
             <div class="modal-actions">
                 <button class="btn btn-info" onclick="printMR(${mr.id}); closeModal();"><i class="fas fa-print"></i> In phiếu</button>
+                ${prBtnHtml}
                 <button class="btn btn-danger" onclick="closeModal()">Đóng</button>
             </div>
         `);

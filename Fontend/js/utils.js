@@ -112,11 +112,10 @@ function getStatusInfo(statusCode, statuses) {
 
 function getStatusBadgeWithInfo(statusCode, statuses) {
     const info = getStatusInfo(statusCode, statuses);
-    // ✅ Hiển thị mã code thay vì tên
     return `<span class="badge" style="background-color:${info.color}; color:white; border-radius:12px; padding:4px 12px; font-weight:600; font-size:12px; display:inline-block;">${statusCode}</span>`;
 }
 
-// ====== BADGE TRẠNG THÁI (FALLBACK) ======
+// ====== BADGE TRẠNG THÁI CŨ (FALLBACK) ======
 function getStatusBadge(status, color = null) {
     if (color) {
         return `<span class="badge" style="background-color:${color}; color:white; border-radius:12px; padding:4px 12px; font-weight:600; font-size:12px; display:inline-block;">${status}</span>`;
@@ -144,6 +143,41 @@ function getStatusBadge(status, color = null) {
     return `<span class="badge ${map[status] || 'badge-draft'}">${status}</span>`;
 }
 
+// ====== LẤY THÔNG TIN USER ======
+function getUserApprovalLevel() {
+    const user = getUser();
+    return user?.approvalLevel || 0;
+}
+
+function getUserDepartmentId() {
+    const user = getUser();
+    return user?.departmentId || null;
+}
+
+// ====== KIỂM TRA QUYỀN DUYỆT (FRONTEND) ======
+function canApprove(step, permissionKey, departmentId) {
+    const user = getUser();
+    if (!user) return false;
+    
+    // ADMIN có toàn quyền
+    if (user.role === 'ADMIN') return true;
+    
+    // 1. Kiểm tra permission (nếu có)
+    if (permissionKey && !hasPermission(permissionKey)) {
+        return false;
+    }
+    
+    // 2. Kiểm tra department (nếu có yêu cầu)
+    if (departmentId && user.departmentId !== departmentId) {
+        return false;
+    }
+    
+        // 3. Kiểm tra approval level: so sánh bước duyệt với cấp duyệt của user
+        // Người dùng chỉ duyệt được bước khi cấp duyệt của họ >= bước hiện tại
+        const level = user.approvalLevel || 0;
+        return level >= step;
+}
+
 // ====== RENDER APPROVAL PROGRESS ======
 function renderApprovalProgress(status, step, stepsConfig, statuses) {
     const defaultSteps = [
@@ -156,13 +190,12 @@ function renderApprovalProgress(status, step, stepsConfig, statuses) {
     let currentStep = step || 1;
     currentStep = Math.min(currentStep, steps.length);
 
-    // Lấy tên trạng thái từ statuses (cho phần hiển thị tên ở header)
+    // Lấy tên trạng thái từ statuses
     const statusInfo = getStatusInfo(status, statuses || []);
     const statusName = statusInfo.name || status;
 
-    // Hoàn thành
-    const finalStatuses = ['APPROVED', 'COMPLETED', 'CONFIRMED'];
-    if (finalStatuses.includes(status)) {
+    // Hoàn thành (approvalStep = 0)
+    if (step === 0 && (status === 'APPROVED' || status === 'COMPLETE')) {
         let progressHtml = `<div style="display:flex; align-items:center; justify-content:space-between; width:100%; margin:8px 0;">`;
         steps.forEach((s, idx) => {
             progressHtml += `
@@ -548,5 +581,8 @@ window.debounce = debounce;
 window.getStatusesForModule = getStatusesForModule;
 window.getStatusInfo = getStatusInfo;
 window.getStatusBadgeWithInfo = getStatusBadgeWithInfo;
+window.getUserApprovalLevel = getUserApprovalLevel;
+window.getUserDepartmentId = getUserDepartmentId;
+window.canApprove = canApprove;
 
-console.log('✅ Utils updated with status code display.');
+console.log('✅ Utils updated with approval level and canApprove function.');

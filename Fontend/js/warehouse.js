@@ -1,6 +1,7 @@
 // ================================================================
-// WAREHOUSE - GRN & STO (SỬ DỤNG API) - ĐÃ TÍCH HỢP PHÂN QUYỀN
+// WAREHOUSE - GRN & STO (SỬ DỤNG API) - ĐÃ TÍCH HỢP APPROVAL LEVEL
 // ================================================================
+
 let currentWhTab = 'wh-list';
 let showAllWarehouses = false;
 
@@ -42,106 +43,69 @@ const debouncedSTOFilter = debounce(() => {
 // ================================================================
 // RENDER PAGE
 // ================================================================
-// Gắn sự kiện cho GRN
-const grnFilterInput = document.getElementById('grn-filter');
-const grnStatusSelect = document.getElementById('grn-status-filter');
-const grnProjectSelect = document.getElementById('grn-project-filter');
-const grnWarehouseSelect = document.getElementById('grn-warehouse-filter');
-const grnSortSelect = document.getElementById('grn-sort');
+async function renderWarehousePage(tab) {
+    currentWhTab = tab || 'wh-list';
+    const container = document.getElementById('inventory-content');
 
-if (grnFilterInput) {
-    grnFilterInput.removeEventListener('input', debouncedGRNFilter);
-    grnFilterInput.addEventListener('input', function(e) {
-        grnState.filterText = this.value;
-        debouncedGRNFilter();
-    });
-}
-if (grnStatusSelect) {
-    grnStatusSelect.removeEventListener('change', debouncedGRNFilter);
-    grnStatusSelect.addEventListener('change', function(e) {
-        grnState.statusFilter = this.value;
-        debouncedGRNFilter();
-    });
-}
-if (grnProjectSelect) {
-    grnProjectSelect.removeEventListener('change', debouncedGRNFilter);
-    grnProjectSelect.addEventListener('change', function(e) {
-        grnState.projectFilter = this.value;
-        debouncedGRNFilter();
-    });
-}
-if (grnWarehouseSelect) {
-    grnWarehouseSelect.removeEventListener('change', debouncedGRNFilter);
-    grnWarehouseSelect.addEventListener('change', function(e) {
-        grnState.warehouseFilter = this.value;
-        debouncedGRNFilter();
-    });
-}
-if (grnSortSelect) {
-    grnSortSelect.removeEventListener('change', debouncedGRNFilter);
-    grnSortSelect.addEventListener('change', function(e) {
-        const [sortBy, sortOrder] = this.value.split('_');
-        grnState.sortBy = sortBy;
-        grnState.sortOrder = sortOrder || 'desc';
-        debouncedGRNFilter();
-    });
-}
+    if (!hasPermission('inventory.view')) {
+        container.innerHTML = `
+            <div style="padding:20px; text-align:center; color:#e74c3c;">
+                <i class="fas fa-lock" style="font-size:24px; display:block; margin-bottom:10px;"></i>
+                Bạn không có quyền xem kho
+            </div>
+        `;
+        return;
+    }
 
-// Tương tự cho STO
-const stoFilterInput = document.getElementById('sto-filter');
-const stoStatusSelect = document.getElementById('sto-status-filter');
-const stoProjectSelect = document.getElementById('sto-project-filter');
-const stoFromWarehouseSelect = document.getElementById('sto-from-warehouse-filter');
-const stoToWarehouseSelect = document.getElementById('sto-to-warehouse-filter');
-const stoSortSelect = document.getElementById('sto-sort');
+    const canEditInventory = hasPermission('inventory.edit');
+    const canCreateGRN = hasPermission('grn.create');
+    const canCreateSTO = hasPermission('sto.create');
 
-if (stoFilterInput) {
-    stoFilterInput.removeEventListener('input', debouncedSTOFilter);
-    stoFilterInput.addEventListener('input', function(e) {
-        stoState.filterText = this.value;
-        debouncedSTOFilter();
-    });
-}
-if (stoStatusSelect) {
-    stoStatusSelect.removeEventListener('change', debouncedSTOFilter);
-    stoStatusSelect.addEventListener('change', function(e) {
-        stoState.statusFilter = this.value;
-        debouncedSTOFilter();
-    });
-}
-if (stoProjectSelect) {
-    stoProjectSelect.removeEventListener('change', debouncedSTOFilter);
-    stoProjectSelect.addEventListener('change', function(e) {
-        stoState.projectFilter = this.value;
-        debouncedSTOFilter();
-    });
-}
-if (stoFromWarehouseSelect) {
-    stoFromWarehouseSelect.removeEventListener('change', debouncedSTOFilter);
-    stoFromWarehouseSelect.addEventListener('change', function(e) {
-        stoState.fromWarehouseFilter = this.value;
-        debouncedSTOFilter();
-    });
-}
-if (stoToWarehouseSelect) {
-    stoToWarehouseSelect.removeEventListener('change', debouncedSTOFilter);
-    stoToWarehouseSelect.addEventListener('change', function(e) {
-        stoState.toWarehouseFilter = this.value;
-        debouncedSTOFilter();
-    });
-}
-if (stoSortSelect) {
-    stoSortSelect.removeEventListener('change', debouncedSTOFilter);
-    stoSortSelect.addEventListener('change', function(e) {
-        const [sortBy, sortOrder] = this.value.split('_');
-        stoState.sortBy = sortBy;
-        stoState.sortOrder = sortOrder || 'desc';
-        debouncedSTOFilter();
-    });
+    // Ẩn/hiện nút
+    const btnAddWH = document.querySelector('#page-inventory .page-header .btn[onclick*="showAddWarehouse"]');
+    if (btnAddWH) btnAddWH.style.display = (tab === 'wh-list' && canEditInventory) ? 'inline-block' : 'none';
+
+    const btnAddGRN = document.querySelector('#page-inventory .page-header .btn[onclick*="showAddGRN"]');
+    if (btnAddGRN) btnAddGRN.style.display = (tab === 'wh-grn' && canCreateGRN) ? 'inline-block' : 'none';
+
+    const btnAddSTO = document.querySelector('#page-inventory .page-header .btn[onclick*="showAddSTO"]');
+    if (btnAddSTO) btnAddSTO.style.display = (tab === 'wh-sto' && canCreateSTO) ? 'inline-block' : 'none';
+
+    let html = `
+        <div class="tab-bar">
+            <div class="tab ${tab === 'wh-list' ? 'active' : ''}" onclick="switchWarehouseTab('wh-list')">📋 Danh sách kho</div>
+            <div class="tab ${tab === 'wh-grn' ? 'active' : ''}" onclick="switchWarehouseTab('wh-grn')">📥 Nhập kho (GRN)</div>
+            <div class="tab ${tab === 'wh-sto' ? 'active' : ''}" onclick="switchWarehouseTab('wh-sto')">📤 Chuyển kho (STO)</div>
+        </div>
+        <div id="wh-tab-content">
+    `;
+
+    try {
+        if (tab === 'wh-list') {
+            html += await renderWarehouseListHTML();
+        } else if (tab === 'wh-grn') {
+            html += await renderGRNListHTML();
+        } else if (tab === 'wh-sto') {
+            html += await renderSTOListHTML();
+        }
+    } catch (error) {
+        console.error('renderWarehousePage error:', error);
+        html += `<div style="padding:20px; text-align:center; color:#e74c3c;">Lỗi tải dữ liệu: ${error.message}</div>`;
+    }
+
+    html += `</div>`;
+    container.innerHTML = html;
+
+    if (tab === 'wh-grn') {
+        attachGRNEvents();
+    }
+    if (tab === 'wh-sto') {
+        attachSTOEvents();
+    }
 }
 
 // ================================================================
-// WAREHOUSE LIST (DANH SÁCH KHO)
+// WAREHOUSE LIST
 // ================================================================
 async function renderWarehouseListHTML() {
     try {
@@ -207,8 +171,25 @@ async function renderWarehouseListHTML() {
     }
 }
 
+function toggleWarehouseFilter() {
+    showAllWarehouses = !showAllWarehouses;
+    switchWarehouseTab('wh-list');
+}
 
-// ====== XEM CHI TIẾT KHO ======
+async function getProjectNameById(projectId) {
+    if (!projectId) return 'Không áp dụng';
+    try {
+        const projects = await api.getProjects();
+        const p = projects.find(pr => pr.id === projectId);
+        return p ? p.name : 'Không tìm thấy';
+    } catch {
+        return 'Không tìm thấy';
+    }
+}
+
+// ================================================================
+// VIEW WAREHOUSE DETAIL
+// ================================================================
 async function viewWarehouseDetail(whId) {
     if (!hasPermission('inventory.view')) {
         showWarning('Bạn không có quyền xem chi tiết kho');
@@ -288,13 +269,18 @@ async function viewWarehouseDetail(whId) {
 // ================================================================
 async function renderGRNListHTML() {
     try {
-        const [grnList, projects, warehouses] = await Promise.all([
+        const [grnList, projects, warehouses, statuses] = await Promise.all([
             api.getGRNs(),
             api.getProjects(),
-            api.getWarehouses()
+            api.getWarehouses(),
+            api.getStatuses('grn')
         ]);
+        
         window._projectsCache = projects;
         window._warehousesCache = warehouses;
+        if (!window._statusesCache) window._statusesCache = {};
+        window._statusesCache['grn'] = statuses;
+        
         saveData('projects', projects);
         saveData('warehouses', warehouses);
 
@@ -360,11 +346,7 @@ async function renderGRNListHTML() {
                 <input type="text" id="grn-filter" placeholder="Tìm theo mã, dự án, NCC, kho..." style="flex:2;" value="${grnState.filterText}">
                 <select id="grn-status-filter" style="flex:1;">
                     <option value="">Tất cả</option>
-                    <option value="DRAFT" ${grnState.statusFilter === 'DRAFT' ? 'selected' : ''}>DRAFT</option>
-                    <option value="RECEIVED" ${grnState.statusFilter === 'RECEIVED' ? 'selected' : ''}>RECEIVED</option>
-                    <option value="QC_CHECKED" ${grnState.statusFilter === 'QC_CHECKED' ? 'selected' : ''}>QC_CHECKED</option>
-                    <option value="COMPLETED" ${grnState.statusFilter === 'COMPLETED' ? 'selected' : ''}>COMPLETED</option>
-                    <option value="REJECTED" ${grnState.statusFilter === 'REJECTED' ? 'selected' : ''}>REJECTED</option>
+                    ${statuses.map(s => `<option value="${s.code}" ${grnState.statusFilter === s.code ? 'selected' : ''}>${s.name}</option>`).join('')}
                 </select>
                 <select id="grn-project-filter" style="flex:1;">
                     <option value="">Tất cả dự án</option>
@@ -404,21 +386,38 @@ async function renderGRNListHTML() {
                     `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="viewPO(${po.id})">${po.code}</span>` :
                     `PO-${String(g.poId || '').padStart(3, '0')}`;
                 const whLink = `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="showWarehouseInfoModal(${g.warehouseId})">${getWarehouseCode(g.warehouseId)}</span>`;
-                const statusBadge = getStatusBadge(g.status);
+                const statusBadge = getStatusBadgeWithInfo(g.status, statuses);
 
                 let actions = `<button class="btn btn-info btn-sm" onclick="viewGRN(${g.id})"><i class="fas fa-eye"></i></button>`;
+                
+                // ✅ Kiểm tra điều kiện cho từng bước
+                const currentStep = g.approvalStep || 1;
+                
                 if (g.status === 'DRAFT' && canEditGRN) {
                     actions += ` <button class="btn btn-warning btn-sm" onclick="editGRN(${g.id})"><i class="fas fa-edit"></i></button>`;
                 }
+                
                 if (g.status === 'DRAFT' && canReceiveGRN) {
-                    actions += ` <button class="btn btn-primary btn-sm" onclick="receiveGRN(${g.id})">Nhận vật tư</button>`;
+                    const canReceive = canApprove(currentStep, 'grn.receive', null);
+                    if (canReceive) {
+                        actions += ` <button class="btn btn-primary btn-sm" onclick="receiveGRN(${g.id})">Nhận vật tư</button>`;
+                    }
                 }
+                
                 if (g.status === 'RECEIVED' && canQCGRN) {
-                    actions += ` <button class="btn btn-primary btn-sm" onclick="qcCheckGRN(${g.id})">QC kiểm tra</button>`;
+                    const canQC = canApprove(currentStep, 'grn.qc', null);
+                    if (canQC) {
+                        actions += ` <button class="btn btn-primary btn-sm" onclick="qcCheckGRN(${g.id})">QC kiểm tra</button>`;
+                    }
                 }
+                
                 if (g.status === 'QC_CHECKED' && canCompleteGRN) {
-                    actions += ` <button class="btn btn-success btn-sm" onclick="completeGRN(${g.id})">Hoàn thành</button>`;
+                    const canComplete = canApprove(currentStep, 'grn.complete', null);
+                    if (canComplete) {
+                        actions += ` <button class="btn btn-success btn-sm" onclick="completeGRN(${g.id})">Hoàn thành</button>`;
+                    }
                 }
+                
                 if ((g.status === 'DRAFT' || g.status === 'RECEIVED') && canDeleteGRN) {
                     actions += ` <button class="btn btn-danger btn-sm" onclick="deleteGRN(${g.id})"><i class="fas fa-trash"></i></button>`;
                 }
@@ -455,100 +454,30 @@ async function getPOById(id) {
 
 function renderGRN() { switchWarehouseTab('wh-grn'); }
 
-// ====== VIEW GRN ======
-async function viewGRN(id) {
-    try {
-        let g = await api.getGRNById ? await api.getGRNById(id) : null;
-        if (!g) {
-            const grns = await api.getGRNs();
-            g = grns.find(item => item.id === id);
-            if (!g) {
-                showError('Không tìm thấy phiếu nhập!');
-                return;
-            }
-        }
-        let items = [];
-        try {
-            if (g.items) {
-                items = typeof g.items === 'string' ? JSON.parse(g.items) : g.items;
-            }
-        } catch (e) { items = []; }
-
-        let itemsHtml = items.map(it =>
-            `<tr><td>${getItemCode(it.itemId)}</td><td>${getItemName(it.itemId)}</td><td>${it.poQty || 0}</td><td>${it.actualQty || 0}</td><td>${it.diff || (it.actualQty - it.poQty)}</td><td>${it.serial || ''}</td><td>${it.condition || ''}</td></tr>`
-        ).join('');
-
-        // Lấy workflow steps từ workflowId của GRN
-        let stepsConfig = [
-            { id: 1, label: 'Lập phiếu' },
-            { id: 2, label: 'Thủ kho nhận' },
-            { id: 3, label: 'QC kiểm tra' },
-            { id: 4, label: 'Hoàn thành' }
-        ];
-        if (g.workflowId) {
-            try {
-                const wf = await api.getWorkflowById ? await api.getWorkflowById(g.workflowId) : null;
-                if (wf && wf.steps) {
-                    const steps = JSON.parse(wf.steps);
-                    stepsConfig = steps.map(s => ({
-                        id: s.step || s.id,
-                        label: s.label || `Bước ${s.step || s.id}`
-                    }));
-                }
-            } catch (e) {
-                console.warn('Không lấy được workflow steps:', e);
-            }
-        }
-        const progressHtml = renderApprovalProgress(g.status, g.approvalStep || 1, stepsConfig);
-
-        showModal('Chi tiết phiếu nhập', `
-            <div class="detail-grid">
-                <div><span class="label">Mã phiếu:</span> <span class="value">${g.code || '--'}</span></div>
-                <div><span class="label">PO liên quan:</span> <span class="value">${g.poId ? 'PO-'+String(g.poId).padStart(3,'0') : ''}</span></div>
-                <div><span class="label">Dự án:</span> <span class="value">${g.projectName || ''}</span></div>
-                <div><span class="label">Kho:</span> <span class="value">${getWarehouseName(g.warehouseId)}</span></div>
-                <div><span class="label">Nhà cung cấp:</span> <span class="value">${g.vendorName || ''}</span></div>
-                <div><span class="label">Ngày nhập:</span> <span class="value">${g.receiptDate || ''}</span></div>
-                <div><span class="label">Người giao:</span> <span class="value">${g.receiver || ''}</span></div>
-                <div><span class="label">Thủ kho nhận:</span> <span class="value">${g.warehouseStaff || ''}</span></div>
-                <div><span class="label">QC xác nhận:</span> <span class="value">${g.qcConfirm || ''}</span></div>
-                <div><span class="label">Kế toán xác nhận:</span> <span class="value">${g.accountantConfirm || ''}</span></div>
-                <div><span class="label">Hóa đơn:</span> <span class="value">${g.invoice || ''}</span></div>
-                <div><span class="label">Trạng thái:</span> <span class="value">${getStatusBadge(g.status)}</span></div>
-                <div style="grid-column:1/-1;"><span class="label">Tiến độ thực hiện:</span><br>${progressHtml}</div>
-                <div style="grid-column:1/-1;"><span class="label">Ghi chú:</span> <span class="value">${g.note || ''}</span></div>
-                <div style="grid-column:1/-1;"><span class="label">Chi tiết vật tư:</span>
-                    <div class="table-responsive">
-                        <table><thead><tr><th>Mã</th><th>Tên</th><th>PO Qty</th><th>Actual</th><th>Chênh lệch</th><th>Serial/Lô</th><th>Tình trạng</th></tr></thead>
-                        <tbody>${itemsHtml}</tbody></table>
-                    </div>
-                </div>
-            </div>
-            <div class="modal-actions">
-                <button class="btn btn-info" onclick="printGRN(${g.id}); closeModal();"><i class="fas fa-print"></i> In phiếu</button>
-                <button class="btn btn-danger" onclick="closeModal()">Đóng</button>
-            </div>
-        `);
-    } catch (error) {
-        showError('Lỗi khi tải chi tiết GRN: ' + error.message);
-    }
-}
-
-// ====== TẠO GRN ======
-function showAddGRN() {
+// ================================================================
+// GRN CRUD & WORKFLOW
+// ================================================================
+function showAddGRN(poId = null) {
     if (!hasPermission('grn.create')) {
         showWarning('Bạn không có quyền tạo GRN');
         return;
     }
     api.getPOs().then(pos => {
-        const poList = pos.filter(p => p.status === 'APPROVED');
+        let poList = pos.filter(p => p.status === 'APPROVED' || p.status === 'COMPLETE');
+        if (poId) {
+            poList = poList.filter(p => p.id === poId);
+            if (poList.length === 0) {
+                showWarning('PO này chưa được duyệt hoặc đã có GRN.');
+                return;
+            }
+        }
         if (!poList.length) {
             showWarning('Không có PO nào APPROVED để nhập kho.');
             return;
         }
         api.getWarehouses().then(warehouses => {
             const whOpts = warehouses.map(w => `<option value="${w.id}">${w.code} - ${w.name}</option>`).join('');
-            const poOpts = poList.map(p => `<option value="${p.id}">${p.code} - ${p.projectName}</option>`).join('');
+            const poOpts = poList.map(p => `<option value="${p.id}" ${p.id === poId ? 'selected' : ''}>${p.code} - ${p.projectName}</option>`).join('');
             showModal('Tạo phiếu nhập kho (GRN)', `
                 <div class="form-group"><label>PO nguồn</label><select id="f-grn-po">${poOpts}</select></div>
                 <div class="form-group"><label>Kho nhập</label><select id="f-grn-wh">${whOpts}</select></div>
@@ -569,8 +498,8 @@ function showAddGRN() {
                 loadGRNItemsFromPO(parseInt(this.value));
             });
             setTimeout(() => {
-                const poId = parseInt(document.getElementById('f-grn-po').value);
-                if (poId) loadGRNItemsFromPO(poId);
+                const selectedPoId = parseInt(document.getElementById('f-grn-po').value);
+                if (selectedPoId) loadGRNItemsFromPO(selectedPoId);
             }, 100);
         }).catch(err => showError('Không thể tải kho: ' + err.message));
     }).catch(err => showError('Không thể tải PO: ' + err.message));
@@ -683,7 +612,93 @@ async function saveGRN() {
     }
 }
 
-// ====== SỬA GRN (DRAFT) ======
+// ====== VIEW GRN ======
+async function viewGRN(id) {
+    try {
+        let g = await api.getGRNById ? await api.getGRNById(id) : null;
+        if (!g) {
+            const grns = await api.getGRNs();
+            g = grns.find(item => item.id === id);
+            if (!g) {
+                showError('Không tìm thấy phiếu nhập!');
+                return;
+            }
+        }
+        
+        const statuses = await api.getStatuses('grn');
+        if (!window._statusesCache) window._statusesCache = {};
+        window._statusesCache['grn'] = statuses;
+        
+        let items = [];
+        try {
+            if (g.items) {
+                items = typeof g.items === 'string' ? JSON.parse(g.items) : g.items;
+            }
+        } catch (e) { items = []; }
+
+        let itemsHtml = items.map(it => {
+            const item = getItemName(it.itemId);
+            return `<tr><td>${getItemCode(it.itemId)}</td><td>${item}</td><td>${it.poQty || 0}</td><td>${it.actualQty || 0}</td><td>${it.diff || (it.actualQty - it.poQty)}</td><td>${it.serial || ''}</td><td>${it.condition || ''}</td></tr>`;
+        }).join('');
+
+        let stepsConfig = [
+            { id: 1, label: 'Lập phiếu' },
+            { id: 2, label: 'Thủ kho nhận' },
+            { id: 3, label: 'QC kiểm tra' },
+            { id: 4, label: 'Hoàn thành' }
+        ];
+        if (g.workflowId) {
+            try {
+                const wf = await api.getWorkflowById ? await api.getWorkflowById(g.workflowId) : null;
+                if (wf && wf.steps) {
+                    const steps = JSON.parse(wf.steps);
+                    stepsConfig = steps.map(s => ({
+                        id: s.step || s.id,
+                        label: s.label || `Bước ${s.step || s.id}`
+                    }));
+                }
+            } catch (e) {
+                console.warn('Không lấy được workflow steps:', e);
+            }
+        }
+        const currentStep = g.approvalStep || 1;
+        const progressHtml = renderApprovalProgress(g.status, currentStep, stepsConfig, statuses);
+        const statusBadge = getStatusBadgeWithInfo(g.status, statuses);
+
+        showModal('Chi tiết phiếu nhập', `
+            <div class="detail-grid">
+                <div><span class="label">Mã phiếu:</span> <span class="value">${g.code || '--'}</span></div>
+                <div><span class="label">PO liên quan:</span> <span class="value">${g.poId ? 'PO-'+String(g.poId).padStart(3,'0') : ''}</span></div>
+                <div><span class="label">Dự án:</span> <span class="value">${g.projectName || ''}</span></div>
+                <div><span class="label">Kho:</span> <span class="value">${getWarehouseName(g.warehouseId)}</span></div>
+                <div><span class="label">Nhà cung cấp:</span> <span class="value">${g.vendorName || ''}</span></div>
+                <div><span class="label">Ngày nhập:</span> <span class="value">${g.receiptDate || ''}</span></div>
+                <div><span class="label">Người giao:</span> <span class="value">${g.receiver || ''}</span></div>
+                <div><span class="label">Thủ kho nhận:</span> <span class="value">${g.warehouseStaff || ''}</span></div>
+                <div><span class="label">QC xác nhận:</span> <span class="value">${g.qcConfirm || ''}</span></div>
+                <div><span class="label">Kế toán xác nhận:</span> <span class="value">${g.accountantConfirm || ''}</span></div>
+                <div><span class="label">Hóa đơn:</span> <span class="value">${g.invoice || ''}</span></div>
+                <div><span class="label">Trạng thái:</span> <span class="value">${statusBadge}</span></div>
+                <div style="grid-column:1/-1;"><span class="label">Tiến độ thực hiện:</span><br>${progressHtml}</div>
+                <div style="grid-column:1/-1;"><span class="label">Ghi chú:</span> <span class="value">${g.note || ''}</span></div>
+                <div style="grid-column:1/-1;"><span class="label">Chi tiết vật tư:</span>
+                    <div class="table-responsive">
+                        <table><thead><tr><th>Mã</th><th>Tên</th><th>PO Qty</th><th>Actual</th><th>Chênh lệch</th><th>Serial/Lô</th><th>Tình trạng</th></tr></thead>
+                        <tbody>${itemsHtml}</tbody></table>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-info" onclick="printGRN(${g.id}); closeModal();"><i class="fas fa-print"></i> In phiếu</button>
+                <button class="btn btn-danger" onclick="closeModal()">Đóng</button>
+            </div>
+        `);
+    } catch (error) {
+        showError('Lỗi khi tải chi tiết GRN: ' + error.message);
+    }
+}
+
+// ====== EDIT GRN ======
 async function editGRN(id) {
     if (!hasPermission('grn.edit')) {
         showWarning('Bạn không có quyền sửa GRN');
@@ -823,7 +838,7 @@ async function updateGRN(id) {
     }
 }
 
-// ====== THỦ KHO NHẬN ======
+// ====== RECEIVE GRN ======
 async function receiveGRN(id) {
     if (!hasPermission('grn.receive')) {
         showWarning('Bạn không có quyền nhận GRN');
@@ -957,7 +972,7 @@ async function confirmReceiveGRN(id) {
     }
 }
 
-// ====== QC KIỂM TRA ======
+// ====== QC CHECK GRN ======
 async function qcCheckGRN(id) {
     if (!hasPermission('grn.qc')) {
         showWarning('Bạn không có quyền QC GRN');
@@ -1040,70 +1055,7 @@ async function confirmQCCheckGRN(id) {
     }
 }
 
-// ====== RENDER PAGE ======
-async function renderWarehousePage(tab) {
-    currentWhTab = tab || 'wh-list';
-    const container = document.getElementById('inventory-content');
-
-    if (!hasPermission('inventory.view')) {
-        container.innerHTML = `
-            <div style="padding:20px; text-align:center; color:#e74c3c;">
-                <i class="fas fa-lock" style="font-size:24px; display:block; margin-bottom:10px;"></i>
-                Bạn không có quyền xem kho
-            </div>
-        `;
-        return;
-    }
-
-    const canEditInventory = hasPermission('inventory.edit');
-    const canCreateGRN = hasPermission('grn.create');
-    const canCreateSTO = hasPermission('sto.create');
-
-    // Ẩn/hiện nút
-    const btnAddWH = document.querySelector('#page-inventory .page-header .btn[onclick*="showAddWarehouse"]');
-    if (btnAddWH) btnAddWH.style.display = (tab === 'wh-list' && canEditInventory) ? 'inline-block' : 'none';
-
-    const btnAddGRN = document.querySelector('#page-inventory .page-header .btn[onclick*="showAddGRN"]');
-    if (btnAddGRN) btnAddGRN.style.display = (tab === 'wh-grn' && canCreateGRN) ? 'inline-block' : 'none';
-
-    const btnAddSTO = document.querySelector('#page-inventory .page-header .btn[onclick*="showAddSTO"]');
-    if (btnAddSTO) btnAddSTO.style.display = (tab === 'wh-sto' && canCreateSTO) ? 'inline-block' : 'none';
-
-    let html = `
-        <div class="tab-bar">
-            <div class="tab ${tab === 'wh-list' ? 'active' : ''}" onclick="switchWarehouseTab('wh-list')">📋 Danh sách kho</div>
-            <div class="tab ${tab === 'wh-grn' ? 'active' : ''}" onclick="switchWarehouseTab('wh-grn')">📥 Nhập kho (GRN)</div>
-            <div class="tab ${tab === 'wh-sto' ? 'active' : ''}" onclick="switchWarehouseTab('wh-sto')">📤 Chuyển kho (STO)</div>
-        </div>
-        <div id="wh-tab-content">
-    `;
-
-    try {
-        if (tab === 'wh-list') {
-            html += await renderWarehouseListHTML();
-        } else if (tab === 'wh-grn') {
-            html += await renderGRNListHTML();
-        } else if (tab === 'wh-sto') {
-            html += await renderSTOListHTML();
-        }
-    } catch (error) {
-        console.error('renderWarehousePage error:', error);
-        html += `<div style="padding:20px; text-align:center; color:#e74c3c;">Lỗi tải dữ liệu: ${error.message}</div>`;
-    }
-
-    html += `</div>`;
-    container.innerHTML = html;
-
-    // Gắn sự kiện cho GRN và STO (nếu đang ở tab tương ứng)
-    if (tab === 'wh-grn') {
-        attachGRNEvents();
-    }
-    if (tab === 'wh-sto') {
-        attachSTOEvents();
-    }
-}
-
-// ====== HOÀN THÀNH GRN ======
+// ====== COMPLETE GRN ======
 async function completeGRN(id) {
     if (!hasPermission('grn.complete')) {
         showWarning('Bạn không có quyền hoàn thành GRN');
@@ -1132,7 +1084,7 @@ async function completeGRN(id) {
     }
 }
 
-// ====== XÓA GRN ======
+// ====== DELETE GRN ======
 async function deleteGRN(id) {
     if (!hasPermission('grn.delete')) {
         showWarning('Bạn không có quyền xóa GRN');
@@ -1211,84 +1163,23 @@ function resetGRNFilters() {
     switchWarehouseTab('wh-grn');
 }
 
-function attachSTOEvents() {
-    const filterInput = document.getElementById('sto-filter');
-    const statusSelect = document.getElementById('sto-status-filter');
-    const projectSelect = document.getElementById('sto-project-filter');
-    const fromWarehouseSelect = document.getElementById('sto-from-warehouse-filter');
-    const toWarehouseSelect = document.getElementById('sto-to-warehouse-filter');
-    const sortSelect = document.getElementById('sto-sort');
-
-    if (filterInput) {
-        filterInput.removeEventListener('input', debouncedSTOFilter);
-        filterInput.addEventListener('input', function(e) {
-            stoState.filterText = this.value;
-            debouncedSTOFilter();
-        });
-    }
-    if (statusSelect) {
-        statusSelect.removeEventListener('change', debouncedSTOFilter);
-        statusSelect.addEventListener('change', function(e) {
-            stoState.statusFilter = this.value;
-            debouncedSTOFilter();
-        });
-    }
-    if (projectSelect) {
-        projectSelect.removeEventListener('change', debouncedSTOFilter);
-        projectSelect.addEventListener('change', function(e) {
-            stoState.projectFilter = this.value;
-            debouncedSTOFilter();
-        });
-    }
-    if (fromWarehouseSelect) {
-        fromWarehouseSelect.removeEventListener('change', debouncedSTOFilter);
-        fromWarehouseSelect.addEventListener('change', function(e) {
-            stoState.fromWarehouseFilter = this.value;
-            debouncedSTOFilter();
-        });
-    }
-    if (toWarehouseSelect) {
-        toWarehouseSelect.removeEventListener('change', debouncedSTOFilter);
-        toWarehouseSelect.addEventListener('change', function(e) {
-            stoState.toWarehouseFilter = this.value;
-            debouncedSTOFilter();
-        });
-    }
-    if (sortSelect) {
-        sortSelect.removeEventListener('change', debouncedSTOFilter);
-        sortSelect.addEventListener('change', function(e) {
-            const [sortBy, sortOrder] = this.value.split('_');
-            stoState.sortBy = sortBy;
-            stoState.sortOrder = sortOrder || 'desc';
-            debouncedSTOFilter();
-        });
-    }
-}
-
-function resetSTOFilters() {
-    stoState.filterText = '';
-    stoState.statusFilter = '';
-    stoState.projectFilter = '';
-    stoState.fromWarehouseFilter = '';
-    stoState.toWarehouseFilter = '';
-    stoState.sortBy = 'createdAt';
-    stoState.sortOrder = 'desc';
-    stoState.page = 1;
-    switchWarehouseTab('wh-sto');
-}
-
 // ================================================================
 // STO - CHUYỂN KHO
 // ================================================================
 async function renderSTOListHTML() {
     try {
-        const [stoList, projects, warehouses] = await Promise.all([
+        const [stoList, projects, warehouses, statuses] = await Promise.all([
             api.getSTOs(),
             api.getProjects(),
-            api.getWarehouses()
+            api.getWarehouses(),
+            api.getStatuses('sto')
         ]);
+        
         window._projectsCache = projects;
         window._warehousesCache = warehouses;
+        if (!window._statusesCache) window._statusesCache = {};
+        window._statusesCache['sto'] = statuses;
+        
         saveData('projects', projects);
         saveData('warehouses', warehouses);
 
@@ -1358,10 +1249,7 @@ async function renderSTOListHTML() {
                 <input type="text" id="sto-filter" placeholder="Tìm theo mã, dự án, kho..." style="flex:2;" value="${stoState.filterText}">
                 <select id="sto-status-filter" style="flex:1;">
                     <option value="">Tất cả</option>
-                    <option value="DRAFT" ${stoState.statusFilter === 'DRAFT' ? 'selected' : ''}>DRAFT</option>
-                    <option value="PENDING" ${stoState.statusFilter === 'PENDING' ? 'selected' : ''}>PENDING</option>
-                    <option value="APPROVED" ${stoState.statusFilter === 'APPROVED' ? 'selected' : ''}>APPROVED</option>
-                    <option value="COMPLETED" ${stoState.statusFilter === 'COMPLETED' ? 'selected' : ''}>COMPLETED</option>
+                    ${statuses.map(s => `<option value="${s.code}" ${stoState.statusFilter === s.code ? 'selected' : ''}>${s.name}</option>`).join('')}
                 </select>
                 <select id="sto-project-filter" style="flex:1;">
                     <option value="">Tất cả dự án</option>
@@ -1402,21 +1290,37 @@ async function renderSTOListHTML() {
                     (s.projectName || '');
                 const fromWhLink = `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="showWarehouseInfoModal(${s.fromWarehouseId})">${getWarehouseCode(s.fromWarehouseId)}</span>`;
                 const toWhLink = `<span style="cursor:pointer; color:#1a3c6e; text-decoration:underline;" onclick="showWarehouseInfoModal(${s.toWarehouseId})">${getWarehouseCode(s.toWarehouseId)}</span>`;
-                const statusBadge = getStatusBadge(s.status);
+                const statusBadge = getStatusBadgeWithInfo(s.status, statuses);
 
                 let actions = `<button class="btn btn-info btn-sm" onclick="viewSTO(${s.id})"><i class="fas fa-eye"></i></button>`;
+                
+                const currentStep = s.approvalStep || 1;
+                
                 if (s.status === 'DRAFT' && canEditSTO) {
                     actions += ` <button class="btn btn-warning btn-sm" onclick="editSTO(${s.id})"><i class="fas fa-edit"></i></button>`;
                 }
+                
                 if (s.status === 'DRAFT' && canSubmitSTO) {
-                    actions += ` <button class="btn btn-success btn-sm" onclick="submitSTO(${s.id})">Xác nhận</button>`;
+                    const canSubmit = canApprove(currentStep, 'sto.submit', null);
+                    if (canSubmit) {
+                        actions += ` <button class="btn btn-success btn-sm" onclick="submitSTO(${s.id})">Xác nhận</button>`;
+                    }
                 }
+                
                 if (s.status === 'PENDING' && canApproveSTO) {
-                    actions += ` <button class="btn btn-success btn-sm" onclick="approveSTO(${s.id})">Duyệt</button>`;
+                    const canApprove = canApprove(currentStep, 'sto.approve', null);
+                    if (canApprove) {
+                        actions += ` <button class="btn btn-success btn-sm" onclick="approveSTO(${s.id})">Duyệt</button>`;
+                    }
                 }
+                
                 if (s.status === 'APPROVED' && canCompleteSTO) {
-                    actions += ` <button class="btn btn-success btn-sm" onclick="completeSTO(${s.id})">Hoàn thành</button>`;
+                    const canComplete = canApprove(currentStep, 'sto.complete', null);
+                    if (canComplete) {
+                        actions += ` <button class="btn btn-success btn-sm" onclick="completeSTO(${s.id})">Hoàn thành</button>`;
+                    }
                 }
+                
                 if ((s.status === 'DRAFT' || s.status === 'PENDING') && canDeleteSTO) {
                     actions += ` <button class="btn btn-danger btn-sm" onclick="deleteSTO(${s.id})"><i class="fas fa-trash"></i></button>`;
                 }
@@ -1441,15 +1345,58 @@ async function renderSTOListHTML() {
     }
 }
 
-function resetGRNFilters() {
-    grnState.filterText = '';
-    grnState.statusFilter = '';
-    grnState.projectFilter = '';
-    grnState.warehouseFilter = '';
-    grnState.sortBy = 'createdAt';
-    grnState.sortOrder = 'desc';
-    grnState.page = 1;
-    switchWarehouseTab('wh-grn');
+function attachSTOEvents() {
+    const filterInput = document.getElementById('sto-filter');
+    const statusSelect = document.getElementById('sto-status-filter');
+    const projectSelect = document.getElementById('sto-project-filter');
+    const fromWarehouseSelect = document.getElementById('sto-from-warehouse-filter');
+    const toWarehouseSelect = document.getElementById('sto-to-warehouse-filter');
+    const sortSelect = document.getElementById('sto-sort');
+
+    if (filterInput) {
+        filterInput.removeEventListener('input', debouncedSTOFilter);
+        filterInput.addEventListener('input', function(e) {
+            stoState.filterText = this.value;
+            debouncedSTOFilter();
+        });
+    }
+    if (statusSelect) {
+        statusSelect.removeEventListener('change', debouncedSTOFilter);
+        statusSelect.addEventListener('change', function(e) {
+            stoState.statusFilter = this.value;
+            debouncedSTOFilter();
+        });
+    }
+    if (projectSelect) {
+        projectSelect.removeEventListener('change', debouncedSTOFilter);
+        projectSelect.addEventListener('change', function(e) {
+            stoState.projectFilter = this.value;
+            debouncedSTOFilter();
+        });
+    }
+    if (fromWarehouseSelect) {
+        fromWarehouseSelect.removeEventListener('change', debouncedSTOFilter);
+        fromWarehouseSelect.addEventListener('change', function(e) {
+            stoState.fromWarehouseFilter = this.value;
+            debouncedSTOFilter();
+        });
+    }
+    if (toWarehouseSelect) {
+        toWarehouseSelect.removeEventListener('change', debouncedSTOFilter);
+        toWarehouseSelect.addEventListener('change', function(e) {
+            stoState.toWarehouseFilter = this.value;
+            debouncedSTOFilter();
+        });
+    }
+    if (sortSelect) {
+        sortSelect.removeEventListener('change', debouncedSTOFilter);
+        sortSelect.addEventListener('change', function(e) {
+            const [sortBy, sortOrder] = this.value.split('_');
+            stoState.sortBy = sortBy;
+            stoState.sortOrder = sortOrder || 'desc';
+            debouncedSTOFilter();
+        });
+    }
 }
 
 function resetSTOFilters() {
@@ -1478,6 +1425,11 @@ async function viewSTO(id) {
                 return;
             }
         }
+        
+        const statuses = await api.getStatuses('sto');
+        if (!window._statusesCache) window._statusesCache = {};
+        window._statusesCache['sto'] = statuses;
+        
         let items = [];
         try {
             if (s.items) {
@@ -1488,7 +1440,6 @@ async function viewSTO(id) {
             `<tr><td>${getItemCode(it.itemId)}</td><td>${getItemName(it.itemId)}</td><td>${it.requestedQty || 0}</td><td>${it.actualQty || 0}</td></tr>`
         ).join('');
 
-        // Lấy workflow steps từ workflowId của STO
         let stepsConfig = [
             { id: 1, label: 'Lập phiếu' },
             { id: 2, label: 'Duyệt' },
@@ -1508,7 +1459,9 @@ async function viewSTO(id) {
                 console.warn('Không lấy được workflow steps:', e);
             }
         }
-        const progressHtml = renderApprovalProgress(s.status, s.approvalStep || 1, stepsConfig);
+        const currentStep = s.approvalStep || 1;
+        const progressHtml = renderApprovalProgress(s.status, currentStep, stepsConfig, statuses);
+        const statusBadge = getStatusBadgeWithInfo(s.status, statuses);
         const noteHtml = s.status === 'COMPLETED' 
             ? `<div style="padding:8px; background:#f0fdf4; border-radius:4px; color:#15803d; font-weight:500;">${s.note || ''}</div>`
             : `<div style="padding:8px; background:#f8fafc; border-radius:4px; border:1px solid #e2e8f0;">${s.note || ''}</div>`;
@@ -1525,7 +1478,7 @@ async function viewSTO(id) {
                 <div><span class="label">Thủ kho xuất:</span> <span class="value">${s.warehouseStaff || ''}</span></div>
                 <div><span class="label">Người vận chuyển:</span> <span class="value">${s.transporter || ''}</span></div>
                 <div><span class="label">Giờ xuất:</span> <span class="value">${s.departureTime || ''}</span></div>
-                <div><span class="label">Trạng thái:</span> <span class="value">${getStatusBadge(s.status)}</span></div>
+                <div><span class="label">Trạng thái:</span> <span class="value">${statusBadge}</span></div>
                 <div style="grid-column:1/-1;"><span class="label">Tiến độ thực hiện:</span><br>${progressHtml}</div>
                 <div style="grid-column:1/-1;">
                     <span class="label">Ghi chú:</span> ${noteHtml}
@@ -1548,7 +1501,7 @@ async function viewSTO(id) {
     }
 }
 
-// ====== TẠO STO ======
+// ====== CREATE STO ======
 function showAddSTO() {
     if (!hasPermission('sto.create')) {
         showWarning('Bạn không có quyền tạo STO');
@@ -1655,7 +1608,7 @@ async function saveSTO() {
     }
 }
 
-// ====== SỬA STO ======
+// ====== EDIT STO ======
 async function editSTO(id) {
     if (!hasPermission('sto.edit')) {
         showWarning('Bạn không có quyền sửa STO');
@@ -1789,7 +1742,7 @@ async function updateSTO(id) {
     }
 }
 
-// ====== SUBMIT, APPROVE, COMPLETE, DELETE STO ======
+// ====== SUBMIT STO ======
 async function submitSTO(id) {
     if (!hasPermission('sto.submit')) {
         showWarning('Bạn không có quyền gửi duyệt STO');
@@ -1804,6 +1757,7 @@ async function submitSTO(id) {
     }
 }
 
+// ====== APPROVE STO ======
 async function approveSTO(id) {
     if (!hasPermission('sto.approve')) {
         showWarning('Bạn không có quyền duyệt STO');
@@ -1818,6 +1772,7 @@ async function approveSTO(id) {
     }
 }
 
+// ====== COMPLETE STO ======
 async function completeSTO(id) {
     if (!hasPermission('sto.complete')) {
         showWarning('Bạn không có quyền hoàn thành STO');
@@ -1835,6 +1790,7 @@ async function completeSTO(id) {
     }
 }
 
+// ====== DELETE STO ======
 async function deleteSTO(id) {
     if (!hasPermission('sto.delete')) {
         showWarning('Bạn không có quyền xóa STO');
@@ -1851,7 +1807,7 @@ async function deleteSTO(id) {
 }
 
 // ================================================================
-// CRUD KHO & INVENTORY (GIỮ NGUYÊN NHƯNG DÙNG API + PERMISSION)
+// CRUD KHO & INVENTORY
 // ================================================================
 async function showAddWarehouse() {
     if (!hasPermission('inventory.edit')) {
@@ -1913,12 +1869,9 @@ async function saveWarehouse() {
         const newWh = { code, name, type, projectId: type === 'SITE' ? projectId : null, manager, address, status, note };
         await api.createWarehouse(newWh);
         closeModal();
-        
-        // ✅ Cập nhật cache
         const freshWarehouses = await api.getWarehouses();
         window._warehousesCache = freshWarehouses;
         saveData('warehouses', freshWarehouses);
-        
         switchWarehouseTab('wh-list');
         showSuccess('Thêm kho thành công!');
     } catch (error) {
@@ -2118,26 +2071,7 @@ window.printSTO = function(id) {
     showInfo('Chức năng in STO đang được phát triển.');
 };
 
-function toggleWarehouseFilter() {
-    showAllWarehouses = !showAllWarehouses;
-    switchWarehouseTab('wh-list');
-}
-
-async function getProjectNameById(projectId) {
-    if (!projectId) return 'Không áp dụng';
-    try {
-        const projects = await api.getProjects();
-        const p = projects.find(pr => pr.id === projectId);
-        return p ? p.name : 'Không tìm thấy';
-    } catch {
-        return 'Không tìm thấy';
-    }
-}
-Object.defineProperty(window, 'currentWhTab', { get: () => currentWhTab });
-
-// ================================================================
-// EXPORT CÁC HÀM RA WINDOW
-// ================================================================
+// ====== EXPORT ======
 window.renderWarehousePage = renderWarehousePage;
 window.renderWarehouseListHTML = renderWarehouseListHTML;
 window.viewWarehouseDetail = viewWarehouseDetail;
@@ -2173,15 +2107,11 @@ window.editInventoryItem = editInventoryItem;
 window.updateInventoryItem = updateInventoryItem;
 window.deleteInventoryItem = deleteInventoryItem;
 window.showWarehouseInfoModal = showWarehouseInfoModal;
-window.renderGRNProgress = renderGRNProgress;
-window.renderSTOProgress = renderSTOProgress;
 window.printGRN = printGRN;
 window.printSTO = printSTO;
 window.resetGRNFilters = resetGRNFilters;
 window.resetSTOFilters = resetSTOFilters;
 window.toggleWarehouseFilter = toggleWarehouseFilter;
 window.showAllWarehouses = showAllWarehouses;
-window.toggleWarehouseFilter = toggleWarehouseFilter;
 
-
-console.log('✅ Warehouse module updated with full permission checks.');
+console.log('✅ Warehouse module updated with approval level and canApprove.');

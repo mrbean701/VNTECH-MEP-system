@@ -29,15 +29,23 @@ public class POService {
     private final ApprovalHistoryRepository approvalHistoryRepository;
     private final ObjectMapper objectMapper;
     private final WorkflowService workflowService;
-    private final StatusService statusService; // ✅ Đã thêm
+    private final StatusService statusService;
     private final CurrentUserUtil currentUserUtil;
 
-    private static final List<String> PENDING_STATUSES = Arrays.asList(
+                private static final List<String> PENDING_STATUSES = Arrays.asList(
             "PENDING", "PENDING_PLANNING", "PENDING_PROJECT", "PENDING_CEO",
             "PLANNING_APPROVED", "PROJECT_APPROVED"
     );
 
-    // ===== HELPERS =====
+    // Các trạng thái "kết thúc / hoàn tất" không được tự áp dụng khi vẫn còn bước duyệt phía sau
+    private static final java.util.Set<String> FINAL_STATUS_CODES = new java.util.HashSet<>(Arrays.asList(
+            "APPROVED", "COMPLETED", "COMPLETE", "CONFIRMED", "RECEIVED", "QC_CHECKED"
+    ));
+
+    private static boolean isFinalStatusCode(String code) {
+        return code != null && FINAL_STATUS_CODES.contains(code);
+    }
+
     private String generateCode(String prefix) {
         long count = poRepository.count() + 1;
         String code = prefix + "-" + String.format("%03d", count);
@@ -52,7 +60,6 @@ public class POService {
         return PENDING_STATUSES.contains(status);
     }
 
-    // ===== GETTERS =====
     public List<PO> getAll() {
         return poRepository.findAll();
     }
@@ -75,7 +82,6 @@ public class POService {
         return poRepository.findByStatus(status);
     }
 
-    // ===== CREATE =====
     @Transactional
     public PO create(PO po) {
         if (!currentUserUtil.hasPermission("po.create")) {
@@ -117,7 +123,6 @@ public class POService {
         return create(poDetails);
     }
 
-    // ===== UPDATE =====
     @Transactional
     public PO update(Long id, PO details) {
         PO po = getById(id);
@@ -145,7 +150,7 @@ public class POService {
         return poRepository.save(po);
     }
 
-    // ===== SUBMIT =====
+    // ✅ SUBMIT - Bắt đầu tính currentStep
     @Transactional
     public void submit(Long id) {
         PO po = getById(id);
@@ -162,33 +167,15 @@ public class POService {
             throw new RuntimeException("Workflow không có bước duyệt nào");
         }
 
-        // Nếu workflow có 1 bước → tự động duyệt luôn
-        if (steps.size() == 1) {
-            if (!currentUserUtil.hasPermission("po.approve")) {
-                throw new RuntimeException("Bạn không có quyền duyệt PO");
-            }
-
-            Map<String, Object> firstStep = steps.get(0);
-            String statusCode = (String) firstStep.get("statusCode");
-            po.setStatus(statusCode != null && !statusCode.isEmpty() ? statusCode : "PENDING");
-            po.setApprovalStep(1);
-            po.setUpdatedAt(LocalDate.now());
-            poRepository.save(po);
-
-            approve(id);
-            return;
-        }
-
-        // Nhiều bước → chuyển sang PENDING bước 1
-        Map<String, Object> firstStep = steps.get(0);
-        String statusCode = (String) firstStep.get("statusCode");
-        po.setStatus(statusCode != null && !statusCode.isEmpty() ? statusCode : "PENDING");
+        // ✅ Bắt đầu tính currentStep = 1
         po.setApprovalStep(1);
+        String statusCode = workflowService.getStatusForStep(wf.getId(), 1);
+        po.setStatus(statusCode != null && !statusCode.isEmpty() ? statusCode : "PENDING");
         po.setUpdatedAt(LocalDate.now());
         poRepository.save(po);
     }
 
-    // ===== APPROVE =====
+    // ✅ APPROVE
     @Transactional
     public void approve(Long id) {
         PO po = getById(id);
@@ -207,7 +194,9 @@ public class POService {
 
         String permissionKey = (String) step.get("permissionKey");
         Long requiredDeptId = step.get("departmentId") != null ? ((Number) step.get("departmentId")).longValue() : null;
-        if (!currentUserUtil.hasPermissionAndDepartment(permissionKey, requiredDeptId)) {
+
+        // ✅ Kiểm tra điều kiện duyệt
+        if (!currentUserUtil.canApproveStep(currentStep, permissionKey, requiredDeptId)) {
             throw new RuntimeException("Bạn không có quyền duyệt bước này");
         }
 
@@ -222,28 +211,32 @@ public class POService {
         history.setWorkflowId(wf.getId());
         history.setStep(currentStep);
         history.setApproverId(currentUser.getId());
-        history.setApproverName(currentUser.getName());
+                history.setApproverName(currentUser.getName());
         history.setStatusBefore(po.getStatus());
 
+        // ✅ Nếu là bước cuối cùng → thực sự duyệt xong mới APPROVED
         if (currentStep == steps.size()) {
-            // Bước cuối → APPROVED
             po.setStatus("APPROVED");
-            po.setApprovalStep(currentStep);
+            po.setApprovalStep(0); // Kết thúc
         } else {
-            // Chuyển sang bước tiếp theo
-            po.setApprovalStep(currentStep + 1);
-            String nextStatusCode = workflowService.getStatusForStep(wf.getId(), currentStep + 1);
+            // ✅ Vẫn còn các bước phía sau → chỉ di chuyển tới bước kế tiếp,
+            //    tuyệt đối không được tự đánh dấu trạng thái "kết thúc" trước hạn.
+            int nextStep = currentStep + 1;
+            po.setApprovalStep(nextStep);
 
-            // ✅ Fallback an toàn: nếu không có mapping, lấy status mặc định của PO
-            if (nextStatusCode == null || nextStatusCode.isEmpty()) {
-                try {
-                    Status defaultStatus = statusService.getDefaultStatus("po");
-                    nextStatusCode = defaultStatus != null ? defaultStatus.getCode() : "PENDING";
-                } catch (Exception e) {
-                    nextStatusCode = "PENDING";
-                }
+            String nextStatusCode = workflowService.getStatusForStep(wf.getId(), nextStep);
+            // Trạng thái "kế tiếp" chỉ dùng được khi nó KHÔNG phải trạng thái kết thúc
+            // (vd APPROVED / COMPLETED / CONFIRMED...). Nếu người quản trị cấu hình code
+            // của bước (như bước CEO) bằng một trạng thái kết thúc thì không được áp dụng
+            // ngay — vì người duyệt bước cuối chưa bấm duyệt.
+            if (nextStep < steps.size()) {
+                po.setStatus(nextStatusCode != null && !nextStatusCode.isEmpty() ? nextStatusCode : "PENDING");
+            } else {
+                // Đang dừng ở bước cuối chờ người duyệt cuối cùng → giữ trạng thái chờ duyệt
+                boolean lastCodeIsFinal = isFinalStatusCode(nextStatusCode);
+                po.setStatus((!lastCodeIsFinal && nextStatusCode != null && !nextStatusCode.isEmpty())
+                        ? nextStatusCode : "PENDING");
             }
-            po.setStatus(nextStatusCode);
         }
 
         history.setStatusAfter(po.getStatus());
@@ -253,7 +246,6 @@ public class POService {
         poRepository.save(po);
     }
 
-    // ===== REJECT =====
     @Transactional
     public void reject(Long id) {
         PO po = getById(id);
@@ -268,7 +260,6 @@ public class POService {
         poRepository.save(po);
     }
 
-    // ===== DELETE =====
     @Transactional
     public void delete(Long id) {
         PO po = getById(id);

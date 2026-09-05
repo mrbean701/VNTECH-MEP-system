@@ -145,7 +145,6 @@ function viewWorkflowDetailWithStep(id, currentStep) {
         steps = [];
     }
 
-    // Lấy status mapping từ API
     let statusMap = {};
     api.getWorkflowStepStatuses(wf.id).then(mappings => {
         if (mappings && Array.isArray(mappings)) {
@@ -173,8 +172,7 @@ function viewWorkflowDetailWithStep(id, currentStep) {
         const statusText = isCompleted ? 'Đã hoàn thành' : (isCurrent ? 'Đang thực hiện' : 'Chưa đến');
 
         const deptName = step.departmentId ? (getDepartmentsData().find(d => d.id === step.departmentId)?.name || 'N/A') : 'Không giới hạn';
-        // Hiển thị permissionKey thay vì role
-        const permKey = step.permissionKey || step.role || '--';
+        const permKey = step.permissionKey || '--';
         const stepStatus = statusMap[stepNumber] || '--';
         stepsHtml += `
             <tr>
@@ -292,7 +290,7 @@ function showCreateWorkflowModal(module) {
     });
 }
 
-// ✅ Đã sửa: thay role bằng permissionKey
+// ====== THÊM BƯỚC WORKFLOW (ĐÃ SỬA) ======
 function addWorkflowStepFieldWithStatus(containerId, module, stepData = null) {
     const container = document.getElementById(containerId);
     if (!container) return;
@@ -300,7 +298,6 @@ function addWorkflowStepFieldWithStatus(containerId, module, stepData = null) {
     stepCounter++;
     const stepNumber = container.querySelectorAll('.wf-step-row').length + 1;
 
-    // Lấy danh sách tất cả permission keys
     const allPermissionKeys = getAllPermissionKeys();
     const permOpts = allPermissionKeys.map(key => 
         `<option value="${key}" ${(stepData && stepData.permissionKey === key) ? 'selected' : ''}>${key}</option>`
@@ -369,7 +366,7 @@ function updateStepNumbers(containerId) {
     });
 }
 
-// Trong collectWorkflowStepsWithStatus()
+// ====== COLLECT WORKFLOW STEPS (ĐÃ SỬA - CÓ DEPARTMENT ID) ======
 function collectWorkflowStepsWithStatus(containerId) {
     const container = document.getElementById(containerId);
     if (!container) return { steps: [], stepStatuses: [] };
@@ -386,7 +383,7 @@ function collectWorkflowStepsWithStatus(containerId) {
             step: idx + 1,
             permissionKey: permissionKey,
             label: label,
-            departmentId: deptId ? parseInt(deptId) : null  // ✅ Thêm departmentId
+            departmentId: deptId ? parseInt(deptId) : null
         });
         if (statusCode) {
             stepStatuses.push({
@@ -398,24 +395,23 @@ function collectWorkflowStepsWithStatus(containerId) {
     return { steps, stepStatuses };
 }
 
-// ✅ Đã sửa: dùng permissionKey thay vì role
 function loadDefaultStepsWithStatus(containerId, module) {
     const defaults = {
         mr: [{ step: 1, permissionKey: 'mr.approve', label: 'Chỉ huy trưởng duyệt', departmentId: 5 }],
         pr: [
-            { step: 1, permissionKey: 'pr.approve', label: 'Kế hoạch duyệt', departmentId: 2 },
-            { step: 2, permissionKey: 'pr.approve', label: 'Dự án duyệt', departmentId: 3 },
-            { step: 3, permissionKey: 'pr.approve', label: 'Tổng Giám đốc duyệt', departmentId: 1 }
+            { step: 1, permissionKey: 'pr.approve', label: 'Dự án duyệt', departmentId: 4 },
+            { step: 2, permissionKey: 'pr.approve', label: 'Kế hoạch duyệt', departmentId: 3 },
+            { step: 3, permissionKey: 'pr.approve', label: 'CEO duyệt', departmentId: 1 }
         ],
         po: [
-            { step: 1, permissionKey: 'po.approve', label: 'Kế hoạch duyệt', departmentId: 2 },
-            { step: 2, permissionKey: 'po.approve', label: 'Dự án duyệt', departmentId: 3 },
-            { step: 3, permissionKey: 'po.approve', label: 'Tổng Giám đốc duyệt', departmentId: 1 }
+            { step: 1, permissionKey: 'po.approve', label: 'Dự án duyệt', departmentId: 4 },
+            { step: 2, permissionKey: 'po.approve', label: 'Kế hoạch duyệt', departmentId: 3 },
+            { step: 3, permissionKey: 'po.approve', label: 'CEO duyệt', departmentId: 1 }
         ],
         grn: [
             { step: 1, permissionKey: 'grn.create', label: 'Lập phiếu', departmentId: 4 },
             { step: 2, permissionKey: 'grn.receive', label: 'Thủ kho nhận', departmentId: null },
-            { step: 3, permissionKey: 'grn.qc', label: 'QC kiểm tra', departmentId: 6 },
+            { step: 3, permissionKey: 'grn.qc', label: 'QC kiểm tra', departmentId: 5 },
             { step: 4, permissionKey: 'grn.complete', label: 'Hoàn thành', departmentId: 4 }
         ],
         sto: [
@@ -456,6 +452,16 @@ async function saveNewWorkflow() {
         showError('Vui lòng nhập tên và ít nhất một bước duyệt');
         return;
     }
+    for (const step of steps) {
+        if (!step.permissionKey) {
+            showError(`Bước ${step.step} chưa chọn permission key`);
+            return;
+        }
+        if (!step.label) {
+            showError(`Bước ${step.step} chưa nhập tên bước`);
+            return;
+        }
+    }
 
     try {
         const payload = {
@@ -465,10 +471,13 @@ async function saveNewWorkflow() {
             steps: JSON.stringify(steps),
             status: 'DRAFT',
             isSystem: false,
-            stepStatuses: stepStatuses  // ✅ Gửi lên backend
+            stepStatuses: stepStatuses
         };
         await api.createWorkflowWithStatuses(payload);
-        // ...
+        closeModal();
+        showSuccess('Tạo workflow thành công!');
+        await refreshAdminWorkflows();
+        renderAdminUI('workflows');
     } catch (error) {
         showError('Lỗi tạo workflow: ' + error.message);
     }
@@ -587,19 +596,19 @@ async function createDefaultWorkflows() {
         const defaults = {
             mr: [{ step: 1, permissionKey: 'mr.approve', label: 'Chỉ huy trưởng duyệt', departmentId: 5 }],
             pr: [
-                { step: 1, permissionKey: 'pr.approve', label: 'Kế hoạch duyệt', departmentId: 2 },
-                { step: 2, permissionKey: 'pr.approve', label: 'Dự án duyệt', departmentId: 3 },
-                { step: 3, permissionKey: 'pr.approve', label: 'Tổng Giám đốc duyệt', departmentId: 1 }
+                { step: 1, permissionKey: 'pr.approve', label: 'Dự án duyệt', departmentId: 4 },
+                { step: 2, permissionKey: 'pr.approve', label: 'Kế hoạch duyệt', departmentId: 3 },
+                { step: 3, permissionKey: 'pr.approve', label: 'CEO duyệt', departmentId: 1 }
             ],
             po: [
-                { step: 1, permissionKey: 'po.approve', label: 'Kế hoạch duyệt', departmentId: 2 },
-                { step: 2, permissionKey: 'po.approve', label: 'Dự án duyệt', departmentId: 3 },
-                { step: 3, permissionKey: 'po.approve', label: 'Tổng Giám đốc duyệt', departmentId: 1 }
+                { step: 1, permissionKey: 'po.approve', label: 'Dự án duyệt', departmentId: 4 },
+                { step: 2, permissionKey: 'po.approve', label: 'Kế hoạch duyệt', departmentId: 3 },
+                { step: 3, permissionKey: 'po.approve', label: 'CEO duyệt', departmentId: 1 }
             ],
             grn: [
                 { step: 1, permissionKey: 'grn.create', label: 'Lập phiếu', departmentId: 4 },
                 { step: 2, permissionKey: 'grn.receive', label: 'Thủ kho nhận', departmentId: null },
-                { step: 3, permissionKey: 'grn.qc', label: 'QC kiểm tra', departmentId: 6 },
+                { step: 3, permissionKey: 'grn.qc', label: 'QC kiểm tra', departmentId: 5 },
                 { step: 4, permissionKey: 'grn.complete', label: 'Hoàn thành', departmentId: 4 }
             ],
             sto: [
@@ -680,3 +689,5 @@ window.addWorkflowStepFieldWithStatus = addWorkflowStepFieldWithStatus;
 window.removeWorkflowStepField = removeWorkflowStepField;
 window.loadDefaultStepsWithStatus = loadDefaultStepsWithStatus;
 window.collectWorkflowStepsWithStatus = collectWorkflowStepsWithStatus;
+
+console.log('✅ Admin Workflows module updated with departmentId support.');

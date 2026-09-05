@@ -1,403 +1,261 @@
-// ================================================================
-// ADMIN USER PERMISSIONS - Phân quyền user (ghi đè phòng ban)
+﻿// ================================================================
+// ADMIN USER PERMISSIONS - Phan quyen rieng tung user (ghi de phong ban)
 // ================================================================
 
-let _userSearchKeyword = '';
+let _userPermSearchKeyword = '';
+
+function getFilteredUsersForPerm() {
+    var users = getUsersData();
+    var keyword = _userPermSearchKeyword.toLowerCase().trim();
+    if (!keyword) return users;
+    return users.filter(function(u){
+        return (u.name || '').toLowerCase().indexOf(keyword) >= 0 ||
+               (u.email || '').toLowerCase().indexOf(keyword) >= 0;
+    });
+}
 
 function renderUserPermissionsTab() {
-    console.log('🔄 renderUserPermissionsTab called');
-
-    const users = getUsersData();
-    const departments = getDepartmentsData();
-    const userPermissions = getUserPermissionsCache();
+    var users = getFilteredUsersForPerm();
+    var departments = getDepartmentsData();
+    var userPermissions = getUserPermissionsCache();
 
     if (!users || users.length === 0) {
-        return `<div style="padding:20px; text-align:center; color:#999;">Chưa có người dùng nào</div>`;
+        return '<div style="padding:20px; text-align:center; color:#999;">Chua co nguoi dung nao</div>';
     }
 
-    const keyword = _userSearchKeyword.toLowerCase().trim();
-    const filteredUsers = keyword ? users.filter(u => 
-        (u.name || '').toLowerCase().includes(keyword) || 
-        (u.email || '').toLowerCase().includes(keyword)
-    ) : users;
+    var selectedUserId = null;
+    var filterEl = document.getElementById('user-perm-user-filter');
+    var stored = filterEl ? parseInt(filterEl.value) : null;
+    if (stored && users.some(function(u){ return u.id === stored; })) selectedUserId = stored;
+    if (!selectedUserId) selectedUserId = users[0].id;
 
-    const userFilter = document.getElementById('user-perm-user-filter');
-    let selectedUserId = userFilter ? parseInt(userFilter.value) : null;
-    
-    if (!selectedUserId || !users.find(u => u.id === selectedUserId)) {
-        if (filteredUsers.length > 0) {
-            selectedUserId = filteredUsers[0].id;
-            if (userFilter) userFilter.value = selectedUserId;
-        } else {
-            return `<div style="padding:20px; text-align:center; color:#999;">Không có user nào phù hợp</div>`;
-        }
-    }
-    
-    const selectedUser = users.find(u => u.id === selectedUserId);
+    var selectedUser = null;
+    for (var i=0;i<users.length;i++){ if(users[i].id===selectedUserId){ selectedUser=users[i]; break; } }
     if (!selectedUser) {
-        return `<div style="padding:20px; text-align:center; color:#999;">Không tìm thấy user</div>`;
+        return '<div style="padding:20px; text-align:center; color:#999;">Khong tim thay user</div>';
     }
 
-    console.log('Selected user:', selectedUser.name, selectedUser.email, 'department:', selectedUser.departmentId);
+    var deptPermMap = getDepartmentPermissionMap(selectedUser.departmentId);
+    var deptPermKeys = [];
+    for (var dk in deptPermMap) if (deptPermMap[dk] === true) deptPermKeys.push(dk);
 
-    // Lấy quyền của phòng ban user (từ _adminPermissions)
-    const deptPerms = getDepartmentPermissionMap(selectedUser.departmentId);
-    const deptPermKeys = Object.keys(deptPerms).filter(k => deptPerms[k] === true);
-
-    if (!userPermissions[selectedUser.id]) {
-        userPermissions[selectedUser.id] = {};
+    if (!userPermissions[selectedUserId]) {
+        userPermissions[selectedUserId] = {};
         saveData('user_permissions', userPermissions);
     }
-    const userPerms = userPermissions[selectedUser.id] || {};
+    var userPerms = userPermissions[selectedUser.id] || {};
 
-    const deptName = selectedUser.departmentId 
-        ? departments.find(d => d.id === selectedUser.departmentId)?.name || 'N/A' 
-        : 'Chưa có phòng ban';
+    var dept = null;
+    for (var j=0;j<departments.length;j++){ if(departments[j].id===selectedUser.departmentId){ dept=departments[j]; break; } }
+    var deptName = dept ? dept.name : (selectedUser.department || 'Chua co phong ban');
 
-    const moduleActions = getModuleActions();
-    const modules = Object.keys(moduleActions);
+    var moduleActions = getModuleActions();
+    var modKeys = Object.keys(moduleActions);
 
-    const userOpts = filteredUsers.map(u => 
-        `<option value="${u.id}" ${u.id === selectedUserId ? 'selected' : ''}>${u.name} (${u.email})</option>`
-    ).join('');
+    var userOpts = users.map(function(u){
+        return '<option value="'+u.id+'" '+(u.id===selectedUserId?'selected':'')+'>'+u.name+' ('+u.email+')</option>';
+    }).join('');
 
-    // ===== THÊM NÚT COPY QUYỀN PHÒNG BAN =====
-    const canCopy = selectedUser.departmentId && deptPermKeys.length > 0;
+    var canCopy = selectedUser.departmentId != null && deptPermKeys.length > 0;
 
-    let html = `
-        <div style="margin-bottom:16px; display:flex; flex-wrap:wrap; gap:12px; align-items:center;">
-            <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
-                <label style="font-weight:600;">Tìm kiếm user:</label>
-                <input type="text" id="user-perm-search" placeholder="Nhập tên hoặc email..." value="${_userSearchKeyword}" style="padding:8px 12px; border:1px solid #ccc; border-radius:4px; min-width:200px;">
-                <button class="btn btn-sm" onclick="searchUserPermissions()"><i class="fas fa-search"></i> Tìm</button>
-                <button class="btn btn-sm btn-secondary" onclick="resetUserSearch()">Xóa</button>
-            </div>
-            <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-left:auto;">
-                <label style="font-weight:600;">Chọn user:</label>
-                <select id="user-perm-user-filter" onchange="renderAdminUI('user-permissions')" style="padding:8px 14px; border:1px solid #ccc; border-radius:4px; min-width:200px;">
-                    ${userOpts}
-                </select>
-                ${canCopy ? `<button class="btn btn-sm btn-info" onclick="copyDepartmentPermissions(${selectedUser.id})"><i class="fas fa-copy"></i> Copy quyền phòng ban</button>` : ''}
-                <button class="btn btn-sm btn-success" onclick="saveUserPermissions()"><i class="fas fa-save"></i> Lưu</button>
-                <button class="btn btn-sm btn-warning" onclick="resetUserPermissions()"><i class="fas fa-undo"></i> Reset</button>
-            </div>
-        </div>
-        <div style="background:#f8fafc; padding:12px 16px; border-radius:8px; margin-bottom:16px; border:1px solid #e2e8f0; display:flex; flex-wrap:wrap; gap:12px; align-items:center;">
-            <span style="font-weight:600; font-size:15px;">👤 ${selectedUser.name}</span>
-            <span style="color:#888;">${selectedUser.email}</span>
-            <span class="badge badge-info">${selectedUser.role}</span>
-            <span>🏢 ${deptName}</span>
-            <span style="color:#888; margin-left:auto;">Phòng ban có <strong>${deptPermKeys.length}</strong> quyền</span>
-        </div>
-    `;
+    var html = '';
+    html += '<div style="margin-bottom:16px; display:flex; flex-wrap:wrap; gap:12px; align-items:center;">';
+    html += '  <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">';
+    html += '    <input type="text" id="user-perm-search-input" placeholder="Tim user theo ten/email..." value="'+_userPermSearchKeyword+'" style="padding:8px 12px; border:1px solid #ccc; border-radius:4px; min-width:200px;">';
+    html += '    <button class="btn btn-sm" onclick="searchUserPermissions()"><i class="fas fa-search"></i></button>';
+    html += '  </div>';
+    html += '  <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-left:auto;">';
+    html += '    <select id="user-perm-user-filter" onchange="renderAdminUI(\'user-permissions\')" style="padding:8px 14px; border:1px solid #ccc; border-radius:4px; min-width:200px;">'+userOpts+'</select>';
+    if (canCopy) html += '<button class="btn btn-sm btn-info" onclick="copyDeptPermissionsToUser('+selectedUserId+')"><i class="fas fa-copy"></i> Copy quyen phong ban</button>';
+    html += '    <button class="btn btn-sm btn-success" onclick="saveUserPermissions()"><i class="fas fa-save"></i> Luu</button>';
+    html += '    <button class="btn btn-sm btn-warning" onclick="resetUserPermissions('+selectedUserId+')"><i class="fas fa-undo"></i> Reset</button>';
+    html += '  </div>';
+    html += '</div>';
+
+    html += '<div style="background:#f8fafc; padding:12px 16px; border-radius:8px; margin-bottom:16px; border:1px solid #e2e8f0; display:flex; flex-wrap:wrap; gap:12px; align-items:center;">';
+    html += '  <span style="font-weight:600; font-size:15px;">'+selectedUser.name+'</span>';
+    html += '  <span style="color:#888;">'+selectedUser.email+'</span>';
+    html += '  <span class="badge badge-info">'+(selectedUser.role||'')+'</span>';
+    html += '  <span>'+deptName+'</span>';
+    html += '  <span style="color:#888; margin-left:auto;">Phong ban co <strong>'+deptPermKeys.length+'</strong> quyen</span>';
+    html += '</div>';
 
     if (!selectedUser.departmentId) {
-        html += `<div style="padding:20px; text-align:center; color:#999; background:white; border-radius:12px; border:1px solid #e2e8f0;">
-            User chưa có phòng ban. Vui lòng gán phòng ban trước.
-        </div>`;
+        html += '<div style="padding:20px; text-align:center; color:#999; background:white; border-radius:12px; border:1px solid #e2e8f0;">User chua co phong ban. Vui long gan phong ban truoc.</div>';
+        setTimeout(bindUserPermEvents, 0);
         return html;
     }
-
     if (deptPermKeys.length === 0) {
-        html += `<div style="padding:20px; text-align:center; color:#999; background:white; border-radius:12px; border:1px solid #e2e8f0;">
-            Phòng ban <strong>${deptName}</strong> chưa có quyền nào. Vui lòng cấp quyền cho phòng ban trước.
-        </div>`;
+        html += '<div style="padding:20px; text-align:center; color:#999; background:white; border-radius:12px; border:1px solid #e2e8f0;">Phong ban "<strong>'+deptName+'</strong>" chua duoc cap quyen nao. Hay cap quyen cho phong ban truoc.</div>';
+        setTimeout(bindUserPermEvents, 0);
         return html;
     }
 
-    html += `<div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap:16px;">`;
+    html += '<div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap:16px;">';
+    modKeys.forEach(function(module){
+        var moduleLabel = getModuleLabel(module);
+        var actions = moduleActions[module];
+        var allKeysInDept = actions.map(function(a){ return module+'.'+a; }).filter(function(k){ return deptPermKeys.indexOf(k) >= 0; });
+        if (allKeysInDept.length === 0) return;
 
-    modules.forEach(module => {
-        const moduleLabel = getModuleLabel(module);
-        const actions = moduleActions[module];
-        const availableActions = actions.filter(action => {
-            const key = `${module}.${action}`;
-            return deptPermKeys.includes(key);
+        var checkedCount = allKeysInDept.filter(function(k){ return userPerms[k] === true; }).length;
+        var totalCount = allKeysInDept.length;
+
+        html += '<div style="background:white; border-radius:12px; border:1px solid #e2e8f0; overflow:hidden;">';
+        html += '  <div style="background:#f0f4f8; padding:10px 14px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; border-bottom:1px solid #e2e8f0;" onclick="toggleModulePerms('+selectedUserId+',\''+module+'\')">';
+        html += '    <span style="font-weight:600; font-size:14px; color:blue;">'+moduleLabel+'</span>';
+        html += '    <span style="font-size:12px; color:#888;"><strong>'+checkedCount+'/'+totalCount+'</strong> <span style="margin-left:8px; font-size:11px;">Chon tat ca</span></span>';
+        html += '  </div>';
+        html += '  <div style="padding:8px 14px;">';
+        allKeysInDept.forEach(function(key){
+            var action = key.split('.').slice(1).join('.');
+            var checked = userPerms[key] === true ? 'checked' : '';
+            html += '<label style="display:flex; align-items:center; gap:8px; padding:4px 0; font-size:13px; cursor:pointer; border-bottom:1px solid #f5f5f5;">';
+            html += '  <input type="checkbox" data-user="'+selectedUserId+'" data-perm="'+key+'" data-module="'+module+'" '+checked+' style="width:15px; height:15px; cursor:pointer; accent-color:blue;" onchange="togglePermCb('+selectedUserId+',\''+key+'\',this.checked)">';
+            html += '  <span>'+getActionLabel(action)+'</span>';
+            html += '</label>';
         });
-        if (availableActions.length === 0) return;
-
-        const perms = availableActions.map(action => ({ key: `${module}.${action}`, action }));
-        const checkedCount = perms.filter(p => userPerms[p.key] === true).length;
-        const totalCount = perms.length;
-
-        html += `
-            <div style="background:white; border-radius:12px; border:1px solid #e2e8f0; overflow:hidden;">
-                <div style="background:#f0f4f8; padding:10px 14px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; border-bottom:1px solid #e2e8f0;" onclick="toggleModuleUserPermissions(${selectedUser.id}, '${module}')">
-                    <span style="font-weight:600; font-size:14px; color:#1a3c6e;">📁 ${moduleLabel}</span>
-                    <span style="font-size:12px; color:#888;">
-                        <span class="module-count" data-module="${module}" data-user="${selectedUser.id}">${checkedCount}</span>/${totalCount}
-                        <span style="margin-left:8px; font-size:11px; color:#1a3c6e;">Chọn tất cả</span>
-                    </span>
-                </div>
-                <div style="padding:8px 12px;">
-        `;
-        perms.forEach(({ key, action }) => {
-            const actionLabel = getActionLabel(action);
-            const checked = (userPerms[key] === true) ? 'checked' : '';
-            html += `
-                <label style="display:flex; align-items:center; gap:8px; padding:4px 0; font-size:13px; cursor:pointer; border-bottom:1px solid #f5f5f5;">
-                    <input type="checkbox" class="user-perm-checkbox" data-user="${selectedUser.id}" data-perm="${key}" data-module="${module}" ${checked} style="width:15px; height:15px; cursor:pointer; accent-color:#1a3c6e;" onchange="togglePermissionAndUpdate(${selectedUser.id}, '${key}', this.checked)">
-                    <span>${actionLabel}</span>
-                </label>
-            `;
-        });
-        html += `</div></div>`;
+        html += '  </div>';
+        html += '</div>';
     });
+    html += '</div>';
 
-    html += `</div>`;
+    html += '<div style="margin-top:16px; font-size:13px; color:#888;">Luu y: User chi chon duoc quyen ma phong ban da co. Quyen gan rieng cho user se ghi de phong ban.</div>';
 
-    html += `
-        <div style="margin-top:16px; font-size:13px; color:#888; display:flex; gap:20px; flex-wrap:wrap; padding:8px 0; border-top:1px solid #e2e8f0;">
-            <span><i class="fas fa-info-circle"></i> <strong>Chú thích:</strong></span>
-            <span>✅ Quyền được gán riêng cho user (ghi đè phòng ban).</span>
-            <span>🔒 User chỉ có thể được cấp các quyền mà phòng ban đã có.</span>
-            <span>📋 Nút "Copy quyền phòng ban" sẽ gán cho user tất cả quyền mà phòng ban hiện có.</span>
-        </div>
-    `;
-
+    setTimeout(bindUserPermEvents, 0);
     return html;
 }
 
-// ===== HÀM COPY QUYỀN PHÒNG BAN =====
-function copyDepartmentPermissions(userId) {
-    const user = getUsersData().find(u => u.id === userId);
-    if (!user) {
-        showError('Không tìm thấy user!');
-        return;
+function bindUserPermEvents() {
+    var input = document.getElementById('user-perm-search-input');
+    if (input) {
+        input.onchange = function(){ _userPermSearchKeyword = this.value; if (typeof renderAdminUI === 'function') renderAdminUI('user-permissions'); };
     }
-    if (!user.departmentId) {
-        showError('User chưa có phòng ban!');
-        return;
-    }
-
-    const deptPerms = getDepartmentPermissionMap(user.departmentId);
-    const deptPermKeys = Object.keys(deptPerms).filter(k => deptPerms[k] === true);
-    if (deptPermKeys.length === 0) {
-        showWarning('Phòng ban này chưa có quyền nào để copy!');
-        return;
-    }
-
-    if (!confirm(`Copy tất cả ${deptPermKeys.length} quyền của phòng ban vào user này?`)) return;
-
-    // Cập nhật userPermissions
-    const userPermissions = getUserPermissionsCache();
-    if (!userPermissions[userId]) {
-        userPermissions[userId] = {};
-    }
-    deptPermKeys.forEach(key => {
-        userPermissions[userId][key] = true;
-    });
-    saveUserPermissionsData(userPermissions);
-
-    // Cập nhật UI
-    // Tick tất cả checkbox của user
-    document.querySelectorAll(`.user-perm-checkbox[data-user="${userId}"]`).forEach(cb => {
-        const permKey = cb.dataset.perm;
-        if (deptPermKeys.includes(permKey)) {
-            cb.checked = true;
-        }
-    });
-
-    // Cập nhật số đếm cho từng module
-    const allKeys = getAllPermissionKeys();
-    const modules = getModuleActions();
-    Object.keys(modules).forEach(module => {
-        const modulePerms = allKeys.filter(k => k.startsWith(module + '.') && deptPermKeys.includes(k));
-        if (modulePerms.length > 0) {
-            const checkedCount = modulePerms.filter(k => userPermissions[userId][k] === true).length;
-            const countSpan = document.querySelector(`.module-count[data-user="${userId}"][data-module="${module}"]`);
-            if (countSpan) {
-                countSpan.textContent = checkedCount;
-            }
-        }
-    });
-
-    showSuccess(`Đã copy ${deptPermKeys.length} quyền từ phòng ban vào user!`);
 }
 
-// ===== HÀM CẬP NHẬT KHI TICK CHECKBOX =====
-function togglePermissionAndUpdate(userId, permKey, checked) {
-    const userPermissions = getUserPermissionsCache();
-    if (!userPermissions[userId]) {
-        userPermissions[userId] = {};
-    }
+function togglePermCb(userId, permKey, checked) {
+    var userPermissions = getUserPermissionsCache();
+    if (!userPermissions[userId]) userPermissions[userId] = {};
     userPermissions[userId][permKey] = checked;
     saveUserPermissionsData(userPermissions);
-    
-    const module = permKey.split('.')[0];
-    updateModuleCount(userId, module);
 }
 
-// ===== CẬP NHẬT SỐ ĐẾM CỦA MODULE =====
-function updateModuleCount(userId, module) {
-    const userPermissions = getUserPermissionsCache();
-    const userPerms = userPermissions[userId] || {};
-    const allPerms = getAllPermissionKeys();
-    
-    const user = getUsersData().find(u => u.id === userId);
-    if (!user) return;
-    const deptPerms = getDepartmentPermissionMap(user.departmentId);
-    const deptPermKeys = Object.keys(deptPerms).filter(k => deptPerms[k] === true);
-    const modulePerms = allPerms.filter(k => k.startsWith(module + '.') && deptPermKeys.includes(k));
-    
-    const checkedCount = modulePerms.filter(k => userPerms[k] === true).length;
-    const totalCount = modulePerms.length;
-    
-    const countSpan = document.querySelector(`.module-count[data-user="${userId}"][data-module="${module}"]`);
-    if (countSpan) {
-        countSpan.textContent = checkedCount;
+function toggleModulePerms(userId, module) {
+    var cbs = document.querySelectorAll('input[data-user="'+userId+'"][data-module="'+module+'"]');
+    if (cbs.length === 0) return;
+    var allChecked = true;
+    for (var i=0;i<cbs.length;i++){ if(!cbs[i].checked){ allChecked=false; break; } }
+    var newChecked = !allChecked;
+    var userPermissions = getUserPermissionsCache();
+    if (!userPermissions[userId]) userPermissions[userId] = {};
+    for (var j=0;j<cbs.length;j++){
+        cbs[j].checked = newChecked;
+        userPermissions[userId][cbs[j].dataset.permissionKey || cbs[j].getAttribute('data-perm')] = newChecked;
     }
-}
-
-// ===== TOGGLE TẤT CẢ QUYỀN CỦA MODULE =====
-function toggleModuleUserPermissions(userId, module) {
-    const checkboxes = document.querySelectorAll(`.user-perm-checkbox[data-user="${userId}"][data-module="${module}"]`);
-    if (checkboxes.length === 0) return;
-    
-    const allChecked = Array.from(checkboxes).every(cb => cb.checked);
-    const newChecked = !allChecked;
-    
-    const userPermissions = getUserPermissionsCache();
-    if (!userPermissions[userId]) {
-        userPermissions[userId] = {};
-    }
-    checkboxes.forEach(cb => {
-        cb.checked = newChecked;
-        const permKey = cb.dataset.perm;
-        userPermissions[userId][permKey] = newChecked;
-    });
     saveUserPermissionsData(userPermissions);
-    
-    updateModuleCount(userId, module);
 }
 
-// ===== TÌM KIẾM =====
-function searchUserPermissions() {
-    const searchInput = document.getElementById('user-perm-search');
-    if (searchInput) {
-        _userSearchKeyword = searchInput.value;
-    }
-    if (typeof renderAdminUI === 'function') {
-        renderAdminUI('user-permissions');
-    } else {
-        renderUserPermissionsTab();
-    }
-}
-
-function resetUserSearch() {
-    const searchInput = document.getElementById('user-perm-search');
-    if (searchInput) {
-        searchInput.value = '';
-        _userSearchKeyword = '';
-    }
-    if (typeof renderAdminUI === 'function') {
-        renderAdminUI('user-permissions');
-    } else {
-        renderUserPermissionsTab();
-    }
-}
-
-// ===== LƯU / RESET =====
 function saveUserPermissions() {
-    const userFilter = document.getElementById('user-perm-user-filter');
-    if (!userFilter) { showError('Không tìm thấy dropdown chọn user'); return; }
-    
-    const selectedUserId = parseInt(userFilter.value);
-    if (!selectedUserId) { showError('Vui lòng chọn user'); return; }
-
-    const userPermissions = getUserPermissionsCache();
-    if (!userPermissions[selectedUserId]) {
-        userPermissions[selectedUserId] = {};
-    }
-    document.querySelectorAll('.user-perm-checkbox[data-user="' + selectedUserId + '"]').forEach(cb => {
-        userPermissions[selectedUserId][cb.dataset.perm] = cb.checked;
-    });
-
+    var userFilter = document.getElementById('user-perm-user-filter');
+    if (!userFilter) { showError('Khong tim thay dropdown chon user'); return; }
+    var userId = parseInt(userFilter.value);
+    if (!userId) { showError('Vui long chon user'); return; }
+    var userPermissions = getUserPermissionsCache();
+    if (!userPermissions[userId]) userPermissions[userId] = {};
+    var cbs = document.querySelectorAll('input[data-user="'+userId+'"]');
+    for (var i=0;i<cbs.length;i++){ userPermissions[userId][cbs[i].getAttribute('data-perm')] = cbs[i].checked; }
     saveUserPermissionsData(userPermissions);
-    showSuccess('Đã lưu phân quyền cho user!');
-    if (typeof renderAdminUI === 'function') {
-        renderAdminUI('user-permissions');
-    } else {
-        renderUserPermissionsTab();
-    }
+    showSuccess('Da luu phan quyen cho user!');
+    syncUserPermissionsToServer(userId);
+    if (typeof renderAdminUI === 'function') renderAdminUI('user-permissions');
 }
 
-function resetUserPermissions() {
-    const userFilter = document.getElementById('user-perm-user-filter');
-    if (!userFilter) { showError('Không tìm thấy dropdown chọn user'); return; }
-    
-    const selectedUserId = parseInt(userFilter.value);
-    if (!selectedUserId) { showError('Vui lòng chọn user'); return; }
-    
-    if (!confirm(`Reset toàn bộ quyền của user này?`)) return;
-
-    const userPermissions = getUserPermissionsCache();
-    if (userPermissions[selectedUserId]) {
-        delete userPermissions[selectedUserId];
-        saveUserPermissionsData(userPermissions);
-    }
-    if (typeof renderAdminUI === 'function') {
-        renderAdminUI('user-permissions');
-    } else {
-        renderUserPermissionsTab();
-    }
-    showSuccess('Đã reset quyền của user.');
+async function syncUserPermissionsToServer(userId) {
+    try {
+        var userPermissions = getUserPermissionsCache();
+        var perms = userPermissions[userId] || {};
+        for (var key in perms) { try { await api.removeUserPermission(userId, key); } catch(e){} }
+        for (var k2 in perms) { if (perms[k2] === true) { try { await api.assignUserPermission(userId, k2, true); } catch(e){} } }
+    } catch (e) { console.warn('sync user permission:', e); }
 }
 
-// ===== HELPER: LẤY QUYỀN CỦA PHÒNG BAN =====
-function getDepartmentPermissionMap(deptId) {
-    if (!deptId) return {};
-    const key = `dept_${deptId}`;
-    if (!window._deptPermMap) {
-        window._deptPermMap = {};
-        const perms = _adminPermissions || {};
-        if (Array.isArray(perms)) {
-            perms.forEach(p => {
-                if (p.departmentId) {
-                    const k = `dept_${p.departmentId}`;
-                    if (!window._deptPermMap[k]) window._deptPermMap[k] = {};
-                    window._deptPermMap[k][p.permissionKey] = p.enabled;
-                }
-            });
-        } else {
-            Object.keys(perms).forEach(role => {
-                const roleData = perms[role];
-                if (typeof roleData === 'object') {
-                    Object.keys(roleData).forEach(k => {
-                        if (!isNaN(k)) {
-                            const deptIdKey = parseInt(k);
-                            const kMap = `dept_${deptIdKey}`;
-                            if (!window._deptPermMap[kMap]) window._deptPermMap[kMap] = {};
-                            const deptPerms = roleData[k];
-                            Object.keys(deptPerms).forEach(pk => {
-                                window._deptPermMap[kMap][pk] = deptPerms[pk];
-                            });
-                        }
-                    });
-                }
-            });
-        }
+async function resetUserPermissions(userId) {
+    if (!userId) {
+        var userFilter = document.getElementById('user-perm-user-filter');
+        userId = userFilter ? parseInt(userFilter.value) : null;
     }
-    return window._deptPermMap[key] || {};
+    if (!userId) { showError('Vui long chon user'); return; }
+    if (!confirm('Reset toan bo quyen rieng cua user nay?')) return;
+    var userPermissions = getUserPermissionsCache();
+    delete userPermissions[userId];
+    saveUserPermissionsData(userPermissions);
+    if (typeof renderAdminUI === 'function') renderAdminUI('user-permissions');
+    showSuccess('Da reset quyen rieng cua user.');
+}
+
+async function copyDeptPermissionsToUser(userId) {
+    var user = getUsersData().find(function(u){ return u.id === userId; });
+    if (!user) { showError('Khong tim thay user!'); return; }
+    if (!user.departmentId) { showError('User chua co phong ban!'); return; }
+    var deptPermMap = getDepartmentPermissionMap(user.departmentId);
+    var deptPermKeys = [];
+    for (var dk in deptPermMap) if (deptPermMap[dk] === true) deptPermKeys.push(dk);
+    if (deptPermKeys.length === 0) { showWarning('Phong ban nay chua co quyen nao!'); return; }
+    if (!confirm('Copy tat ca '+deptPermKeys.length+' quyen cua phong ban vao user nay?')) return;
+    var userPermissions = getUserPermissionsCache();
+    if (!userPermissions[userId]) userPermissions[userId] = {};
+    deptPermKeys.forEach(function(key){ userPermissions[userId][key] = true; });
+    saveUserPermissionsData(userPermissions);
+    showSuccess('Da copy '+deptPermKeys.length+' quyen tu phong ban vao user!');
+    if (typeof renderAdminUI === 'function') renderAdminUI('user-permissions');
+}
+
+function searchUserPermissions() {
+    var input = document.getElementById('user-perm-search-input');
+    if (input) _userPermSearchKeyword = input.value;
+    if (typeof renderAdminUI === 'function') renderAdminUI('user-permissions');
 }
 
 function getUserPermissionsCache() {
-    return getData('user_permissions') || {};
+    try { var d = getData('user_permissions'); return d && typeof d === 'object' ? d : {}; } catch (e) { return {}; }
+}
+function saveUserPermissionsData(data) { saveData('user_permissions', data); }
+
+function getDepartmentPermissionMap(deptId) {
+    if (!deptId) return {};
+    var perms = getAdminPermissions();
+    var result = {};
+    if (Array.isArray(perms)) {
+        perms.forEach(function(p){ if (p.departmentId === deptId && p.enabled) result[p.permissionKey] = true; });
+        return result;
+    }
+    Object.keys(perms).forEach(function(role){
+        var rd = perms[role];
+        if (rd && typeof rd === 'object') {
+            Object.keys(rd).forEach(function(k){
+                if (!isNaN(parseInt(k)) && parseInt(k) === deptId) {
+                    var dp = rd[k];
+                    Object.keys(dp).forEach(function(pk){ if (dp[pk]) result[pk] = true; });
+                }
+            });
+        }
+    });
+    return result;
+}
+function getAdminPermissions() {
+    try { var d = getData('permissions'); return d && typeof d === 'object' ? d : {}; } catch (e) { return {}; }
 }
 
-function saveUserPermissionsData(data) {
-    saveData('user_permissions', data);
-}
-
-// Export ra window
 window.renderUserPermissionsTab = renderUserPermissionsTab;
 window.searchUserPermissions = searchUserPermissions;
-window.resetUserSearch = resetUserSearch;
-window.toggleModuleUserPermissions = toggleModuleUserPermissions;
-window.togglePermissionAndUpdate = togglePermissionAndUpdate;
-window.updateModuleCount = updateModuleCount;
+window.toggleModulePerms = toggleModulePerms;
+window.togglePermCb = togglePermCb;
 window.saveUserPermissions = saveUserPermissions;
 window.resetUserPermissions = resetUserPermissions;
-window.copyDepartmentPermissions = copyDepartmentPermissions;
+window.copyDeptPermissionsToUser = copyDeptPermissionsToUser;
 window.getUserPermissionsCache = getUserPermissionsCache;
 window.getDepartmentPermissionMap = getDepartmentPermissionMap;
+window.getAdminPermissions = getAdminPermissions;
+window.syncUserPermissionsToServer = syncUserPermissionsToServer;
+
+console.log('Admin User Permissions module loaded.');

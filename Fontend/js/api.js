@@ -87,7 +87,6 @@ async function getVendors() {
     }, 60000);
 }
 
-// Override các hàm GET để dùng cache
 async function getItems() {
     return getCachedData('items', async () => {
         const data = await apiRequest('/items');
@@ -171,16 +170,6 @@ async function getInventoryByWarehouse(warehouseId) {
     }
 }
 
-// ====== WAREHOUSE CRUD ======
-async function createWarehouse(warehouse) { return apiRequest('/warehouses', 'POST', warehouse); }
-async function updateWarehouse(id, warehouse) { return apiRequest(`/warehouses/${id}`, 'PUT', warehouse); }
-async function deleteWarehouse(id) { return apiRequest(`/warehouses/${id}`, 'DELETE'); }
-
-// ====== INVENTORY CRUD ======
-async function updateInventoryQuantity(warehouseId, itemId, quantity) {
-    return apiRequest(`/inventory/warehouse/${warehouseId}/item/${itemId}?quantity=${quantity}`, 'PATCH');
-}
-
 async function getGRNs() {
     try {
         const data = await apiRequest('/grn');
@@ -250,7 +239,7 @@ async function getUsers() {
             return arr;
         }
         return getData('users') || [];
-    }, 120000); // 2 phút cho users (ít thay đổi)
+    }, 120000);
 }
 
 async function getDepartments() {
@@ -268,9 +257,7 @@ async function getDepartments() {
 async function getPermissions() {
     try {
         const data = await apiRequest('/permissions');
-        console.log('getPermissions raw data:', data);
         const arr = extractArray(data);
-        console.log('getPermissions extracted array:', arr);
         if (arr && arr.length > 0) {
             saveData('permissions', arr);
             return arr;
@@ -312,35 +299,18 @@ async function getActiveWorkflow(module) {
     return all.find(w => w.module === module && w.isActive === true) || null;
 }
 
-async function createWorkflow(workflow) {
-    return apiRequest('/workflows', 'POST', workflow);
+async function getWorkflowById(id) {
+    try {
+        const data = await apiRequest(`/workflows/${id}`);
+        return data;
+    } catch(e) {
+        console.warn('getWorkflowById fallback:', e);
+        const all = getData('workflows') || [];
+        return all.find(w => w.id === id) || null;
+    }
 }
 
-async function updateWorkflow(id, workflow) {
-    return apiRequest(`/workflows/${id}`, 'PUT', workflow);
-}
-
-async function activateWorkflow(module, id) {
-    return apiRequest(`/workflows/module/${module}/activate/${id}`, 'PUT');
-}
-
-async function duplicateWorkflow(id) {
-    return apiRequest(`/workflows/duplicate/${id}`, 'POST');
-}
-
-async function deleteWorkflow(id) {
-    return apiRequest(`/workflows/${id}`, 'DELETE');
-}
-
-// ====== WORKFLOW STEP-STATUS MAPPING ======
-async function getStepsWithStatus(module) {
-    return apiRequest(`/workflows/module/${module}/steps-with-status`);
-}
-
-async function getStatusForStep(module, step) {
-    return apiRequest(`/workflows/module/${module}/step/${step}/status`);
-}
-
+// ====== WORKFLOW STEP-STATUS ======
 async function getWorkflowStepStatuses(workflowId) {
     return apiRequest(`/workflows/${workflowId}/step-statuses`);
 }
@@ -353,16 +323,16 @@ async function updateWorkflowWithStatuses(id, payload) {
     return apiRequest(`/workflows/${id}/with-statuses`, 'PUT', payload);
 }
 
-// ====== WORKFLOW BY ID (mới thêm) ======
-async function getWorkflowById(id) {
-    try {
-        const data = await apiRequest(`/workflows/${id}`);
-        return data;
-    } catch(e) {
-        console.warn('getWorkflowById fallback:', e);
-        const all = getData('workflows') || [];
-        return all.find(w => w.id === id) || null;
-    }
+async function activateWorkflow(module, id) {
+    return apiRequest(`/workflows/module/${module}/activate/${id}`, 'PUT');
+}
+
+async function duplicateWorkflow(id) {
+    return apiRequest(`/workflows/duplicate/${id}`, 'POST');
+}
+
+async function deleteWorkflow(id) {
+    return apiRequest(`/workflows/${id}`, 'DELETE');
 }
 
 // ====== STATUS API ======
@@ -395,10 +365,6 @@ async function updateStatus(id, data) {
 
 async function deleteStatus(id) {
     return apiRequest(`/statuses/${id}`, 'DELETE');
-}
-
-async function deleteStatusesByEntityType(entityType) {
-    return apiRequest(`/statuses/entity/${entityType}`, 'DELETE');
 }
 
 // ====== USER PERMISSIONS ======
@@ -464,6 +430,14 @@ async function submitPO(id) { return apiRequest(`/po/${id}/submit`, 'POST'); }
 async function approvePO(id) { return apiRequest(`/po/${id}/approve`, 'POST'); }
 async function rejectPO(id) { return apiRequest(`/po/${id}/reject`, 'POST'); }
 
+async function createWarehouse(warehouse) { return apiRequest('/warehouses', 'POST', warehouse); }
+async function updateWarehouse(id, warehouse) { return apiRequest(`/warehouses/${id}`, 'PUT', warehouse); }
+async function deleteWarehouse(id) { return apiRequest(`/warehouses/${id}`, 'DELETE'); }
+
+async function updateInventoryQuantity(warehouseId, itemId, quantity) {
+    return apiRequest(`/inventory/warehouse/${warehouseId}/item/${itemId}?quantity=${quantity}`, 'PATCH');
+}
+
 async function createGRN(grn) { return apiRequest('/grn', 'POST', grn); }
 async function updateGRN(id, grn) { return apiRequest(`/grn/${id}`, 'PUT', grn); }
 async function deleteGRN(id) { return apiRequest(`/grn/${id}`, 'DELETE'); }
@@ -503,85 +477,118 @@ async function approveMaterialReturn(id, itemsUpdateJson) {
 async function confirmMaterialReturn(id) { return apiRequest(`/material-return/${id}/confirm`, 'POST'); }
 async function rejectMaterialReturn(id) { return apiRequest(`/material-return/${id}/reject`, 'POST'); }
 
-async function saveMinStock(warehouseId, itemId, minQuantity) {
-    return apiRequest(`/min-stock/save?warehouseId=${warehouseId}&itemId=${itemId}&minQuantity=${minQuantity}`, 'POST');
+// ====== USER CRUD (có approvalLevel) ======
+async function createUser(user) {
+    // Đảm bảo approvalLevel được gửi
+    if (user.approvalLevel === undefined) {
+        user.approvalLevel = 0;
+    }
+    return apiRequest('/users', 'POST', user);
 }
-async function deleteMinStock(id) { return apiRequest(`/min-stock/${id}`, 'DELETE'); }
 
-async function updateAutoReorderConfig(config) { return apiRequest('/auto-reorder/config', 'PUT', config); }
-async function checkAutoReorder() { return apiRequest('/auto-reorder/check', 'POST'); }
-
-async function getAutoReorderConfig() {
-    try {
-        const data = await apiRequest('/auto-reorder/config');
-        const obj = extractObject(data);
-        if (obj && obj.id) {
-            saveData('auto_reorder_config', obj);
-            return obj;
+async function updateUser(id, user) {
+    if (user.approvalLevel === undefined) {
+        // Giữ nguyên giá trị cũ nếu không gửi
+        const existing = await getUsers();
+        const u = existing.find(u => u.id === id);
+        if (u && u.approvalLevel !== undefined) {
+            user.approvalLevel = u.approvalLevel;
+        } else {
+            user.approvalLevel = 0;
         }
-    } catch(e) { console.warn('getAutoReorderConfig fallback:', e); }
-    return getData('auto_reorder_config') || { enabled: false, multiplier: 2 };
+    }
+    return apiRequest(`/users/${id}`, 'PUT', user);
 }
-
-async function getAutoReorderRules() {
-    try {
-        const data = await apiRequest('/auto-reorder/rules');
-        const arr = extractArray(data);
-        if (arr && arr.length > 0) {
-            saveData('auto_reorder_rules', arr);
-            return arr;
-        }
-    } catch(e) { console.warn('getAutoReorderRules fallback:', e); }
-    return getData('auto_reorder_rules') || [];
-}
-
-async function createAutoReorderRule(rule) { return apiRequest('/auto-reorder/rules', 'POST', rule); }
-async function updateAutoReorderRule(id, rule) { return apiRequest(`/auto-reorder/rules/${id}`, 'PUT', rule); }
-async function deleteAutoReorderRule(id) { return apiRequest(`/auto-reorder/rules/${id}`, 'DELETE'); }
-
-async function createUser(user) { return apiRequest('/users', 'POST', user); }
-async function updateUser(id, user) { return apiRequest(`/users/${id}`, 'PUT', user); }
 async function deleteUser(id) { return apiRequest(`/users/${id}`, 'DELETE'); }
 
-async function createDepartment(dept) { return apiRequest('/departments', 'POST', dept); }
-async function updateDepartment(id, dept) { return apiRequest(`/departments/${id}`, 'PUT', dept); }
-async function deleteDepartment(id) { return apiRequest(`/departments/${id}`, 'DELETE'); }
-async function getDepartmentSubs(id) { return apiRequest(`/departments/${id}/sub`); }
-
-// ====== POSITIONS ======
-async function getPositions() {
+// ====== GETTERS BỔ SUNG ======
+async function getProjectById(id) {
     try {
-        const data = await apiRequest('/positions');
-        const arr = extractArray(data);
-        if (arr && arr.length > 0) {
-            saveData('positions', arr);
-            return arr;
-        }
-    } catch(e) { console.warn('getPositions fallback:', e); }
-    return getData('positions') || [];
+        const data = await apiRequest(`/projects/${id}`);
+        return data;
+    } catch(e) {
+        console.warn('getProjectById fallback:', e);
+        const projects = getData('projects') || [];
+        return projects.find(p => p.id === id) || null;
+    }
 }
 
-async function getActivePositions() {
+async function getPRById(id) {
     try {
-        const data = await apiRequest('/positions/active');
-        return extractArray(data) || [];
-    } catch(e) { console.warn('getActivePositions fallback:', e); }
-    return getData('positions') || [];
+        const data = await apiRequest(`/pr/${id}`);
+        return data;
+    } catch(e) {
+        console.warn('getPRById fallback:', e);
+        const prs = getData('prs') || [];
+        return prs.find(p => p.id === id) || null;
+    }
 }
 
-async function createPosition(pos) { return apiRequest('/positions', 'POST', pos); }
-async function updatePosition(id, pos) { return apiRequest(`/positions/${id}`, 'PUT', pos); }
-async function deletePosition(id) { return apiRequest(`/positions/${id}`, 'DELETE'); }
-
-// ====== AUDIT LOG ======
-async function getAuditLogs() {
+async function getPOById(id) {
     try {
-        const data = await apiRequest('/audit');
-        return extractArray(data) || [];
-    } catch(e) { console.warn('getAuditLogs fallback:', e); }
-    return getData('audit_logs') || [];
+        const data = await apiRequest(`/po/${id}`);
+        return data;
+    } catch(e) {
+        console.warn('getPOById fallback:', e);
+        const pos = getData('pos') || [];
+        return pos.find(p => p.id === id) || null;
+    }
 }
-async function clearAuditLogs() { return apiRequest('/audit/clear', 'DELETE'); }
+
+async function getGRNById(id) {
+    try {
+        const data = await apiRequest(`/grn/${id}`);
+        return data;
+    } catch(e) {
+        console.warn('getGRNById fallback:', e);
+        const grns = getData('grns') || [];
+        return grns.find(g => g.id === id) || null;
+    }
+}
+
+async function getSTOById(id) {
+    try {
+        const data = await apiRequest(`/sto/${id}`);
+        return data;
+    } catch(e) {
+        console.warn('getSTOById fallback:', e);
+        const stos = getData('stos') || [];
+        return stos.find(s => s.id === id) || null;
+    }
+}
+
+async function getIssueById(id) {
+    try {
+        const data = await apiRequest(`/issue/${id}`);
+        return data;
+    } catch(e) {
+        console.warn('getIssueById fallback:', e);
+        const issues = getData('issues') || [];
+        return issues.find(i => i.id === id) || null;
+    }
+}
+
+async function getMaterialReturnById(id) {
+    try {
+        const data = await apiRequest(`/material-return/${id}`);
+        return data;
+    } catch(e) {
+        console.warn('getMaterialReturnById fallback:', e);
+        const returns = getData('material_returns') || [];
+        return returns.find(r => r.id === id) || null;
+    }
+}
+
+async function getVendorById(id) {
+    try {
+        const data = await apiRequest(`/vendors/${id}`);
+        return data;
+    } catch(e) {
+        console.warn('getVendorById fallback:', e);
+        const vendors = getData('vendors') || [];
+        return vendors.find(v => v.id === id) || null;
+    }
+}
 
 // ====== DEPARTMENT PERMISSIONS ======
 async function getDepartmentPermissions(departmentId) {
@@ -596,221 +603,92 @@ async function removeDepartmentPermission(departmentId, permissionKey) {
     return apiRequest(`/permissions/department/${departmentId}/remove?permissionKey=${permissionKey}`, 'DELETE');
 }
 
-// ================================================================
-// TEAM API
-// ================================================================
+// ====== AUDIT LOG ======
+async function getAuditLogs() {
+    try {
+        const data = await apiRequest('/audit');
+        return extractArray(data) || [];
+    } catch(e) { console.warn('getAuditLogs fallback:', e); }
+    return getData('audit_logs') || [];
+}
+async function clearAuditLogs() { return apiRequest('/audit/clear', 'DELETE'); }
 
+// ====== POSITIONS ======
+async function getPositions() {
+    try {
+        const data = await apiRequest('/positions');
+        const arr = extractArray(data);
+        if (arr && arr.length > 0) {
+            saveData('positions', arr);
+            return arr;
+        }
+    } catch(e) { console.warn('getPositions fallback:', e); }
+    return getData('positions') || [];
+}
+async function createPosition(pos) { return apiRequest('/positions', 'POST', pos); }
+async function updatePosition(id, pos) { return apiRequest(`/positions/${id}`, 'PUT', pos); }
+async function deletePosition(id) { return apiRequest(`/positions/${id}`, 'DELETE'); }
+
+// ====== AUTO REORDER ======
+async function getAutoReorderConfig() {
+    try {
+        const data = await apiRequest('/auto-reorder/config');
+        const obj = extractObject(data);
+        if (obj && obj.id) {
+            saveData('auto_reorder_config', obj);
+            return obj;
+        }
+    } catch(e) { console.warn('getAutoReorderConfig fallback:', e); }
+    return getData('auto_reorder_config') || { enabled: false, multiplier: 2 };
+}
+async function updateAutoReorderConfig(config) { return apiRequest('/auto-reorder/config', 'PUT', config); }
+async function checkAutoReorder() { return apiRequest('/auto-reorder/check', 'POST'); }
+
+// ====== TEAM ======
 async function getTeams() {
     try {
         const data = await apiRequest('/teams');
         return extractArray(data) || [];
-    } catch(e) {
-        console.warn('getTeams fallback:', e);
-        return [];
-    }
+    } catch(e) { console.warn('getTeams fallback:', e); return []; }
 }
-
-async function getTeam(id) {
-    return apiRequest(`/teams/${id}`);
-}
-
-async function createTeam(team) {
-    return apiRequest('/teams', 'POST', team);
-}
-
-async function updateTeam(id, team) {
-    return apiRequest(`/teams/${id}`, 'PUT', team);
-}
-
-async function deleteTeam(id) {
-    return apiRequest(`/teams/${id}`, 'DELETE');
-}
-
+async function createTeam(team) { return apiRequest('/teams', 'POST', team); }
+async function updateTeam(id, team) { return apiRequest(`/teams/${id}`, 'PUT', team); }
+async function deleteTeam(id) { return apiRequest(`/teams/${id}`, 'DELETE'); }
 async function getTeamMembers(teamId, includeLeft = false) {
     const endpoint = includeLeft ? `/teams/${teamId}/members/all` : `/teams/${teamId}/members`;
     return apiRequest(endpoint);
 }
-
 async function addTeamMember(teamId, userId, role, joinedAt) {
     const params = new URLSearchParams({ userId, role: role || 'Thành viên', joinedAt: joinedAt || '' });
     return apiRequest(`/teams/${teamId}/members?${params.toString()}`, 'POST');
 }
-
 async function removeTeamMember(teamId, userId, leftAt) {
     const params = new URLSearchParams({ leftAt: leftAt || '' });
     return apiRequest(`/teams/${teamId}/members/${userId}?${params.toString()}`, 'DELETE');
 }
 
-// ================================================================
-// PROJECT MEMBER API
-// ================================================================
-
+// ====== PROJECT MEMBER ======
 async function getProjectMembers(projectId, includeLeft = false) {
     return apiRequest(`/project-members/project/${projectId}?includeLeft=${includeLeft}`);
 }
-
 async function getProjectsByUser(userId, includeLeft = false) {
     return apiRequest(`/project-members/user/${userId}?includeLeft=${includeLeft}`);
 }
-
 async function addProjectMember(data) {
     return apiRequest('/project-members', 'POST', data);
 }
-
 async function updateProjectMemberRole(id, role) {
     return apiRequest(`/project-members/${id}/role?role=${role}`, 'PUT');
 }
-
 async function leaveProject(id, leftAt) {
     const params = new URLSearchParams({ leftAt: leftAt || '' });
     return apiRequest(`/project-members/${id}/leave?${params.toString()}`, 'POST');
 }
-
 async function deleteProjectMember(id) {
     return apiRequest(`/project-members/${id}`, 'DELETE');
 }
 
-
-// ================================================================
-// PROJECT - GET BY ID (THIẾU)
-// ================================================================
-
-async function getProjectById(id) {
-    try {
-        const data = await apiRequest(`/projects/${id}`);
-        return data;
-    } catch(e) {
-        console.warn('getProjectById fallback:', e);
-        const projects = getData('projects') || [];
-        return projects.find(p => p.id === id) || null;
-    }
-}
-
-// ================================================================
-// PR - GET BY ID (THIẾU)
-// ================================================================
-
-async function getPRById(id) {
-    try {
-        const data = await apiRequest(`/pr/${id}`);
-        return data;
-    } catch(e) {
-        console.warn('getPRById fallback:', e);
-        const prs = getData('prs') || [];
-        return prs.find(p => p.id === id) || null;
-    }
-}
-
-// ================================================================
-// PO - GET BY ID (THIẾU)
-// ================================================================
-
-async function getPOById(id) {
-    try {
-        const data = await apiRequest(`/po/${id}`);
-        return data;
-    } catch(e) {
-        console.warn('getPOById fallback:', e);
-        const pos = getData('pos') || [];
-        return pos.find(p => p.id === id) || null;
-    }
-}
-
-// ================================================================
-// GRN - GET BY ID (THIẾU)
-// ================================================================
-
-async function getGRNById(id) {
-    try {
-        const data = await apiRequest(`/grn/${id}`);
-        return data;
-    } catch(e) {
-        console.warn('getGRNById fallback:', e);
-        const grns = getData('grns') || [];
-        return grns.find(g => g.id === id) || null;
-    }
-}
-
-// ================================================================
-// STO - GET BY ID (THIẾU)
-// ================================================================
-
-async function getSTOById(id) {
-    try {
-        const data = await apiRequest(`/sto/${id}`);
-        return data;
-    } catch(e) {
-        console.warn('getSTOById fallback:', e);
-        const stos = getData('stos') || [];
-        return stos.find(s => s.id === id) || null;
-    }
-}
-
-// ================================================================
-// ISSUE - GET BY ID (THIẾU)
-// ================================================================
-
-async function getIssueById(id) {
-    try {
-        const data = await apiRequest(`/issue/${id}`);
-        return data;
-    } catch(e) {
-        console.warn('getIssueById fallback:', e);
-        const issues = getData('issues') || [];
-        return issues.find(i => i.id === id) || null;
-    }
-}
-
-// ================================================================
-// MATERIAL RETURN - GET BY ID (THIẾU)
-// ================================================================
-
-async function getMaterialReturnById(id) {
-    try {
-        const data = await apiRequest(`/material-return/${id}`);
-        return data;
-    } catch(e) {
-        console.warn('getMaterialReturnById fallback:', e);
-        const returns = getData('material_returns') || [];
-        return returns.find(r => r.id === id) || null;
-    }
-}
-
-// ================================================================
-// VENDOR - GET BY ID (THIẾU)
-// ================================================================
-
-async function getVendorById(id) {
-    try {
-        const data = await apiRequest(`/vendors/${id}`);
-        return data;
-    } catch(e) {
-        console.warn('getVendorById fallback:', e);
-        const vendors = getData('vendors') || [];
-        return vendors.find(v => v.id === id) || null;
-    }
-}
-
-async function updateProjectMember(id, data) {
-    return apiRequest(`/project-members/${id}`, 'PUT', data);
-}
-
-// ====== HÀM XÓA CACHE KHI CÓ THAY ĐỔI ======
-// Gọi sau khi create/update/delete
-function invalidateCache(keys) {
-    if (Array.isArray(keys)) {
-        keys.forEach(key => clearCache(key));
-    } else {
-        clearCache(keys);
-    }
-}
-
-// ====== VENDOR GROUPS ======
-async function updateVendorGroups(vendorId, groupNames) {
-    return apiRequest(`/vendors/${vendorId}/groups`, 'PUT', groupNames);
-}
-
-// ====== EXPORT RA WINDOW ======
+// ====== EXPORT ======
 window.api = {
     // Auth
     login,
@@ -818,18 +696,13 @@ window.api = {
     getProjects, getVendors, getItems, getMRs, getPRs, getPOs,
     getWarehouses, getInventory, getGRNs, getSTOs, getIssues, getMaterialReturns,
     getMinStock, getUsers, getDepartments, getPermissions,
-    // Workflow
-    getWorkflows, getWorkflowsByModule, getActiveWorkflow,
-    createWorkflow, updateWorkflow, activateWorkflow,
-    duplicateWorkflow, deleteWorkflow,
-    // Workflow Step-Status
-    getStepsWithStatus, getStatusForStep, getWorkflowStepStatuses,
-    createWorkflowWithStatuses, updateWorkflowWithStatuses,
-    // Workflow by ID
-    getWorkflowById,
+        // Workflow
+    getWorkflows, getWorkflowsByModule, getActiveWorkflow, getWorkflowById,
+    getWorkflowStepStatuses, createWorkflowWithStatuses, updateWorkflowWithStatuses,
+    activateWorkflow, duplicateWorkflow, deleteWorkflow,
     // Status
     getStatuses, getDefaultStatus, getFinalStatuses, getStatusByEntityAndCode,
-    createStatus, updateStatus, deleteStatus, deleteStatusesByEntityType,
+    createStatus, updateStatus, deleteStatus,
     // User Permissions
     getUserPermissions, assignUserPermission, removeUserPermission,
     // CRUD
@@ -846,49 +719,14 @@ window.api = {
     createIssue, updateIssue, deleteIssue, submitIssue, approveIssue, rejectIssue, completeIssue, confirmIssue,
     createMaterialReturn, updateMaterialReturn, deleteMaterialReturn,
     submitMaterialReturn, approveMaterialReturn, confirmMaterialReturn, rejectMaterialReturn,
-    saveMinStock, deleteMinStock,
-    updateAutoReorderConfig, checkAutoReorder,
-    getAutoReorderConfig, getAutoReorderRules,
-    createAutoReorderRule, updateAutoReorderRule, deleteAutoReorderRule,
     createUser, updateUser, deleteUser,
-    createDepartment, updateDepartment, deleteDepartment, getDepartmentSubs,
-    getPositions, getActivePositions, createPosition, updatePosition, deletePosition,
+    getProjectById, getPRById, getPOById, getGRNById, getSTOById, getIssueById, getMaterialReturnById, getVendorById,
+    getDepartmentPermissions, assignDepartmentPermission, removeDepartmentPermission,
     getAuditLogs, clearAuditLogs,
-    getDepartmentPermissions,
-    assignDepartmentPermission,
-    removeDepartmentPermission,
-
-    getProjectById,
-    getPRById,
-    getPOById,
-    getGRNById,
-    getSTOById,
-    getIssueById,
-    getMaterialReturnById,
-    getVendorById,
-
-    getTeams,
-    getTeam,
-    createTeam,
-    updateTeam,
-    deleteTeam,
-    getTeamMembers,
-    addTeamMember,
-    removeTeamMember,
-    
-    // Project Member
-    getProjectMembers,
-    getProjectsByUser,
-    addProjectMember,
-    updateProjectMemberRole,
-    leaveProject,
-    deleteProjectMember,
-
-    updateProjectMember,
-    
+    getPositions, createPosition, updatePosition, deletePosition,
+    getAutoReorderConfig, updateAutoReorderConfig, checkAutoReorder,
+    getTeams, createTeam, updateTeam, deleteTeam, getTeamMembers, addTeamMember, removeTeamMember,
+    getProjectMembers, getProjectsByUser, addProjectMember, updateProjectMemberRole, leaveProject, deleteProjectMember
 };
 
-window.invalidateCache = invalidateCache;
-window.updateVendorGroups = updateVendorGroups;
-
-console.log('✅ API layer loaded successfully');
+console.log('✅ API layer updated with approvalLevel support.');
